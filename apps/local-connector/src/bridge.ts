@@ -2,6 +2,7 @@ import type { CliStatus, OrgSummary, RelayOperation, RelayRequestState, RelayRes
 import { relayOperationSchema } from '@dcat/core';
 import { fetchTransformBundle, validateTransformId } from '@dcat/data360-api';
 import { CliError, safeErrorMessage, validateAlias } from '@dcat/salesforce-cli';
+import { clearDiscoverySessions, getDiscoverySession, startDiscoverySession } from './discovery-sessions.ts';
 import { refreshCliStatus } from './state.ts';
 import type { AppState } from './state.ts';
 import { resolveInventory, resolveOrgs } from './routes/orgs.ts';
@@ -128,6 +129,18 @@ export async function executeRelayOperation(
       const org = await findOrg(state, task.alias);
       return resolveInventory(state, org, task.refresh === true);
     }
+    case 'inventory.start': {
+      const org = await findOrg(state, task.alias);
+      return startDiscoverySession(state, org, { sessionId: task.sessionId, refresh: task.refresh });
+    }
+    case 'inventory.status': {
+      const org = await findOrg(state, task.alias);
+      return getDiscoverySession(state, org, {
+        sessionId: task.sessionId,
+        resume: task.resume,
+        family: task.family,
+      });
+    }
     case 'transform.get': {
       const alias = validateAlias(task.alias);
       const id = validateTransformId(task.id);
@@ -143,6 +156,7 @@ export async function executeRelayOperation(
       state.mode = task.mode;
       state.orgsCache = null;
       state.inventoryCache = null;
+      clearDiscoverySessions(state);
       return { mode: state.mode };
     case 'bridge.update':
       if (!onUpdate) throw new CliError('INVALID_ARGUMENT', 'Bridge updates require the installed bridge CLI.');

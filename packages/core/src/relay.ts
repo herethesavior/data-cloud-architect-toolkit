@@ -1,11 +1,13 @@
 import { z } from 'zod';
-import { cliStatusSchema, inventorySnapshotSchema, orgSummarySchema, transformBundleSchema } from './domain.ts';
+import { RESOURCE_FAMILIES, cliStatusSchema, inventorySnapshotSchema, orgSummarySchema, transformBundleSchema } from './domain.ts';
 
 export const RELAY_OPERATIONS = [
   'cli.status',
   'org.list',
   'org.connect',
   'inventory.get',
+  'inventory.start',
+  'inventory.status',
   'transform.get',
   'mode.set',
   'bridge.update',
@@ -44,6 +46,20 @@ export const relayOperationSchema = z.discriminatedUnion('operation', [
     operation: z.literal('inventory.get'),
     alias: aliasSchema,
     refresh: z.boolean().optional(),
+  }),
+  z.object({
+    operation: z.literal('inventory.start'),
+    alias: aliasSchema,
+    // Reusing an opaque session id is idempotent; refresh starts a new generation.
+    sessionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
+    refresh: z.boolean().optional(),
+  }),
+  z.object({
+    operation: z.literal('inventory.status'),
+    alias: aliasSchema,
+    sessionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+    resume: z.boolean().optional(),
+    family: z.enum(RESOURCE_FAMILIES).optional(),
   }),
   z.object({
     operation: z.literal('transform.get'),

@@ -8,6 +8,7 @@ import type {
   RelayOperation,
   RelayPairing,
   RelayRequestState,
+  ResourceFamily,
   SessionInfo,
   TransformBundle,
 } from '@dcat/core';
@@ -165,6 +166,23 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+const PROGRESS_POLL_MS = 750;
+
+interface InventorySessionResult {
+  sessionId: string;
+  snapshot: InventorySnapshot;
+}
+
+export interface InventoryRequestOptions {
+  force?: boolean;
+  signal?: AbortSignal;
+  sessionId?: string;
+  resume?: boolean;
+  family?: ResourceFamily;
+  /** Called for every partial snapshot so the UI can render rows immediately. */
+  onSnapshot?: (snapshot: InventorySnapshot) => void;
+}
+
 const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
   'cli.status': 30_000,
   'org.list': 120_000,
@@ -172,6 +190,8 @@ const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
   // Keep the browser deadline aligned with the Worker so a timed-out retry
   // cannot hit BRIDGE_BUSY while the original request is still running.
   'inventory.get': 60_000,
+  'inventory.start': 60_000,
+  'inventory.status': 30_000,
   'transform.get': 60_000,
   'mode.set': 30_000,
   'bridge.update': 5 * 60_000,
@@ -258,6 +278,101 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
   }
 }
 
+function snapshotWithOrg(snapshot: InventorySnapshot): InventorySnapshot {
+  return { ...snapshot, org: normalizeOrg(snapshot.org) };
+}
+
+async function startInventorySession(
+  alias: string,
+  options: InventoryRequestOptions,
+  hostedLive: boolean,
+): Promise<InventorySessionResult> {
+  const operation: RelayOperation = {
+    operation: 'inventory.start',
+    alias,
+    sessionId: options.sessionId,
+    refresh: options.force,
+  };
+  if (hostedLive) return relayCall<InventorySessionResult>(operation, options.signal);
+  return requestWithToken<InventorySessionResult>(`/api/orgs/${encodeURIComponent(alias)}/inventory/session`, {
+    method: 'POST',
+    body: { sessionId: options.sessionId, refresh: options.force },
+    signal: options.signal,
+    timeoutMs: OPERATION_TIMEOUT_MS['inventory.start'],
+  });
+}
+
+async function readInventorySession(
+  alias: string,
+  sessionId: string,
+  options: InventoryRequestOptions,
+  hostedLive: boolean,
+): Promise<InventorySessionResult> {
+  const operation: RelayOperation = {
+    operation: 'inventory.status',
+    alias,
+    sessionId,
+    resume: options.resume,
+    family: options.family,
+  };
+  if (hostedLive) return relayCall<InventorySessionResult>(operation, options.signal);
+  return requestWithToken<InventorySessionResult>(
+    `/api/orgs/${encodeURIComponent(alias)}/inventory/session/${encodeURIComponent(sessionId)}`,
+    {
+      method: 'POST',
+      body: { resume: options.resume, family: options.family },
+      signal: options.signal,
+      timeoutMs: OPERATION_TIMEOUT_MS['inventory.status'],
+    },
+  );
+}
+
+async function legacyInventory(
+  alias: string,
+  options: InventoryRequestOptions,
+  hostedLive: boolean,
+): Promise<InventorySnapshot> {
+  if (hostedLive) {
+    return relayCall<InventorySnapshot>({ operation: 'inventory.get', alias, refresh: options.force }, options.signal);
+  }
+  const path = `/api/orgs/${encodeURIComponent(alias)}/inventory`;
+  return options.force
+    ? requestWithToken<InventorySnapshot>(`${path}?refresh=1`, {
+        signal: options.signal,
+        timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
+      })
+    : request<InventorySnapshot>(path, {
+        signal: options.signal,
+        timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
+      });
+}
+
+/** Start once, then poll the connector's accumulated snapshot until it settles. */
+async function progressiveInventory(
+  alias: string,
+  options: InventoryRequestOptions,
+  hostedLive: boolean,
+): Promise<InventorySnapshot> {
+  let result = options.sessionId
+    ? await readInventorySession(alias, options.sessionId, options, hostedLive)
+    : await startInventorySession(alias, options, hostedLive);
+  let snapshot = snapshotWithOrg(result.snapshot);
+  options.onSnapshot?.(snapshot);
+
+  // A resume clears failed families once. Repeating it on every poll would hide
+  // a second failure and turn a bounded retry into an endless retry loop.
+  const pollOptions: InventoryRequestOptions = { ...options, resume: false };
+  while (snapshot.progress && snapshot.progress.state !== 'complete') {
+    if (snapshot.progress.state === 'failed' && !options.resume) break;
+    await wait(PROGRESS_POLL_MS, options.signal);
+    result = await readInventorySession(alias, result.sessionId, pollOptions, hostedLive);
+    snapshot = snapshotWithOrg(result.snapshot);
+    options.onSnapshot?.(snapshot);
+    if (snapshot.progress?.state === 'failed') break;
+  }
+  return snapshot;
+}
+
 async function bridgeStatus(): Promise<BridgeStatus> {
   if (isHosted()) return request<BridgeStatus>('/api/relay/status');
   const [health, session] = await Promise.all([api.health(), getSession()]);
@@ -303,24 +418,20 @@ export const api = {
     }
     return normalizeOrg(await request<OrgSummary>(`/api/orgs/${encodeURIComponent(alias)}`));
   },
-  inventory: async (alias: string, options: { force?: boolean; signal?: AbortSignal } = {}): Promise<InventorySnapshot> => {
-    let snapshot: InventorySnapshot;
-    if (isHosted() && !await hostedUsesFixtures()) {
-      snapshot = await relayCall<InventorySnapshot>({ operation: 'inventory.get', alias, refresh: options.force }, options.signal);
-    } else {
-      const path = `/api/orgs/${encodeURIComponent(alias)}/inventory`;
-      // A forced refresh bypasses the server cache and is token-protected.
-      snapshot = options.force
-        ? await requestWithToken<InventorySnapshot>(`${path}?refresh=1`, {
-            signal: options.signal,
-            timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
-          })
-        : await request<InventorySnapshot>(path, {
-            signal: options.signal,
-            timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
-          });
+  inventory: async (alias: string, options: InventoryRequestOptions = {}): Promise<InventorySnapshot> => {
+    const hostedLive = isHosted() && !await hostedUsesFixtures();
+    try {
+      return await progressiveInventory(alias, options, hostedLive);
+    } catch (error) {
+      // An older local bridge or connector may not expose the progressive
+      // operations yet. Preserve the previous all-at-once behavior in that case.
+      const unsupported = error instanceof ApiError
+        && (error.code === 'INVALID_ARGUMENT' || error.code === 'REQUEST_FAILED' || error.code === 'NOT_FOUND');
+      if (!unsupported) throw error;
+      const snapshot = snapshotWithOrg(await legacyInventory(alias, options, hostedLive));
+      options.onSnapshot?.(snapshot);
+      return snapshot;
     }
-    return { ...snapshot, org: normalizeOrg(snapshot.org) };
   },
   transformBundle: async (alias: string, id: string, options: { signal?: AbortSignal } = {}): Promise<TransformBundle> => {
     if (isHosted() && !await hostedUsesFixtures()) {

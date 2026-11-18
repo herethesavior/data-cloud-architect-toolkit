@@ -100,6 +100,10 @@ async function mockConnector(page: Page, state: ConnectorState, options: MockCon
     }
     if (segments[3] === 'inventory') {
       const inventory = state.mode === 'demo' ? demoInventory : state.inventories[alias] ?? demoInventory;
+      if (segments[4] === 'session') {
+        const sessionId = segments[5] ?? 'e2e-session';
+        return route.fulfill({ json: { sessionId, snapshot: inventory } });
+      }
       return route.fulfill({ json: inventory });
     }
     const org = [...demoOrgs, ...state.orgs].find((entry) => entry.alias === alias);
@@ -531,9 +535,9 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
 test('a slow refresh can be cancelled instead of leaving a permanent spinner', async ({ page }) => {
   await openDemo(page);
   let routeFinished = false;
-  await page.route('**/api/orgs/*/inventory?refresh=1', async (route: Route) => {
+  await page.route('**/api/orgs/*/inventory/session', async (route: Route) => {
     await new Promise((resolve) => setTimeout(resolve, 1_500));
-    await route.fulfill({ json: demoInventory });
+    await route.fulfill({ json: { sessionId: 'e2e-session', snapshot: demoInventory } });
     routeFinished = true;
   });
 
@@ -1053,9 +1057,9 @@ test('a refresh started before a mode switch cannot repopulate the old context',
   await expect(page.getByText('Sample inventory')).toBeVisible();
 
   let refreshCompleted = false;
-  await page.route('**/api/orgs/*/inventory?refresh=1', async (route: Route) => {
+  await page.route('**/api/orgs/*/inventory/session', async (route: Route) => {
     await new Promise((resolve) => setTimeout(resolve, 600));
-    await route.fulfill({ json: demoInventory });
+    await route.fulfill({ json: { sessionId: 'e2e-session', snapshot: demoInventory } });
     refreshCompleted = true;
   });
   const pageErrors: string[] = [];

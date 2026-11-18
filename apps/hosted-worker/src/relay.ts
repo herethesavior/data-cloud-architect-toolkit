@@ -99,6 +99,8 @@ const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
   // Match the browser deadline so a client retry cannot arrive while the
   // original inventory request is still running on the bridge.
   'inventory.get': 60_000,
+  'inventory.start': 60_000,
+  'inventory.status': 30_000,
   'transform.get': 60_000,
   'mode.set': 30_000,
   'bridge.update': 5 * 60_000,

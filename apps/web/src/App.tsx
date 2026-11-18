@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InventorySnapshot, OrgSummary, SessionInfo } from '@dcat/core';
+import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { buildCommandResults } from './lib/commandSearch.ts';
 import { isHosted } from './lib/hosted.ts';
@@ -106,6 +106,7 @@ export function App() {
   const activeContextIdRef = useRef<string | null>(context?.contextId ?? null);
   activeContextIdRef.current = context?.contextId ?? null;
   const refreshControllerRef = useRef<AbortController | null>(null);
+  const resumeControllerRef = useRef<AbortController | null>(null);
   const refreshContextRef = useRef<string | null>(context?.contextId ?? null);
   const modePendingRef = useRef(false);
 
@@ -120,6 +121,8 @@ export function App() {
   const resetWorkspaceState = (activeContextId: string | null) => {
     refreshControllerRef.current?.abort();
     refreshControllerRef.current = null;
+    resumeControllerRef.current?.abort();
+    resumeControllerRef.current = null;
     refreshContextRef.current = activeContextId;
     clearWorkspaceCaches(queryClient, activeContextId);
   };
@@ -191,13 +194,51 @@ export function App() {
     },
   });
 
+  const resumeInventory = useMutation({
+    mutationFn: async ({ target, sessionId, family }: {
+      target: WorkspaceContext | null;
+      sessionId: string;
+      family?: ResourceFamily;
+    }) => {
+      resumeControllerRef.current?.abort();
+      const controller = new AbortController();
+      resumeControllerRef.current = controller;
+      refreshContextRef.current = target?.contextId ?? null;
+      try {
+        if (!target?.alias) throw new Error('Select an org first.');
+        return await api.inventory(target.alias, {
+          sessionId,
+          resume: true,
+          family,
+          signal: controller.signal,
+          onSnapshot: (snapshot) => {
+            if (target.contextId === activeContextIdRef.current) {
+              queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
+            }
+          },
+        });
+      } finally {
+        if (resumeControllerRef.current === controller) resumeControllerRef.current = null;
+      }
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === 'ABORTED') return;
+    },
+  });
+
   useEffect(() => {
     const nextContextId = context?.contextId ?? null;
-    if (refreshContextRef.current !== nextContextId) refreshControllerRef.current?.abort();
+    if (refreshContextRef.current !== nextContextId) {
+      refreshControllerRef.current?.abort();
+      resumeControllerRef.current?.abort();
+    }
     refreshContextRef.current = nextContextId;
   }, [context?.contextId]);
 
-  useEffect(() => () => refreshControllerRef.current?.abort(), []);
+  useEffect(() => () => {
+    refreshControllerRef.current?.abort();
+    resumeControllerRef.current?.abort();
+  }, []);
 
   // Feedback is transient: it confirms the switch without becoming permanent chrome.
   useEffect(() => {
@@ -389,6 +430,12 @@ export function App() {
         refreshError: refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
           ? ''
           : refreshInventory.error?.message ?? '',
+        resumeDiscovery: (family) => {
+          const sessionId = inventoryQuery.data?.progress?.sessionId;
+          if (!sessionId) return;
+          resumeInventory.mutate({ target: context, sessionId, family });
+        },
+        isResumingDiscovery: resumeInventory.isPending,
       }}
     >
       <AppShell

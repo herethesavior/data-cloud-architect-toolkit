@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import type { InventorySnapshot } from '@dcat/core';
+import type { DiscoveryProgress as DiscoveryProgressData, InventorySnapshot } from '@dcat/core';
 import { formatUpdatedAt, isInventoryStale } from '../lib/inventory.ts';
-import { discoveryStages } from '../lib/resourceStatus.ts';
+import { discoveryStages, humanizeResource } from '../lib/resourceStatus.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 import { Button } from './ui/index.ts';
@@ -10,6 +10,81 @@ import { EmptyState, ErrorState } from './DataStates.tsx';
 import { Icon } from './Icon.tsx';
 import { DiscoveryProgress, ResourceStatusNotice } from './ResourceStatusPanel.tsx';
 import { NoOrgState } from './NoOrgState.tsx';
+
+function countLabel(loaded: number, total: number | null): string {
+  return total === null ? `${loaded} loaded` : `${loaded}/${total}`;
+}
+
+function stalledFamilies(inventory: InventorySnapshot): boolean {
+  return inventory.progress?.families.some((family) => family.status === 'failed' || Boolean(family.error)) ?? false;
+}
+
+/** Visible, exact counters for partial snapshots; never hides loaded rows. */
+function InventoryProgressBanner({
+  progress,
+  onResume,
+  isResuming,
+}: {
+  progress: DiscoveryProgressData;
+  onResume?: () => void;
+  isResuming: boolean;
+}) {
+  const stalled = progress.state === 'failed';
+  const title = stalled
+    ? 'Some collections stopped loading'
+    : progress.state === 'complete'
+      ? 'Inventory complete'
+      : 'Loading inventory in batches';
+  const detail = progress.total === null
+    ? `${progress.loaded} records loaded so far`
+    : `${progress.loaded} of ${progress.total} records loaded`;
+
+  if (progress.state === 'complete') {
+    return (
+      <p data-testid="inventory-progress" role="status" className="mb-4 text-xs text-ink-soft">
+        <span aria-hidden="true">✓ </span>{title} · {detail}
+      </p>
+    );
+  }
+
+  return (
+    <section
+      data-testid="inventory-progress"
+      role={stalled ? 'alert' : 'status'}
+      aria-busy={progress.state === 'running'}
+      className={`mb-4 rounded-lg border px-4 py-3 ${stalled ? 'border-danger/25 bg-danger-soft' : 'border-brand/20 bg-brand-soft'}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium text-ink">{title}</p>
+          <p className="mt-0.5 text-xs text-ink-soft">{detail}</p>
+        </div>
+        {stalled && onResume ? (
+          <button
+            type="button"
+            onClick={onResume}
+            disabled={isResuming}
+            className="min-h-8 rounded-lg border border-line bg-surface px-3 text-xs font-semibold text-brand transition-colors hover:bg-surface-alt disabled:opacity-50"
+          >
+            {isResuming ? 'Resuming…' : 'Resume loading'}
+          </button>
+        ) : null}
+      </div>
+      <ul className="mt-3 grid gap-1.5 text-xs text-ink-soft sm:grid-cols-2 lg:grid-cols-3">
+        {progress.families.map((family) => (
+          <li key={family.family} data-testid={`inventory-progress-${family.family}`} className="flex items-center justify-between gap-2 rounded-md bg-surface/70 px-2.5 py-1.5">
+            <span className="truncate font-medium text-ink">{humanizeResource(family.family)}</span>
+            <span className="whitespace-nowrap tabular-nums">
+              {countLabel(family.loaded, family.total)}
+              {family.hasMore ? ' · more' : ''}
+              {family.status === 'failed' ? ' · stopped' : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 function InventoryRefreshSkeleton({ onCancel }: { onCancel?: () => void }) {
   return (
@@ -66,17 +141,18 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   // A disabled query is "pending" in React Query. Without this guard every
   // explorer would spin forever when live mode has no authenticated org.
   if (!context) return <NoOrgState />;
-  if (query.isPending) return <DiscoveryProgress stages={discoveryStages(null, true)} />;
-  // Loading replaces the snapshot so stale rows cannot be mistaken for fresh
-  // results. Once loading ends, the real result, empty, or error state returns.
+  if (query.isPending && !query.data) return <DiscoveryProgress stages={discoveryStages(null, true)} />;
+  // A manual refresh deliberately replaces the view with its cancellable
+  // skeleton. Automatic continuation keeps partial rows visible; it only needs
+  // a skeleton when there is no snapshot to render yet.
   const manualRefresh = Boolean(actions?.isRefreshingInventory);
-  if (query.isFetching || manualRefresh) {
+  if (manualRefresh || (query.isFetching && !query.data)) {
     // Only a manual refresh can be cancelled. An invalidation-triggered query
     // refetch is owned by React Query, so offering Cancel there would spin
     // forever after the click without actually stopping the request.
     return <InventoryRefreshSkeleton onCancel={manualRefresh ? actions?.cancelRefresh : undefined} />;
   }
-  if (query.isError) {
+  if (query.isError && !query.data) {
     return (
       <ErrorState
         title="Couldn't load the inventory"
@@ -143,6 +219,13 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
 
   return (
     <>
+      {inventory.progress ? (
+        <InventoryProgressBanner
+          progress={inventory.progress}
+          onResume={stalledFamilies(inventory) ? () => actions?.resumeDiscovery?.() : undefined}
+          isResuming={Boolean(actions?.isResumingDiscovery)}
+        />
+      ) : null}
       <ResourceStatusNotice inventory={inventory} />
       {actions?.refreshError ? (
         <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
