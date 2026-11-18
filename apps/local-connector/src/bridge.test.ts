@@ -113,6 +113,11 @@ describe('executeRelayOperation', () => {
       ['org', 'login', 'web', '--alias', 'demo-uat', '--set-default', '--instance-url', 'https://demo--uat.sandbox.my.salesforce.com'],
       expect.objectContaining({ timeoutMs: 5 * 60_000 }),
     );
+    expect(runner.run).toHaveBeenCalledWith(
+      ['org', 'list', '--skip-connection-status', '--json'],
+      { timeoutMs: 15_000 },
+    );
+    expect(connected.connectedStatus).toBe('Connected');
 
     const inventory = await operation<InventorySnapshot>(state, { operation: 'inventory.get', alias: 'demo-uat' });
     expect(inventory).toMatchObject({ mode: 'live', apiVersion: '65.0' });

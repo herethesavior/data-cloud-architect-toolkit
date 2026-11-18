@@ -16,6 +16,9 @@ const ORG_COMMAND_TIMEOUT_MS = 90_000;
 const REST_TIMEOUT_MS = 90_000;
 // `sf org login web` waits for a browser round trip, so it needs a longer budget.
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
+// Local-only org listing skips the network status probe and returns quickly.
+const LOCAL_ORG_TIMEOUT_MS = 15_000;
+const ORG_DETECT_INTERVAL_MS = 2_000;
 
 export function validateAlias(alias: string): string {
   if (!ALIAS_PATTERN.test(alias)) {
@@ -76,6 +79,57 @@ export class SalesforceCliAdapter {
     return parseOrgList(result.stdout);
   }
 
+  /** Fast local-only listing; no network status check, so it can poll during login. */
+  async listOrgsLocal(): Promise<OrgSummary[]> {
+    const result = await this.run(['org', 'list', '--skip-connection-status', '--json'], {
+      timeoutMs: LOCAL_ORG_TIMEOUT_MS,
+    });
+    return parseOrgList(result.stdout);
+  }
+
+  /**
+   * Watch for the CLI to write a new/changed authorization for `alias`. The web
+   * login command can stay alive long after the browser auth succeeds, so this
+   * gives callers a prompt, credential-free completion signal.
+   */
+  async waitForOrgConnected(
+    alias: string,
+    baseline: readonly OrgSummary[],
+    options: { timeoutMs?: number; intervalMs?: number; signal?: AbortSignal } = {},
+  ): Promise<OrgSummary> {
+    const safeAlias = validateAlias(alias);
+    const previous = baseline.find((org) => org.alias === safeAlias);
+    const deadline = Date.now() + (options.timeoutMs ?? LOGIN_TIMEOUT_MS);
+    const interval = options.intervalMs ?? ORG_DETECT_INTERVAL_MS;
+    const signal = options.signal;
+
+    while (Date.now() < deadline) {
+      if (signal?.aborted) throw new CliError('COMMAND_FAILED', 'Login detection stopped.');
+      let found: OrgSummary | undefined;
+      try {
+        found = (await this.listOrgsLocal()).find((org) => org.alias === safeAlias);
+      } catch {
+        // A concurrent login can briefly make `org list` fail. Keep polling.
+      }
+      if (found && (!previous || found.username !== previous.username || found.orgId !== previous.orgId)) {
+        return found;
+      }
+      if (signal?.aborted) throw new CliError('COMMAND_FAILED', 'Login detection stopped.');
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, interval);
+        const onAbort = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    }
+    throw new CliError('TIMEOUT', 'The org did not appear in the Salesforce CLI after login. Check the login window.');
+  }
+
   async displayOrg(alias: string): Promise<OrgSummary> {
     const safeAlias = validateAlias(alias);
     const result = await this.run(['org', 'display', '--target-org', safeAlias, '--json'], {
@@ -95,9 +149,24 @@ export class SalesforceCliAdapter {
     const args = ['org', 'login', 'web', '--alias', safeAlias, '--set-default'];
     if (safeInstanceUrl) args.push('--instance-url', safeInstanceUrl);
     if (browser) args.push('--browser', browser);
+    const baseline = await this.listOrgsLocal().catch(() => []);
+
     // A hidden child window stops the CLI's `open` call from raising the login
     // browser on Windows, so this is the one command that keeps its console.
-    await this.run(args, { timeoutMs: LOGIN_TIMEOUT_MS, windowsHide: false });
+    const login = this.run(args, { timeoutMs: LOGIN_TIMEOUT_MS, windowsHide: false });
+    const controller = new AbortController();
+    const detected = this.waitForOrgConnected(safeAlias, baseline, {
+      timeoutMs: LOGIN_TIMEOUT_MS,
+      signal: controller.signal,
+    });
+    // The losing side must not become an unhandled rejection.
+    void login.catch(() => undefined);
+    void detected.catch(() => undefined);
+    try {
+      await Promise.race([login, detected]);
+    } finally {
+      controller.abort();
+    }
     return { alias: safeAlias, connected: true };
   }
 

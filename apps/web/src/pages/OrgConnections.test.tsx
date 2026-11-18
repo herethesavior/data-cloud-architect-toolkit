@@ -115,4 +115,50 @@ describe('OrgConnections connect wizard', () => {
     finish(connectedOrg);
     await pending;
   });
+
+  it('keeps live inventory locked while step 1 and step 2 are incomplete', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.orgs).mockResolvedValue([]);
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({
+      paired: false,
+      relay: 'waiting',
+      cli: { installed: false, version: null, error: null },
+      lastSeenAt: null,
+    }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('Finish setup to view live inventory')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh org list' })).toBeDisabled();
+    expect(screen.queryByRole('table', { name: 'Authenticated Salesforce orgs' })).not.toBeInTheDocument();
+  });
+
+  it('asks for an org before showing live inventory when the bridge is ready', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.orgs).mockResolvedValue([]);
+    renderOrgConnections();
+
+    expect(await screen.findByText('Connect an org to view live inventory')).toBeInTheDocument();
+    expect(screen.getByText('Complete steps 1 and 2 first')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh org list' })).toBeDisabled();
+  });
+
+  it('unlocks live inventory once an authenticated org exists', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.orgs).mockResolvedValue([connectedOrg]);
+    renderOrgConnections();
+
+    expect(await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh org list' })).toBeEnabled();
+    expect(screen.queryByText('Connect an org to view live inventory')).not.toBeInTheDocument();
+  });
+
+  it('does not gate inventory in hosted demo mode', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.orgs).mockResolvedValue([]);
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({ mode: 'demo', paired: false, relay: 'waiting' }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('No authenticated orgs yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh org list' })).toBeEnabled();
+  });
 });

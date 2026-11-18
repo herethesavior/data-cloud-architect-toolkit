@@ -65,4 +65,59 @@ describe('SalesforceCliAdapter', () => {
       { timeoutMs: 90_000 },
     );
   });
+
+  it('resolves login as soon as a new authorization appears, without waiting for the CLI process', async () => {
+    type RunResult = { stdout: string; stderr: string; exitCode: number };
+    let finishLogin!: (result: RunResult) => void;
+    const loginPending = new Promise<RunResult>((resolve) => {
+      finishLogin = resolve;
+    });
+    let listCalls = 0;
+    const changedOrgList = JSON.parse(orgListJson) as { result: { nonScratchOrgs: Array<{ username: string }> } };
+    changedOrgList.result.nonScratchOrgs[0]!.username = 'new-user@example.invalid';
+
+    const runner: ProcessRunner = {
+      run: vi.fn(async (args: readonly string[]): Promise<RunResult> => {
+        if (args[0] === 'org' && args[1] === 'list') {
+          listCalls += 1;
+          return { stdout: listCalls === 1 ? orgListJson : JSON.stringify(changedOrgList), stderr: '', exitCode: 0 };
+        }
+        if (args[0] === 'org' && args[1] === 'login') return loginPending;
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+    };
+    const adapter = new SalesforceCliAdapter(runner);
+
+    await expect(adapter.loginOrg('demo-uat', undefined, 'chrome')).resolves.toEqual({
+      alias: 'demo-uat',
+      connected: true,
+    });
+    expect(runner.run).toHaveBeenCalledWith(
+      ['org', 'list', '--skip-connection-status', '--json'],
+      { timeoutMs: 15_000 },
+    );
+    expect(runner.run).toHaveBeenCalledWith(
+      ['org', 'login', 'web', '--alias', 'demo-uat', '--set-default', '--browser', 'chrome'],
+      expect.objectContaining({ timeoutMs: 5 * 60_000, windowsHide: false }),
+    );
+
+    // The login command is still pending; the completion signal came from org detection.
+    finishLogin({ stdout: '', stderr: '', exitCode: 0 });
+    await loginPending;
+  });
+
+  it('propagates a failed login instead of waiting for the detection timeout', async () => {
+    const runner: ProcessRunner = {
+      run: vi.fn(async (args: readonly string[]) => {
+        if (args[0] === 'org' && args[1] === 'list') return { stdout: orgListJson, stderr: '', exitCode: 0 };
+        if (args[0] === 'org' && args[1] === 'login') {
+          return { stdout: '', stderr: 'ERROR: login was cancelled', exitCode: 1 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+    };
+    const adapter = new SalesforceCliAdapter(runner);
+
+    await expect(adapter.loginOrg('demo-uat')).rejects.toThrow(/login was cancelled/);
+  });
 });

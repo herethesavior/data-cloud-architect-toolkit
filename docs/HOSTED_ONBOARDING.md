@@ -13,7 +13,7 @@ The supported live path is one Cloudflare Pages project or one Workers Builds pr
 
 The root `wrangler.jsonc` is the Workers Builds deploy config and contains the `DCAT_SESSIONS` namespace id. The separate standalone Worker path uses `npm run worker:dry-run`, `npm run worker:dev`, and `npm run worker:deploy`; it needs the namespace `id` in `apps/hosted-worker/wrangler.jsonc`. There are no other stores or secrets. KV writes are throttled to stay within free-tier limits. `SESSION_TTL_SECONDS` is optional (default 30 days); for local Worker development, copy `apps/hosted-worker/.dev.vars.example` to `.dev.vars` and never commit it.
 
-> Demo mode is live as soon as Cloudflare deploys. The hosted **Connect org** wizard uses the published `@dcat-toolkit/bridge@0.1.1` package, so no npm credentials or publish step are needed for deployment.
+> Demo mode is live as soon as Cloudflare deploys. The hosted **Connect org** wizard uses the published `@dcat-toolkit/bridge@0.1.2` package, so no npm credentials or publish step are needed for deployment.
 
 No Salesforce app registration, callback URL, consumer key/secret, `SF_CLIENT_ID`, `SF_CLIENT_SECRET`, `OAUTH_CALLBACK_URL`, `TOKEN_ENCRYPTION_KEY`, or `SF_LOGIN_URL` is part of this deployment.
 

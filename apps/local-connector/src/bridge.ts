@@ -101,6 +101,11 @@ export async function executeRelayOperation(state: AppState, operation: unknown)
       const alias = validateAlias(task.alias);
       await state.cli.loginOrg(alias, task.instanceUrl, task.browser);
       state.orgsCache = null;
+      // `loginOrg` can finish as soon as the CLI writes the authorization, so
+      // use the fast local listing to answer instead of a slow network probe.
+      const local = await state.cli.listOrgsLocal().catch(() => []);
+      const connected = local.find((entry) => entry.alias === alias);
+      if (connected) return { ...connected, connectedStatus: 'Connected' } satisfies OrgSummary;
       const orgs = await resolveOrgs(state, true);
       return orgs.find((entry) => entry.alias === alias) ?? {
         alias,

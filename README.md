@@ -90,7 +90,7 @@ See [docs/CLOUDFLARE_PAGES_SETUP.md](docs/CLOUDFLARE_PAGES_SETUP.md) for the ful
 
 The root `wrangler.jsonc` is the Workers Builds deploy config. The separate standalone Worker path is still available with `npm run worker:dry-run`, `npm run worker:dev`, and `npm run worker:deploy`; it requires a real namespace `id` in `apps/hosted-worker/wrangler.jsonc`. There are **no Worker secrets to set**; `apps/hosted-worker/.dev.vars.example` only documents optional `SESSION_TTL_SECONDS`. Never commit a local `.dev.vars`.
 
-> Demo mode works immediately after the Cloudflare deploy. Hosted live-org connection uses the published `@dcat-toolkit/bridge@0.1.1` npm package, so no npm publish step is needed during deployment. See the Cloudflare setup guide.
+> Demo mode works immediately after the Cloudflare deploy. Hosted live-org connection uses the published `@dcat-toolkit/bridge@0.1.2` npm package, so no npm publish step is needed during deployment. See the Cloudflare setup guide.
 
 Worker KV writes are throttled because free-tier Workers KV has write limits; session, pairing, and relay state are kept small and expire. Pairing codes are one-time and short-lived; unpairing invalidates the agent token.
 

@@ -152,6 +152,10 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
     ? Boolean(status?.paired && status.relay === 'connected' && status.cli.installed)
     : Boolean(status?.cli.installed);
   const setupState = setupLabel(status, hosted, cliInstalled);
+  const liveMode = hosted && (status?.mode ?? 'live') === 'live';
+  const step2Done = Boolean(connectedAlias)
+    || (orgsQuery.data ?? []).some((org) => org.connectedStatus === 'Connected');
+  const inventoryLocked = liveMode && (!bridgeReady || !step2Done);
   const instanceError = validateInstanceUrl(instanceUrl);
   const aliasError = aliasPattern.test(newAlias) ? null : 'Use letters, numbers, dots, dashes, underscores, or @.';
   const installCommand = status?.pairing?.installCommand ?? 'npx -y @dcat-toolkit/bridge@latest setup --relay <site-url> --code <code>';
@@ -396,27 +400,41 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
           number={3}
           title="View inventory"
           description="Select an authenticated org to load its Data 360 metadata into the workbench."
+          badge={inventoryLocked ? <Badge tone="neutral">Complete steps 1 and 2 first</Badge> : undefined}
           action={
             <Button
               variant="secondary"
               onClick={() => refreshOrgs.mutate()}
-              disabled={refreshOrgs.isPending}
+              disabled={refreshOrgs.isPending || inventoryLocked}
               icon={<Icon name="refresh" size={15} />}
             >
               {refreshOrgs.isPending ? 'Refreshing…' : 'Refresh org list'}
             </Button>
           }
         >
-          {orgsQuery.isPending ? <LoadingState label="Reading org list…" /> : null}
-          {orgsQuery.isError ? <ErrorState message={orgsQuery.error.message} onRetry={() => void orgsQuery.refetch()} /> : null}
-          {orgsQuery.data?.length === 0 ? (
+          {inventoryLocked && !bridgeReady ? (
+            <EmptyState
+              icon="plug"
+              title="Finish setup to view live inventory"
+              description="Connect the local bridge in step 1, then authenticate an org in step 2. Demo mode works without setup."
+            />
+          ) : inventoryLocked ? (
+            <EmptyState
+              icon="plug"
+              title="Connect an org to view live inventory"
+              description="Authenticate an org in step 2. Its Data 360 metadata will appear here once the CLI reports it as connected."
+            />
+          ) : null}
+          {!inventoryLocked && orgsQuery.isPending ? <LoadingState label="Reading org list…" /> : null}
+          {!inventoryLocked && orgsQuery.isError ? <ErrorState message={orgsQuery.error.message} onRetry={() => void orgsQuery.refetch()} /> : null}
+          {!inventoryLocked && orgsQuery.data?.length === 0 ? (
             <EmptyState
               icon="plug"
               title="No authenticated orgs yet"
               description="Connect an org in step 2 to load its inventory, or use demo mode to explore sample metadata."
             />
           ) : null}
-          {orgsQuery.data && orgsQuery.data.length > 0 ? (
+          {!inventoryLocked && orgsQuery.data && orgsQuery.data.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-line">
               <DataTable columns={columns} rows={orgsQuery.data} getRowKey={(org) => org.alias} ariaLabel="Authenticated Salesforce orgs" />
             </div>
