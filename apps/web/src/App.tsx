@@ -31,6 +31,7 @@ import { DataStreamExplorer } from './pages/DataStreamExplorer.tsx';
 import { DataTransformExplorer } from './pages/DataTransformExplorer.tsx';
 import { ErdExplorer } from './pages/ErdExplorer.tsx';
 import { DataDictionary } from './pages/DataDictionary.tsx';
+import { HelpPage } from './pages/HelpPage.tsx';
 import type { Page } from './navigation.ts';
 
 function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: string; onRetry?: () => void }) {
@@ -289,6 +290,8 @@ export function App() {
         return <ErdExplorer context={context} />;
       case 'dictionary':
         return <DataDictionary context={context} />;
+      case 'help':
+        return <HelpPage onNavigate={setPage} />;
     }
   })();
 

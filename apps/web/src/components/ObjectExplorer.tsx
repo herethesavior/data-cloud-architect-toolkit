@@ -100,7 +100,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
 
   return (
     <InventoryBoundary query={query} context={context}>
-      {(inventory) => {
+      {(inventory, freshness) => {
         const objects: ExplorerObject[] = isDlo ? inventory.dlos : inventory.dmos;
         const capability = findCapability(inventory, isDlo ? 'dlos' : 'dmos');
         const linksFor = (object: ExplorerObject) => objectLinks(inventory, object);
@@ -366,6 +366,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
                       ))}
                     </select>
                   </label>
+                  {freshness}
                   <ExportMenu items={exportItems} />
                 </>
               }

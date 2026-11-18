@@ -33,6 +33,7 @@ const pageIcons: Record<Page, IconName> = {
   erd: 'graph',
   dictionary: 'book',
   settings: 'settings',
+  help: 'info',
 };
 
 interface AppShellProps {
@@ -272,14 +273,20 @@ export function AppShell({
             <p className="truncate text-xs text-ink-soft">Data Cloud Architect Toolkit</p>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           <NavigationList page={page} onNavigate={navigate} label="Main navigation" collapsed={sidebarCollapsed} />
         </div>
         <div className="sidebar-footer border-t border-line p-4">
           <div className="rounded-lg bg-surface-alt p-3">
-            <div className="sidebar-footer-heading flex items-center gap-2 text-ink-soft">
+            <div
+              className="sidebar-footer-heading flex items-center gap-2 text-ink-soft"
+              title={hosted ? 'Hosted edition — read-only metadata' : 'Local-first — read-only metadata'}
+            >
               <Icon name="shield" size={16} />
               <p className="label-xs sidebar-label">{hosted ? 'Hosted edition' : 'Local-first'}</p>
+              {sidebarCollapsed ? (
+                <span className="sr-only">{hosted ? 'Hosted edition' : 'Local-first'}</span>
+              ) : null}
             </div>
             <p className="sidebar-label mt-1.5 text-xs text-ink-soft">
               {hosted
@@ -374,6 +381,16 @@ export function AppShell({
                     : 'Demo mode uses sample metadata; no Salesforce org is connected.'}
                 >
                   <span className="hidden sm:inline">{isTogglingMode ? 'Switching…' : `Use ${activeMode === 'demo' ? 'live' : 'demo'}`}</span>
+                </Button>
+                <Button
+                  variant="quiet"
+                  onClick={() => navigate('help')}
+                  aria-label="Help"
+                  title="Help and documentation"
+                  className="px-2"
+                >
+                  <Icon name="info" size={17} />
+                  <span className="hidden xl:inline">Help</span>
                 </Button>
                 <Button
                   variant="quiet"

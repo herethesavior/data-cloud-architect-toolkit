@@ -200,7 +200,7 @@ test('switching to live mode announces the context and never flashes demo metada
   await page.evaluate(() => window.__switchObserver?.disconnect());
 });
 
-test('switching demo to live keeps the header height stable and freshness in the inventory strip', async ({ page }) => {
+test('switching demo to live keeps the header height stable and freshness in a compact chip', async ({ page }) => {
   await openDemo(page);
   await expect(page.getByText('Sample inventory')).toBeVisible();
 
@@ -209,9 +209,18 @@ test('switching demo to live keeps the header height stable and freshness in the
   const titleHeight = () => titleBlock.evaluate((element) => element.getBoundingClientRect().height);
   const demoTitleHeight = await titleHeight();
   await expect(header.getByText(/^Updated /)).toHaveCount(0);
-  const freshness = page.locator('#main-content').getByText(/^Updated /);
+  const freshness = page.locator('#main-content').getByTestId('inventory-freshness');
   await expect(freshness).toBeVisible();
+  await expect(freshness).toHaveText(/^Updated /);
   await expect(freshness.locator('[title^="Updated "]')).toHaveAttribute('title', /Updated .*\d{4}/);
+  const chip = await freshness.boundingBox();
+  expect(chip, 'freshness chip bounds').not.toBeNull();
+  expect(chip!.height).toBeLessThanOrEqual(40);
+  expect(chip!.width).toBeLessThan(280);
+  await expect(freshness.getByRole('button', { name: 'Refresh inventory' })).toHaveAttribute(
+    'title',
+    'Refresh this inventory from the local connector',
+  );
 
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
   await expect(header.getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
@@ -219,7 +228,7 @@ test('switching demo to live keeps the header height stable and freshness in the
 
   expect(await titleHeight()).toBe(demoTitleHeight);
   await expect(header.getByText(/^Updated /)).toHaveCount(0);
-  await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
+  await expect(page.locator('#main-content').getByTestId('inventory-freshness')).toBeVisible();
 });
 
 test('live Discovery Health and Needs attention stay inside the viewport', async ({ page }) => {
@@ -598,6 +607,8 @@ test('export menu consolidates local export formats', async ({ page }) => {
 
   const menu = page.getByRole('menu', { name: 'Export' });
   await expect(menu).toBeVisible();
+  expect(await menu.evaluate((element) => element.parentElement === document.body)).toBe(true);
+  expect(await menu.evaluate((element) => Boolean(element.closest('#main-content')))).toBe(false);
   for (const format of ['CSV', 'JSON', 'Markdown']) {
     await expect(menu.getByRole('menuitem', { name: new RegExp(format) })).toBeVisible();
   }
@@ -605,6 +616,27 @@ test('export menu consolidates local export formats', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test('Help page explains DCAT, Data Cloud terms, and privacy', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('header').getByRole('button', { name: 'Help' }).click();
+
+  await expect(page.locator('h1')).toHaveText('Help');
+  await expect(page.getByRole('heading', { name: 'Help & documentation' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'What is DCAT?' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText(/Read metadata with allowlisted, read-only Salesforce CLI commands/)).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Data Cloud glossary' }).click();
+  await expect(page.getByText('Data Lake Object (DLO)')).toBeVisible();
+  await expect(page.getByText('Discovery Health')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Privacy' }).click();
+  await expect(page.getByText('No hosted OAuth')).toBeVisible();
+  await expect(page.getByText(/\/api\/auth\/\* routes are intentionally removed and return 404/)).toBeVisible();
+
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Help' }).click();
+  await expect(page.locator('h1')).toHaveText('Help');
 });
 
 test('theme toggle switches to dark and persists across reloads', async ({ page }) => {
@@ -650,7 +682,11 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await expect(sidebar.locator('.sidebar-label').first()).toBeHidden();
   await expect(sidebar.locator('.nav-item svg').first()).toHaveAttribute('width', '20');
   expect((await dloItem.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-  await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(2);
+  await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(3);
+  await expect(sidebar.locator('.sidebar-footer-heading')).toHaveAttribute(
+    'title',
+    'Local-first — read-only metadata',
+  );
   const collapsedWidth = (await sidebar.boundingBox())?.width ?? 0;
   expect(collapsedWidth).toBeLessThan(expandedWidth - 150);
 
@@ -661,6 +697,27 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await expect(page.locator('#desktop-sidebar .sidebar-label').first()).toBeVisible();
   await expect(page.locator('#desktop-sidebar .nav-item svg').first()).toHaveAttribute('width', '18');
   await expect(page.locator('#desktop-sidebar nav > div > div[aria-hidden="true"]')).toHaveCount(0);
+});
+
+test('edition status stays visible while long pages scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Dictionary' }).click();
+  await expect(page.locator('h1')).toHaveText('Data Dictionary');
+
+  const scrollY = await page.evaluate(() => {
+    window.scrollTo(0, document.body.scrollHeight);
+    return window.scrollY;
+  });
+  expect(scrollY).toBeGreaterThan(0);
+
+  const footer = page.locator('#desktop-sidebar .sidebar-footer');
+  await expect(footer).toBeVisible();
+  await expect(footer).toContainText('Local-first');
+  const box = await footer.boundingBox();
+  expect(box, 'sidebar footer bounds').not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(-1);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(521);
 });
 
 test('detail drawer contains keyboard focus and closes on Escape', async ({ page }) => {
@@ -689,8 +746,12 @@ test('reduced motion disables transitions and entrance animations', async ({ pag
       page: pageContent ? getComputedStyle(pageContent).animationDuration : 'missing',
     };
   });
-  expect(parseFloat(durations.sidebar)).toBeLessThan(0.001);
-  expect(parseFloat(durations.page)).toBeLessThan(0.001);
+  const toMilliseconds = (value: string) => {
+    const amount = parseFloat(value);
+    return value.endsWith('ms') ? amount : amount * 1000;
+  };
+  expect(toMilliseconds(durations.sidebar)).toBeLessThan(1);
+  expect(toMilliseconds(durations.page)).toBeLessThan(1);
 });
 
 test('layout has no horizontal overflow at laptop, tablet, and phone widths', async ({ page }) => {
@@ -726,6 +787,7 @@ test('every screen fits a phone viewport', async ({ page }) => {
     'ERD Explorer',
     'Data Dictionary',
     'Settings & Diagnostics',
+    'Help',
   ]) {
     await page.getByRole('button', { name: 'Open navigation' }).click();
     await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name }).click();

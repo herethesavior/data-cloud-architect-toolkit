@@ -14,7 +14,7 @@ import { NoOrgState } from './NoOrgState.tsx';
 interface InventoryBoundaryProps {
   query: UseQueryResult<InventorySnapshot, Error>;
   context: WorkspaceContext | null;
-  children: (inventory: InventorySnapshot) => ReactNode;
+  children: (inventory: InventorySnapshot, freshness: ReactNode) => ReactNode;
 }
 
 export function InventoryBoundary({ query, context, children }: InventoryBoundaryProps) {
@@ -51,39 +51,45 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   const live = context.mode === 'live';
   const stale = live && isInventoryStale(inventory.generatedAt);
 
+  const freshness = (
+    <span data-testid="inventory-freshness" className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-surface-alt px-2 text-xs text-ink-soft">
+      <Icon name="clock" size={13} className="text-ink-faint" />
+      <span title={`Updated ${absolute}`} className="whitespace-nowrap">
+        Updated {formatUpdatedAt(inventory.generatedAt)}
+      </span>
+      {stale ? (
+        <span
+          aria-label="Cached snapshot"
+          title="Cached snapshot"
+          className="size-1.5 shrink-0 rounded-full bg-warning"
+        />
+      ) : null}
+      {actions ? (
+        <button
+          type="button"
+          onClick={actions.refreshInventory}
+          disabled={!context.alias || actions.isRefreshingInventory}
+          aria-label="Refresh inventory"
+          aria-busy={actions.isRefreshingInventory}
+          title="Refresh this inventory from the local connector"
+          className="grid size-7 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-40"
+        >
+          <Icon name="refresh" size={13} className={actions.isRefreshingInventory ? 'animate-spin' : undefined} />
+        </button>
+      ) : null}
+    </span>
+  );
+
   return (
     <>
       <ResourceStatusNotice inventory={inventory} />
-      <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-soft">
-        <Icon name="clock" size={14} className="text-ink-faint" />
-        <span>
-          Updated <span title={`Updated ${absolute}`}>{formatUpdatedAt(inventory.generatedAt)}</span>
-        </span>
-        {stale ? (
-          <span className="rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-warning">Cached</span>
-        ) : null}
-        {actions ? (
-          <Button
-            variant="quiet"
-            onClick={actions.refreshInventory}
-            disabled={!context.alias || actions.isRefreshingInventory}
-            aria-label="Refresh inventory"
-            aria-busy={actions.isRefreshingInventory}
-            title="Refresh this inventory from the local connector"
-            className="ml-auto px-2 py-1 text-xs"
-          >
-            <Icon name="refresh" size={14} className={actions.isRefreshingInventory ? 'animate-spin' : undefined} />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
-        ) : null}
-      </div>
       {actions?.refreshError ? (
         <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
           <span>Refresh failed: {actions.refreshError}</span>
           <button type="button" onClick={actions.refreshInventory} className="font-semibold underline underline-offset-2">Retry</button>
         </p>
       ) : null}
-      {children(inventory)}
+      {children(inventory, freshness)}
     </>
   );
 }

@@ -337,7 +337,7 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
 
   return (
     <InventoryBoundary query={query} context={context}>
-      {(inventory) => {
+      {(inventory, freshness) => {
         const capability = findCapability(inventory, 'data-transforms');
         const transforms = filterByQuery(inventory.dataTransforms, search, (transform) => [
           transform.label ?? '',
@@ -458,6 +458,7 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
                       <option value="streaming">Streaming</option>
                     </select>
                   </label>
+                  {freshness}
                   <ExportMenu items={exportItems} />
                 </>
               }

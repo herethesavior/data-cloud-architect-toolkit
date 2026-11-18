@@ -9,7 +9,8 @@ export type Page =
   | 'data-transforms'
   | 'erd'
   | 'dictionary'
-  | 'settings';
+  | 'settings'
+  | 'help';
 
 export interface NavItem {
   id: Page;
@@ -48,6 +49,10 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'settings', label: 'Settings & Diagnostics' },
     ],
   },
+  {
+    label: 'Support',
+    items: [{ id: 'help', label: 'Help' }],
+  },
 ];
 
 export const PAGE_TITLES: Record<Page, string> = {
@@ -62,4 +67,5 @@ export const PAGE_TITLES: Record<Page, string> = {
   erd: 'ERD Explorer',
   dictionary: 'Data Dictionary',
   settings: 'Settings & Diagnostics',
+  help: 'Help',
 };

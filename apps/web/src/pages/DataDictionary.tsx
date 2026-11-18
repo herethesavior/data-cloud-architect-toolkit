@@ -64,7 +64,7 @@ export function DataDictionary({ context }: { context: WorkspaceContext | null }
 
   return (
     <InventoryBoundary query={query} context={context}>
-      {(inventory) => {
+      {(inventory, freshness) => {
         const allRows = buildDictionaryRows(inventory);
         const rows = filterByQuery(allRows, search, (row) => [
           row.objectType,
@@ -113,6 +113,7 @@ export function DataDictionary({ context }: { context: WorkspaceContext | null }
                       <option value="DMO">DMO fields</option>
                     </select>
                   </label>
+                  {freshness}
                   <ExportMenu items={exportItems} />
                 </>
               }

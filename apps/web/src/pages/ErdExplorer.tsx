@@ -36,7 +36,7 @@ export function ErdExplorer({ context }: { context: WorkspaceContext | null }) {
 
   return (
     <InventoryBoundary query={query} context={context}>
-      {(inventory) => {
+      {(inventory, freshness) => {
         const layout = buildErdLayout(inventory);
         const edges = layout.edges.filter((edge) =>
           filter === 'all'
@@ -96,6 +96,7 @@ export function ErdExplorer({ context }: { context: WorkspaceContext | null }) {
                       </button>
                     ))}
                   </div>
+                  {freshness}
                   <ExportMenu items={exportItems} />
                 </>
               }
