@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyTheme, getThemePreference, resolveTheme, setThemePreference } from './preferences.ts';
+import {
+  applyTheme,
+  getHiddenOrgs,
+  getThemePreference,
+  resolveTheme,
+  setHiddenOrgs,
+  setThemePreference,
+} from './preferences.ts';
 
 interface SystemTheme {
   setDark: (dark: boolean) => void;
@@ -57,6 +64,21 @@ describe('theme preferences', () => {
   it('ignores unknown stored values', () => {
     window.localStorage.setItem('dcat.theme', 'neon');
     expect(getThemePreference()).toBe('system');
+  });
+
+  it('stores only valid hidden org aliases and can clear them', () => {
+    setHiddenOrgs(['prod-org', 'prod-org', 'bad alias', 'uat.example']);
+    expect(getHiddenOrgs()).toEqual(['prod-org', 'uat.example']);
+    expect(JSON.parse(window.localStorage.getItem('dcat.hiddenOrgs') ?? 'null')).toEqual(['prod-org', 'uat.example']);
+
+    setHiddenOrgs([]);
+    expect(getHiddenOrgs()).toEqual([]);
+    expect(window.localStorage.getItem('dcat.hiddenOrgs')).toBeNull();
+  });
+
+  it('ignores malformed hidden org storage', () => {
+    window.localStorage.setItem('dcat.hiddenOrgs', '{"alias":"prod-org"}');
+    expect(getHiddenOrgs()).toEqual([]);
   });
 
   it('resolves explicit themes without consulting the system', () => {

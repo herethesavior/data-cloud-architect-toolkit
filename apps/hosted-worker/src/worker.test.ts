@@ -284,6 +284,30 @@ describe('bridge npm update status', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it('shares one in-flight registry check across concurrent status requests', async () => {
+    let releaseFetch!: (response: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      releaseFetch = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const session = pairedSession('0.1.4');
+
+    const first = getBridgeUpdateStatus(session, 'https://dcat.example');
+    const second = getBridgeUpdateStatus(session, 'https://dcat.example');
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    releaseFetch(new Response(JSON.stringify({ version: '0.2.0' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ latestVersion: '0.2.0', updateAvailable: true }),
+      expect.objectContaining({ latestVersion: '0.2.0', updateAvailable: true }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('compares numeric version components instead of strings', async () => {
     stubNpmVersion('0.1.10');
 

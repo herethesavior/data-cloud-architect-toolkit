@@ -3,6 +3,7 @@ import {
   cliVersionOutput,
   orgDisplayJson,
   orgListAlternateJson,
+  orgListEnvironmentJson,
   orgListJson,
   orgListUnexpectedJson,
 } from '@dcat/test-fixtures';
@@ -29,6 +30,17 @@ describe('parseOrgList', () => {
     const orgs = parseOrgList(orgListAlternateJson);
     expect(orgs[0]?.alias).toBe('demo-alt');
     expect(orgs[0]?.environment).toBe('production');
+  });
+
+  it('classifies orgs from CLI metadata instead of treating hyphens as sandbox signals', () => {
+    const orgs = parseOrgList(orgListEnvironmentJson);
+    const byAlias = new Map(orgs.map((org) => [org.alias, org.environment]));
+
+    expect(byAlias.get('dev-ed')).toBe('production');
+    expect(byAlias.get('uat')).toBe('sandbox');
+    expect(byAlias.get('hub')).toBe('dev-hub');
+    expect(byAlias.get('scratch')).toBe('scratch');
+    expect([...byAlias.values()]).not.toContain('unknown');
   });
 
   it('rejects an unrecognized shape instead of inventing data', () => {

@@ -181,13 +181,18 @@ function resultFor(state: HostedState, operation: RelayOperation): unknown {
     case 'org.list':
       return state.orgs;
     case 'org.connect': {
+      const instanceUrl = typeof operation.instanceUrl === 'string'
+        ? operation.instanceUrl
+        : 'https://prod-org.my.salesforce.com';
+      const environment: OrgSummary['environment'] =
+        /sandbox\.my\.salesforce\.com|test\.salesforce\.com/.test(instanceUrl) ? 'sandbox' : 'production';
       const org: OrgSummary = {
         ...demoOrgs[0]!,
         alias: operation.alias,
         username: 'architect@prod.example.invalid',
-        instanceUrl: 'https://prod-org.my.salesforce.com',
+        instanceUrl,
         orgId: '00DXX0000001PROD',
-        environment: 'production',
+        environment,
         connectedStatus: 'Connected',
         isDefault: true,
         source: 'salesforce-cli',
@@ -492,6 +497,38 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   expect(state.csrf['/api/relay/requests']).toBeGreaterThan(0);
   expect(state.csrf['/api/relay/requests/:id']).toBeGreaterThan(0);
   expect(state.authCalls).toEqual([]);
+
+  await page.evaluate(() => {
+    (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;
+  });
+});
+
+test('hosted connect detects a sandbox from its Salesforce instance URL', async ({ page }) => {
+  const state = createState('live');
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.getByRole('button', { name: 'Create pairing code' }).click();
+  await startFakeBridge(page, 'PAIR12345678');
+  await page.getByRole('button', { name: 'Re-check CLI' }).click();
+
+  await page.getByLabel('Org alias').fill('uat-org');
+  await page.getByLabel(/Sandbox instance URL/).fill('https://acme--uat.sandbox.my.salesforce.com');
+  await page.getByRole('button', { name: 'Connect org' }).click();
+
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+  await page.getByRole('button', { name: 'Open org connection details' }).click();
+
+  const row = page.getByRole('row', { name: /uat-org/ });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('sandbox');
+  expect(state.operationBodies).toContainEqual({
+    operation: 'org.connect',
+    alias: 'uat-org',
+    instanceUrl: 'https://acme--uat.sandbox.my.salesforce.com',
+  });
 
   await page.evaluate(() => {
     (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;

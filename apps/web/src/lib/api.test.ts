@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionInfo } from '@dcat/core';
+import type { OrgSummary, SessionInfo } from '@dcat/core';
 import { api, clearCachedSession, getSession } from './api.ts';
 
 function jsonResponse(body: unknown, status = 200) {
@@ -118,6 +118,31 @@ describe('web API session handling', () => {
       '/api/relay/requests',
       '/api/relay/requests/req-2',
     ]);
+  });
+
+  it('upgrades unknown live org environments from CLI URL metadata', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const org: OrgSummary = {
+      alias: 'uat-org',
+      username: 'uat@example.invalid',
+      orgId: null,
+      instanceUrl: 'https://acme--uat.sandbox.my.salesforce.com',
+      loginUrl: null,
+      environment: 'unknown',
+      connectedStatus: 'Connected',
+      isDefault: true,
+      isDevHub: false,
+      source: 'salesforce-cli',
+    };
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests') return jsonResponse({ id: 'req-env' });
+      if (path === '/api/relay/requests/req-env') return jsonResponse({ status: 'completed', result: [org] });
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.orgs()).resolves.toMatchObject([{ alias: 'uat-org', environment: 'sandbox' }]);
   });
 
   it('creates a pairing with the session token and no credential fields', async () => {

@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BridgeStatus, OrgSummary } from '@dcat/core';
@@ -31,6 +31,9 @@ function validateInstanceUrl(value: string): string | null {
 interface OrgConnectionsProps {
   selectedAlias: string | null;
   onSelect: (alias: string) => void;
+  hiddenAliases: readonly string[];
+  onRemoveOrg: (alias: string) => void;
+  onRestoreOrg: (alias: string) => void;
 }
 
 interface StepProps {
@@ -74,7 +77,13 @@ function setupLabel(status: BridgeStatus | undefined, hosted: boolean, installed
   return 'Bridge connected';
 }
 
-export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps) {
+export function OrgConnections({
+  selectedAlias,
+  onSelect,
+  hiddenAliases,
+  onRemoveOrg,
+  onRestoreOrg,
+}: OrgConnectionsProps) {
   const queryClient = useQueryClient();
   const hosted = isHosted();
   const [newAlias, setNewAlias] = useState('my-data360-org');
@@ -84,6 +93,9 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
   const [updateNotice, setUpdateNotice] = useState('');
   const [connectError, setConnectError] = useState('');
   const [connectedAlias, setConnectedAlias] = useState<string | null>(null);
+  const [confirmingAlias, setConfirmingAlias] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
+  const [removalNotice, setRemovalNotice] = useState('');
   const connectStarted = useRef(false);
   const aliasInputId = useId();
   const instanceInputId = useId();
@@ -161,6 +173,8 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
         org,
         ...current.filter((entry) => entry.alias !== org.alias),
       ]);
+      // Reconnecting an alias is the explicit way to bring a removed org back.
+      onRestoreOrg(org.alias);
       onSelect(org.alias);
     },
     onError: (error: Error) => setConnectError(error.message),
@@ -181,9 +195,33 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
     : Boolean(status?.cli.installed);
   const setupState = setupLabel(status, hosted, cliInstalled);
   const liveMode = hosted && (status?.mode ?? 'live') === 'live';
+  // The shared cache can briefly contain fixtures from a prior mode switch.
+  const candidateOrgs = (orgsQuery.data ?? []).filter(
+    (org) => !liveMode || org.source !== 'demo-fixture',
+  );
+  const activeOrgs = candidateOrgs.filter((org) => !hiddenAliases.includes(org.alias));
+  const hiddenOrgs = candidateOrgs.filter((org) => hiddenAliases.includes(org.alias));
   const step2Done = Boolean(connectedAlias)
-    || (orgsQuery.data ?? []).some((org) => org.connectedStatus === 'Connected');
+    || activeOrgs.some((org) => org.connectedStatus === 'Connected');
   const inventoryLocked = liveMode && (!bridgeReady || !step2Done);
+
+  useEffect(() => {
+    if (confirmingAlias && !activeOrgs.some((org) => org.alias === confirmingAlias)) {
+      setConfirmingAlias(null);
+    }
+  }, [activeOrgs, confirmingAlias]);
+
+  const removeOrg = (alias: string) => {
+    onRemoveOrg(alias);
+    setConfirmingAlias(null);
+    setRemovalNotice(`${alias} is hidden from DCAT only. Salesforce CLI authentication is unchanged.`);
+    if (connectedAlias === alias) setConnectedAlias(null);
+  };
+
+  const restoreOrg = (alias: string) => {
+    onRestoreOrg(alias);
+    setRemovalNotice(`${alias} is visible in DCAT again.`);
+  };
   const instanceError = validateInstanceUrl(instanceUrl);
   const aliasError = aliasPattern.test(newAlias) ? null : 'Use letters, numbers, dots, dashes, underscores, or @.';
   const installCommand = status?.pairing?.installCommand ?? 'npx -y @dcat-toolkit/bridge@latest setup --relay <site-url> --code <code>';
@@ -217,13 +255,76 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
       key: 'action',
       header: <span className="sr-only">Actions</span>,
       render: (org) => (
-        <Button
-          variant={selectedAlias === org.alias ? 'primary' : 'secondary'}
-          onClick={() => onSelect(org.alias)}
-          className="px-2.5 py-1 text-xs"
-        >
-          {selectedAlias === org.alias ? 'Selected' : 'Select'}
-        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Button
+            variant={selectedAlias === org.alias ? 'primary' : 'secondary'}
+            onClick={() => onSelect(org.alias)}
+            className="px-2.5 py-1 text-xs"
+            aria-label={selectedAlias === org.alias ? `${org.alias} selected` : `Select ${org.alias}`}
+          >
+            {selectedAlias === org.alias ? 'Selected' : 'Select'}
+          </Button>
+          {confirmingAlias === org.alias ? (
+            <>
+              <span className="text-xs text-ink-soft">Hide from DCAT?</span>
+              <Button
+                variant="primary"
+                onClick={() => removeOrg(org.alias)}
+                className="px-2.5 py-1 text-xs"
+                aria-label={`Confirm remove ${org.alias}`}
+              >
+                Confirm
+              </Button>
+              <Button
+                variant="quiet"
+                onClick={() => setConfirmingAlias(null)}
+                className="px-2.5 py-1 text-xs"
+                aria-label={`Cancel remove ${org.alias}`}
+              >
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="quiet"
+              onClick={() => setConfirmingAlias(org.alias)}
+              className="px-2.5 py-1 text-xs"
+              aria-label={`Remove ${org.alias}`}
+            >
+              Remove
+            </Button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  const hiddenColumns: DataTableColumn<OrgSummary>[] = [
+    {
+      key: 'alias',
+      header: 'Alias',
+      render: (org) => (
+        <div className="min-w-0">
+          <p className="font-medium text-ink">{org.alias}</p>
+          <Badge tone="neutral">Hidden in DCAT</Badge>
+        </div>
+      ),
+    },
+    { key: 'environment', header: 'Environment', render: (org) => org.environment },
+    {
+      key: 'action',
+      header: <span className="sr-only">Actions</span>,
+      render: (org) => (
+        <div className="flex justify-end">
+          <Button
+            variant="secondary"
+            onClick={() => restoreOrg(org.alias)}
+            className="px-2.5 py-1 text-xs"
+            aria-label={`Restore ${org.alias}`}
+          >
+            Restore
+          </Button>
+        </div>
       ),
     },
   ];
@@ -469,16 +570,32 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
           description="Select an authenticated org to load its Data 360 metadata into the workbench."
           badge={inventoryLocked ? <Badge tone="neutral">Complete steps 1 and 2 first</Badge> : undefined}
           action={
-            <Button
-              variant="secondary"
-              onClick={() => refreshOrgs.mutate()}
-              disabled={refreshOrgs.isPending || inventoryLocked}
-              icon={<Icon name="refresh" size={15} />}
-            >
-              {refreshOrgs.isPending ? 'Refreshing…' : 'Refresh org list'}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {hiddenOrgs.length > 0 ? (
+                <Button
+                  variant="quiet"
+                  onClick={() => setShowHidden((current) => !current)}
+                  aria-expanded={showHidden}
+                >
+                  {showHidden ? 'Hide removed orgs' : `Show removed orgs (${hiddenOrgs.length})`}
+                </Button>
+              ) : null}
+              <Button
+                variant="secondary"
+                onClick={() => refreshOrgs.mutate()}
+                disabled={refreshOrgs.isPending || inventoryLocked}
+                icon={<Icon name="refresh" size={15} />}
+              >
+                {refreshOrgs.isPending ? 'Refreshing…' : 'Refresh org list'}
+              </Button>
+            </div>
           }
         >
+          {removalNotice ? (
+            <p className="mb-3 rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft" role="status">
+              {removalNotice}
+            </p>
+          ) : null}
           {inventoryLocked && !bridgeReady ? (
             <EmptyState
               icon="plug"
@@ -494,16 +611,28 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
           ) : null}
           {!inventoryLocked && orgsQuery.isPending ? <LoadingState label="Reading org list…" /> : null}
           {!inventoryLocked && orgsQuery.isError ? <ErrorState message={orgsQuery.error.message} onRetry={() => void orgsQuery.refetch()} /> : null}
-          {!inventoryLocked && orgsQuery.data?.length === 0 ? (
+          {!inventoryLocked && !orgsQuery.isPending && !orgsQuery.isError && activeOrgs.length === 0 ? (
             <EmptyState
               icon="plug"
               title="No authenticated orgs yet"
-              description="Connect an org in step 2 to load its inventory, or use demo mode to explore sample metadata."
+              description={hiddenOrgs.length > 0
+                ? 'All authenticated orgs are hidden from DCAT. Use Show removed orgs to restore one.'
+                : 'Connect an org in step 2 to load its inventory, or use demo mode to explore sample metadata.'}
             />
           ) : null}
-          {!inventoryLocked && orgsQuery.data && orgsQuery.data.length > 0 ? (
+          {!inventoryLocked && activeOrgs.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <DataTable columns={columns} rows={orgsQuery.data} getRowKey={(org) => org.alias} ariaLabel="Authenticated Salesforce orgs" />
+              <DataTable columns={columns} rows={activeOrgs} getRowKey={(org) => org.alias} ariaLabel="Authenticated Salesforce orgs" />
+            </div>
+          ) : null}
+          {showHidden && hiddenOrgs.length > 0 ? (
+            <div className="mt-4 space-y-2 rounded-lg border border-line bg-surface-alt p-3">
+              <p className="text-xs text-ink-soft">
+                Hidden from DCAT only. Restoring an org does not change Salesforce CLI authentication.
+              </p>
+              <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+                <DataTable columns={hiddenColumns} rows={hiddenOrgs} getRowKey={(org) => org.alias} ariaLabel="Orgs hidden from DCAT" />
+              </div>
             </div>
           ) : null}
         </Step>

@@ -2,9 +2,12 @@ export type ModePreference = 'demo' | 'live';
 
 const MODE_KEY = 'dcat.mode';
 const ORG_KEY = 'dcat.selectedOrg';
+const HIDDEN_ORGS_KEY = 'dcat.hiddenOrgs';
 const THEME_KEY = 'dcat.theme';
 const SIDEBAR_KEY = 'dcat.sidebarCollapsed';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
+const ORG_ALIAS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
+const MAX_HIDDEN_ORGS = 200;
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
@@ -35,6 +38,29 @@ export function setSelectedOrg(alias: string | null): void {
   if (!storage) return;
   if (alias) storage.setItem(ORG_KEY, alias);
   else storage.removeItem(ORG_KEY);
+}
+
+/** Orgs hidden from DCAT are browser-local; Salesforce CLI auth is untouched. */
+export function getHiddenOrgs(): string[] {
+  const raw = getStorage()?.getItem(HIDDEN_ORGS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter(
+      (alias): alias is string => typeof alias === 'string' && ORG_ALIAS_PATTERN.test(alias),
+    ))].slice(0, MAX_HIDDEN_ORGS);
+  } catch {
+    return [];
+  }
+}
+
+export function setHiddenOrgs(aliases: readonly string[]): void {
+  const storage = getStorage();
+  if (!storage) return;
+  const valid = [...new Set(aliases.filter((alias) => ORG_ALIAS_PATTERN.test(alias)))].slice(0, MAX_HIDDEN_ORGS);
+  if (valid.length === 0) storage.removeItem(HIDDEN_ORGS_KEY);
+  else storage.setItem(HIDDEN_ORGS_KEY, JSON.stringify(valid));
 }
 
 export function getSidebarCollapsed(): boolean {
