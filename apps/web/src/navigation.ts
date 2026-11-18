@@ -69,3 +69,42 @@ export const PAGE_TITLES: Record<Page, string> = {
   settings: 'Settings & Diagnostics',
   help: 'Help',
 };
+
+const PAGE_IDS = Object.keys(PAGE_TITLES) as Page[];
+const PAGE_ID_SET = new Set<string>(PAGE_IDS);
+
+export function isPage(value: string): value is Page {
+  return PAGE_ID_SET.has(value);
+}
+
+/** The landing view keeps a clean URL; every other view is addressable by fragment. */
+export function pageHash(page: Page): string {
+  return page === 'dashboard' ? '' : `#${page}`;
+}
+
+export function pageHref(page: Page): string {
+  return page === 'dashboard' ? './' : pageHash(page);
+}
+
+function hashValue(hash: string): string {
+  return hash.replace(/^#\/?/, '').trim().toLowerCase();
+}
+
+export function pageFromHash(hash: string): Page {
+  const candidate = hashValue(hash);
+  return isPage(candidate) ? candidate : 'dashboard';
+}
+
+export function pageUrl(page: Page, currentUrl: string): string {
+  const url = new URL(currentUrl);
+  url.hash = pageHash(page);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+export function writePageHash(page: Page, mode: 'push' | 'replace' = 'push'): void {
+  const nextUrl = pageUrl(page, window.location.href);
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (nextUrl === currentUrl) return;
+  if (mode === 'replace') window.history.replaceState(null, '', nextUrl);
+  else window.history.pushState(null, '', nextUrl);
+}

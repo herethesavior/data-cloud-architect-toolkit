@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import type { OrgSummary } from '@dcat/core';
-import { NAV_GROUPS, PAGE_TITLES } from '../navigation.ts';
+import { NAV_GROUPS, PAGE_TITLES, pageHref } from '../navigation.ts';
 import type { Page } from '../navigation.ts';
 import type { CommandResult } from '../lib/commandSearch.ts';
 import { trapDialogFocus } from '../lib/focusTrap.ts';
@@ -62,6 +62,17 @@ interface NavigationListProps {
   collapsed?: boolean;
 }
 
+/** Preserve browser behavior for modified clicks while routing plain clicks. */
+function navigateFromLink(
+  event: MouseEvent<HTMLAnchorElement>,
+  page: Page,
+  onNavigate: (page: Page) => void,
+) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  onNavigate(page);
+}
+
 function NavigationList({ page, onNavigate, label, collapsed = false }: NavigationListProps) {
   return (
     <nav aria-label={label} className={collapsed ? 'space-y-0' : 'space-y-6'}>
@@ -75,10 +86,10 @@ function NavigationList({ page, onNavigate, label, collapsed = false }: Navigati
             {group.items.map((item) => {
               const active = item.id === page;
               return (
-                <button
+                <a
                   key={item.id}
-                  type="button"
-                  onClick={() => onNavigate(item.id)}
+                  href={pageHref(item.id)}
+                  onClick={(event) => navigateFromLink(event, item.id, onNavigate)}
                   aria-current={active ? 'page' : undefined}
                   aria-label={collapsed ? item.label : undefined}
                   title={collapsed ? item.label : undefined}
@@ -89,7 +100,7 @@ function NavigationList({ page, onNavigate, label, collapsed = false }: Navigati
                   {active ? (
                     <span aria-hidden="true" className="sidebar-active-dot ml-auto size-1.5 rounded-full bg-brand" />
                   ) : null}
-                </button>
+                </a>
               );
             })}
           </div>

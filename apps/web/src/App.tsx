@@ -17,7 +17,7 @@ import {
 import { useTheme } from './lib/useTheme.ts';
 import { useInventory } from './lib/useInventory.ts';
 import type { FocusObject } from './lib/objectDetail.ts';
-import { clearWorkspaceCaches, createWorkspaceContext } from './lib/workspace.ts';
+import { clearWorkspaceCaches, createWorkspaceContext, invalidateWorkspaceState } from './lib/workspace.ts';
 import type { WorkspaceContext, WorkspaceMode } from './lib/workspace.ts';
 import { AppShell } from './components/AppShell.tsx';
 import { ErrorState, LoadingState } from './components/DataStates.tsx';
@@ -32,6 +32,7 @@ import { DataTransformExplorer } from './pages/DataTransformExplorer.tsx';
 import { ErdExplorer } from './pages/ErdExplorer.tsx';
 import { DataDictionary } from './pages/DataDictionary.tsx';
 import { HelpPage } from './pages/HelpPage.tsx';
+import { pageFromHash, pageHash, writePageHash } from './navigation.ts';
 import type { Page } from './navigation.ts';
 
 function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: string; onRetry?: () => void }) {
@@ -69,12 +70,18 @@ export function App() {
   const sessionReady = Boolean(sessionQuery.data);
   const orgsQuery = useQuery({ queryKey: ['orgs'], queryFn: api.orgs, enabled: !hosted || sessionReady });
 
-  const [page, setPage] = useState<Page>('dashboard');
+  const [page, setPage] = useState<Page>(() => pageFromHash(window.location.hash));
   const [selectedAlias, setSelectedAlias] = useState<string | null>(() => getSelectedOrg());
   const [hiddenAliases, setHiddenAliases] = useState<string[]>(() => getHiddenOrgs());
   const [modeNotice, setModeNotice] = useState('');
   const [modeError, setModeError] = useState('');
   const [focusObject, setFocusObject] = useState<FocusObject | null>(null);
+
+  const navigate = (nextPage: Page) => {
+    setPage(nextPage);
+    writePageHash(nextPage);
+  };
+
   const modeAppliedRef = useRef<string | null>(null);
   const failedModeRef = useRef<WorkspaceMode>('demo');
   const theme = useTheme();
@@ -119,8 +126,7 @@ export function App() {
       setSelectedOrg(null);
       // The connector exposes a different org list in each mode. Refresh it so
       // a mode switch cannot leave the UI stuck on the previous mode's orgs.
-      void queryClient.invalidateQueries({ queryKey: ['orgs'] });
-      void queryClient.invalidateQueries({ queryKey: ['health'] });
+      invalidateWorkspaceState(queryClient);
       setModeError('');
       setModeNotice(requestedMode === 'demo'
         ? 'Now using demo mode — sample metadata only.'
@@ -175,6 +181,25 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [modeNotice]);
 
+  // The URL is the source of truth for deep links and browser history. Skip
+  // links stay fragment-only so assistive navigation never changes the view.
+  useEffect(() => {
+    const syncPageFromUrl = () => {
+      const hash = window.location.hash;
+      if (hash.replace(/^#/, '').toLowerCase() === 'main-content') return;
+      const nextPage = pageFromHash(hash);
+      setPage(nextPage);
+      if (hash !== pageHash(nextPage)) writePageHash(nextPage, 'replace');
+    };
+    syncPageFromUrl();
+    window.addEventListener('popstate', syncPageFromUrl);
+    window.addEventListener('hashchange', syncPageFromUrl);
+    return () => {
+      window.removeEventListener('popstate', syncPageFromUrl);
+      window.removeEventListener('hashchange', syncPageFromUrl);
+    };
+  }, []);
+
   useEffect(() => {
     const session = sessionQuery.data;
     if (!session) return;
@@ -222,7 +247,7 @@ export function App() {
     setFocusObject(null);
     setSelectedAlias(alias);
     setSelectedOrg(alias);
-    setPage('dashboard');
+    navigate('dashboard');
   };
 
   const hideOrg = (alias: string) => {
@@ -257,23 +282,23 @@ export function App() {
   const selectSearchResult = (result: CommandResult) => {
     if (result.kind === 'stream') {
       setFocusObject({ kind: 'stream', apiName: result.apiName });
-      setPage('data-streams');
+      navigate('data-streams');
       return;
     }
     if (result.kind === 'transform') {
       setFocusObject({ kind: 'transform', apiName: result.apiName });
-      setPage('data-transforms');
+      navigate('data-transforms');
       return;
     }
     if (result.kind !== 'dlo' && result.kind !== 'dmo') return;
     setFocusObject({ kind: result.kind, apiName: result.apiName });
-    setPage(result.kind === 'dlo' ? 'dlos' : 'dmos');
+    navigate(result.kind === 'dlo' ? 'dlos' : 'dmos');
   };
 
   const content = (() => {
     switch (page) {
       case 'dashboard':
-        return <Dashboard context={context} mode={mode} onNavigate={setPage} />;
+        return <Dashboard context={context} mode={mode} onNavigate={navigate} />;
       case 'orgs':
         return (
           <OrgConnections
@@ -315,7 +340,7 @@ export function App() {
       case 'dictionary':
         return <DataDictionary context={context} />;
       case 'help':
-        return <HelpPage onNavigate={setPage} />;
+        return <HelpPage onNavigate={navigate} />;
     }
   })();
 
@@ -324,7 +349,7 @@ export function App() {
       value={{
         context,
         mode,
-        onGoToOrgs: () => setPage('orgs'),
+        onGoToOrgs: () => navigate('orgs'),
         onToggleMode: toggleMode,
         isTogglingMode,
         refreshInventory: () => refreshInventory.mutate(context),
@@ -337,7 +362,7 @@ export function App() {
     >
       <AppShell
         page={page}
-        onNavigate={setPage}
+        onNavigate={navigate}
         context={context}
         onToggleMode={toggleMode}
         isTogglingMode={isTogglingMode}
@@ -347,7 +372,7 @@ export function App() {
         orgs={visibleOrgs}
         selectedAlias={selectedAlias}
         onSelectOrg={selectOrg}
-        onGoToOrgs={() => setPage('orgs')}
+        onGoToOrgs={() => navigate('orgs')}
         theme={theme}
         searchResults={searchResults}
         onSelectSearchResult={selectSearchResult}

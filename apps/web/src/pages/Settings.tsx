@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.ts';
+import { invalidateBridgeState } from '../lib/workspace.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
 import { ErrorState, LoadingState } from '../components/DataStates.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -32,8 +33,7 @@ export function Settings({ theme }: { theme: ThemeController }) {
     mutationFn: api.refreshCli,
     onSuccess: () => {
       setRefreshError('');
-      void queryClient.invalidateQueries({ queryKey: ['health'] });
-      void queryClient.invalidateQueries({ queryKey: ['bridge-status'] });
+      invalidateBridgeState(queryClient);
     },
     onError: (error: Error) => setRefreshError(error.message),
   });

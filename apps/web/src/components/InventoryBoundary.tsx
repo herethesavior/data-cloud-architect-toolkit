@@ -11,6 +11,49 @@ import { Icon } from './Icon.tsx';
 import { DiscoveryProgress, ResourceStatusNotice } from './ResourceStatusPanel.tsx';
 import { NoOrgState } from './NoOrgState.tsx';
 
+function InventoryRefreshSkeleton({ onCancel }: { onCancel?: () => void }) {
+  return (
+    <section
+      data-testid="inventory-refresh-skeleton"
+      aria-busy="true"
+      aria-live="polite"
+      aria-label="Refreshing inventory"
+      className="panel px-6 py-6"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="label-xs">Inventory refresh</p>
+          <h3 className="mt-1 flex items-center gap-2 text-base font-semibold text-ink">
+            <Icon name="refresh" size={17} className="animate-spin text-brand" />
+            Getting the latest metadata…
+          </h3>
+          <p className="mt-1 text-sm text-ink-soft">Previous results return when the refresh finishes.</p>
+        </div>
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Cancel refresh"
+            title="Cancel this refresh"
+            className="min-h-9 rounded-lg border border-line px-3 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink"
+          >
+            Cancel refresh
+          </button>
+        ) : null}
+      </div>
+      <div aria-hidden="true" className="mt-5 space-y-3">
+        <div className="skeleton h-3 w-2/3 rounded" />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="skeleton h-20 rounded-lg" />
+          <div className="skeleton h-20 rounded-lg" />
+          <div className="skeleton h-20 rounded-lg" />
+        </div>
+        <div className="skeleton h-28 rounded-lg" />
+      </div>
+    </section>
+  );
+}
+
 interface InventoryBoundaryProps {
   query: UseQueryResult<InventorySnapshot, Error>;
   context: WorkspaceContext | null;
@@ -24,6 +67,11 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   // explorer would spin forever when live mode has no authenticated org.
   if (!context) return <NoOrgState />;
   if (query.isPending) return <DiscoveryProgress stages={discoveryStages(null, true)} />;
+  // Loading replaces the snapshot so stale rows cannot be mistaken for fresh
+  // results. Once loading ends, the real result, empty, or error state returns.
+  if (query.isFetching || actions?.isRefreshingInventory) {
+    return <InventoryRefreshSkeleton onCancel={actions?.cancelRefresh} />;
+  }
   if (query.isError) {
     return (
       <ErrorState

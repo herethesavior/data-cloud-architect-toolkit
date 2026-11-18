@@ -165,6 +165,34 @@ test('org switcher and details page use the authenticated demo org', async ({ pa
   ).toBeVisible();
 });
 
+test('menu links use fragments and browser history restores the right view', async ({ page }) => {
+  await openDemo(page);
+  const sidebar = page.locator('#desktop-sidebar');
+
+  await expect(sidebar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', './');
+  const dloLink = sidebar.getByRole('link', { name: 'DLO Explorer' });
+  await expect(dloLink).toHaveAttribute('href', '#dlos');
+
+  await dloLink.click();
+  await expect.poll(() => new URL(page.url()).hash).toBe('#dlos');
+  await expect(page.locator('h1')).toHaveText('DLO Explorer');
+
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).hash).toBe('');
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+
+  await page.goForward();
+  await expect.poll(() => new URL(page.url()).hash).toBe('#dlos');
+  await expect(page.locator('h1')).toHaveText('DLO Explorer');
+
+  await page.goto('/#does-not-exist');
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+  await expect.poll(() => new URL(page.url()).hash).toBe('');
+
+  await page.goto('/#data-streams');
+  await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
+});
+
 test('switching to live mode announces the context and never flashes demo metadata', async ({ page }) => {
   await openDemo(page);
   await expect(page.getByText('Sample inventory')).toBeVisible();
@@ -192,7 +220,7 @@ test('switching to live mode announces the context and never flashes demo metada
   await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
   await expect(page.getByText('Live org metadata')).toBeVisible();
 
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
   const liveRows = page.getByRole('table', { name: 'DLO Explorer results' });
   await expect(liveRows.getByText('Production Account')).toBeVisible();
   await expect(liveRows.getByText('Account DLO', { exact: true })).toHaveCount(0);
@@ -230,6 +258,18 @@ test('switching demo to live keeps the header height stable and freshness in a c
   expect(await titleHeight()).toBe(demoTitleHeight);
   await expect(header.getByText(/^Updated /)).toHaveCount(0);
   await expect(page.locator('#main-content').getByTestId('inventory-freshness')).toBeVisible();
+});
+
+test('mode changes refresh diagnostics in the currently open view', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+
+  const modeFact = page.locator('dt').filter({ hasText: /^Mode$/ }).locator('..');
+  await expect(modeFact).toContainText('demo');
+
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await expect(modeFact).toContainText('live');
 });
 
 test('live Discovery Health and Needs attention stay inside the viewport', async ({ page }) => {
@@ -358,7 +398,7 @@ test('switching live orgs replaces cached metadata instead of showing the previo
   await page.goto('/');
 
   await expect(page.getByLabel('Selected organization')).toHaveValue('prod-org');
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
   const rows = page.getByRole('table', { name: 'DLO Explorer results' });
   await expect(rows.getByText('Production Account')).toBeVisible();
   await expect(rows.getByText('Sandbox Account')).toHaveCount(0);
@@ -368,7 +408,7 @@ test('switching live orgs replaces cached metadata instead of showing the previo
   // Selecting an org returns to the Dashboard to establish the new context.
   await expect(page.locator('h1')).toHaveText('Dashboard');
   await expect(page.locator('header').getByText('LIVE · SANDBOX', { exact: true })).toBeVisible();
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
   await expect(rows.getByText('Sandbox Account')).toBeVisible();
   await expect(rows.getByText('Production Account')).toHaveCount(0);
 });
@@ -376,7 +416,7 @@ test('switching live orgs replaces cached metadata instead of showing the previo
 test('object details use tabs, breadcrumbs, and metadata copy actions', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
 
   const rows = page.getByRole('table', { name: 'DLO Explorer results' });
   await expect(rows.getByText('Has mapping').first()).toBeVisible();
@@ -405,7 +445,7 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
   await expect(page.locator('header').getByRole('button', { name: 'Refresh inventory' })).toHaveCount(0);
   await expect(page.getByRole('main').getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
 
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
   await expect(page.getByRole('main').getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
 
   await page.getByRole('table', { name: 'DLO Explorer results' }).getByRole('button', { name: 'Details', exact: true }).first().click();
@@ -459,9 +499,14 @@ test('a slow refresh can be cancelled instead of leaving a permanent spinner', a
   });
 
   await page.getByRole('button', { name: 'Refresh inventory' }).click();
-  await expect(page.getByRole('button', { name: 'Cancel refresh' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel refresh' }).click();
+  const skeleton = page.getByTestId('inventory-refresh-skeleton');
+  await expect(skeleton).toBeVisible();
+  await expect(page.getByText('Sample inventory')).toHaveCount(0);
+  await expect(skeleton.getByRole('button', { name: 'Cancel refresh' })).toBeVisible();
+  await skeleton.getByRole('button', { name: 'Cancel refresh' }).click();
 
+  await expect(skeleton).toBeHidden();
+  await expect(page.getByText('Sample inventory')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect.poll(() => routeFinished).toBe(true);
@@ -470,7 +515,7 @@ test('a slow refresh can be cancelled instead of leaving a permanent spinner', a
 test('detail drawer content scrolls inside a short viewport', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 520 });
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Transform Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Transform Explorer' }).click();
   await page.getByRole('table', { name: 'Data Transform Explorer results' })
     .getByRole('button', { name: 'Details', exact: true })
     .first()
@@ -503,16 +548,16 @@ test('live export surfaces the metadata sharing notice', async ({ page }) => {
   await page.goto('/');
 
   const notice = "This export contains metadata about your Salesforce org. Store and share it according to your organization's security policies.";
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Dictionary' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
   await expect(page.getByText(notice)).toBeVisible();
 
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'ERD Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'ERD Explorer' }).click();
   await expect(page.getByText(notice)).toBeVisible();
 });
 
 test('data stream explorer shows grounded source-to-target detail and visible exports', async ({ page }) => {
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Stream Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Stream Explorer' }).click();
   await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
 
   const rows = page.getByRole('table', { name: 'Data Stream Explorer results' });
@@ -551,7 +596,7 @@ test('data stream explorer shows grounded source-to-target detail and visible ex
 
 test('data transform explorer shows grounded detail, lineage, and run states', async ({ page }) => {
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Transform Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Transform Explorer' }).click();
   await expect(page.locator('h1')).toHaveText('Data Transform Explorer');
 
   const rows = page.getByRole('table', { name: 'Data Transform Explorer results' });
@@ -605,7 +650,7 @@ test('data transform explorer shows grounded detail, lineage, and run states', a
 
 test('ERD Explorer shows the richer demo model and filters grounded edges', async ({ page }) => {
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'ERD Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'ERD Explorer' }).click();
 
   await expect(page.locator('h1')).toHaveText('ERD Explorer');
   await expect(page.getByText('8 objects', { exact: true })).toBeVisible();
@@ -618,7 +663,7 @@ test('ERD Explorer shows the richer demo model and filters grounded edges', asyn
 
 test('export menu consolidates local export formats', async ({ page }) => {
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Dictionary' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
 
   const trigger = page.getByRole('button', { name: 'Export' });
   await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
@@ -667,7 +712,7 @@ test('Help page explains DCAT, Data Cloud terms, privacy, and authorship', async
     'https://www.linkedin.com/in/ryanjoshuadc',
   );
 
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Help' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Help' }).click();
   await expect(page.locator('h1')).toHaveText('Help');
 });
 
@@ -709,7 +754,7 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute('aria-expanded', 'false');
   await expect(sidebar).toHaveAttribute('data-collapsed', 'true');
   await expect(sidebar.locator('img[src="/dcat-icon-192.png"]')).toBeVisible();
-  const dloItem = sidebar.getByRole('button', { name: 'DLO Explorer' });
+  const dloItem = sidebar.getByRole('link', { name: 'DLO Explorer' });
   await expect(dloItem).toBeVisible();
   await expect(sidebar.locator('.sidebar-label').first()).toBeHidden();
   await expect(sidebar.locator('.nav-item svg').first()).toHaveAttribute('width', '20');
@@ -734,7 +779,7 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
 test('edition status stays visible while long pages scroll', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 520 });
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Dictionary' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
   await expect(page.locator('h1')).toHaveText('Data Dictionary');
 
   const scrollY = await page.evaluate(() => {
@@ -822,7 +867,7 @@ test('every screen fits a phone viewport', async ({ page }) => {
     'Help',
   ]) {
     await page.getByRole('button', { name: 'Open navigation' }).click();
-    await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name }).click();
+    await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('link', { name }).click();
     await expect(page.locator('h1')).toHaveText(name);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

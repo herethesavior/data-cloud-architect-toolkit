@@ -5,6 +5,8 @@ import type { OrgSummary } from '@dcat/core';
 import {
   clearWorkspaceCaches,
   createWorkspaceContext,
+  invalidateBridgeState,
+  invalidateWorkspaceState,
   isContextScopedQuery,
   shouldDiscardQuery,
   workspaceBadge,
@@ -96,6 +98,44 @@ describe('workspace contexts', () => {
     clearWorkspaceCaches(client, null);
     expect(client.getQueryData(['inventory', liveId])).toBeUndefined();
     expect(client.getQueryData(['orgs'])).toEqual([{ marker: 'org-list' }]);
+  });
+
+  it('invalidates shared and context-scoped state in one place', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['bridge-status'], { paired: true });
+    client.setQueryData(['health'], { status: 'ok' });
+    client.setQueryData(['orgs'], [demoOrg]);
+    client.setQueryData(['inventory', 'demo:demo-uat'], { marker: 'inventory' });
+    client.setQueryData(['transforms', 'demo:demo-uat', 'bundle', 't1'], { marker: 'transform' });
+    client.setQueryData(['session'], { mode: 'demo' });
+
+    invalidateWorkspaceState(client);
+
+    for (const key of [
+      ['bridge-status'],
+      ['health'],
+      ['orgs'],
+      ['inventory', 'demo:demo-uat'],
+      ['transforms', 'demo:demo-uat', 'bundle', 't1'],
+    ]) {
+      expect(client.getQueryState(key)?.isInvalidated, `query ${key.join('/')}`).toBe(true);
+    }
+    expect(client.getQueryState(['session'])?.isInvalidated).toBe(false);
+  });
+
+  it('syncs bridge state without adding an org.list before connect', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['bridge-status'], { paired: true });
+    client.setQueryData(['health'], { status: 'ok' });
+    client.setQueryData(['orgs'], [demoOrg]);
+    client.setQueryData(['inventory', 'demo:demo-uat'], { marker: 'inventory' });
+
+    invalidateBridgeState(client);
+
+    expect(client.getQueryState(['bridge-status'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['health'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['inventory', 'demo:demo-uat'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['orgs'])?.isInvalidated).toBe(false);
   });
 
   it('labels the active context explicitly in the header', () => {
