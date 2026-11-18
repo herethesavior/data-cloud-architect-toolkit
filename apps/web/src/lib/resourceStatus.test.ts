@@ -72,6 +72,22 @@ describe('resource status model', () => {
     expect(discoveryStages(inventory).find((stage) => stage.id === 'pipelines')?.state).toBe('complete');
   });
 
+  it('explains a skipped family without treating it as actionable', () => {
+    const message = 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.';
+    const inventory = inventoryWith([
+      capability({ family: 'mappings', status: 'not-started', itemCount: 0, message }),
+    ]);
+    inventory.warnings.push({ family: 'mappings', code: 'MAPPINGS_SKIPPED', message, severity: 'info' });
+
+    expect(resourceStatusMessage(inventory.capabilities[0]!)).toBe(message);
+    expect(hasDegradedResources(inventory)).toBe(false);
+    expect(actionableWarnings(inventory)).toEqual([]);
+    expect(discoveryStages(inventory).find((stage) => stage.id === 'pipelines')).toMatchObject({
+      state: 'complete',
+      detail: message,
+    });
+  });
+
   it('presents the demo snapshot without degraded-resource warnings', () => {
     expect(hasDegradedResources(demoInventory)).toBe(false);
     expect(demoInventory.warnings).toHaveLength(0);

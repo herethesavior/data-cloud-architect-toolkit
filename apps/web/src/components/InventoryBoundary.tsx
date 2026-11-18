@@ -64,17 +64,26 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           className="size-1.5 shrink-0 rounded-full bg-warning"
         />
       ) : null}
-      {actions ? (
+      {actions && actions.isRefreshingInventory ? (
+        <button
+          type="button"
+          onClick={actions.cancelRefresh}
+          aria-label="Cancel refresh"
+          title="Cancel this refresh"
+          className="grid size-7 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
+        >
+          <Icon name="close" size={13} />
+        </button>
+      ) : actions ? (
         <button
           type="button"
           onClick={actions.refreshInventory}
-          disabled={!context.alias || actions.isRefreshingInventory}
+          disabled={!context.alias}
           aria-label="Refresh inventory"
-          aria-busy={actions.isRefreshingInventory}
           title="Refresh this inventory from the local connector"
           className="grid size-7 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-40"
         >
-          <Icon name="refresh" size={13} className={actions.isRefreshingInventory ? 'animate-spin' : undefined} />
+          <Icon name="refresh" size={13} />
         </button>
       ) : null}
     </span>

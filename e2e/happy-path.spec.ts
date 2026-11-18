@@ -141,6 +141,7 @@ test('demo first impression shows the inventory and the CTA opens an explorer', 
   );
   await expect(page.getByText('Sample metadata only — no Salesforce org is connected.')).toHaveCount(0);
   await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect(page.locator('header').getByText(/SF CLI (ready|missing|checking)/)).toHaveCount(0);
   await expect(page.getByText('Your Data 360 model, clearly mapped.')).toBeVisible();
   await expect(page.getByText('Data Lake Objects')).toBeVisible();
   await expect(page.getByText('Complete · 100%')).toBeVisible();
@@ -448,6 +449,24 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
   expect(catcherStyle.backdrop).toBe('none');
 });
 
+test('a slow refresh can be cancelled instead of leaving a permanent spinner', async ({ page }) => {
+  await openDemo(page);
+  let routeFinished = false;
+  await page.route('**/api/orgs/*/inventory?refresh=1', async (route: Route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await route.fulfill({ json: demoInventory });
+    routeFinished = true;
+  });
+
+  await page.getByRole('button', { name: 'Refresh inventory' }).click();
+  await expect(page.getByRole('button', { name: 'Cancel refresh' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel refresh' }).click();
+
+  await expect(page.getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect.poll(() => routeFinished).toBe(true);
+});
+
 test('detail drawer content scrolls inside a short viewport', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 520 });
   await openDemo(page);
@@ -618,7 +637,7 @@ test('export menu consolidates local export formats', async ({ page }) => {
   await expect(trigger).toBeFocused();
 });
 
-test('Help page explains DCAT, Data Cloud terms, and privacy', async ({ page }) => {
+test('Help page explains DCAT, Data Cloud terms, privacy, and authorship', async ({ page }) => {
   await openDemo(page);
   await page.locator('header').getByRole('button', { name: 'Help' }).click();
 
@@ -634,6 +653,19 @@ test('Help page explains DCAT, Data Cloud terms, and privacy', async ({ page }) 
   await page.getByRole('tab', { name: 'Privacy' }).click();
   await expect(page.getByText('No hosted OAuth')).toBeVisible();
   await expect(page.getByText(/\/api\/auth\/\* routes are intentionally removed and return 404/)).toBeVisible();
+
+  await page.getByRole('tab', { name: 'About & contact' }).click();
+  await expect(page.getByText('Ryan Joshua Dela Cruz')).toBeVisible();
+  await expect(page.getByText('Technical Architect at Salesforce')).toBeVisible();
+  await expect(page.getByText(/Created in a personal capacity/)).toBeVisible();
+  await expect(page.getByRole('link', { name: /Open GitHub Issues \(opens in a new tab\)/ })).toHaveAttribute(
+    'href',
+    'https://github.com/herethesavior/data-cloud-architect-toolkit/issues',
+  );
+  await expect(page.getByRole('link', { name: /Connect on LinkedIn \(opens in a new tab\)/ })).toHaveAttribute(
+    'href',
+    'https://www.linkedin.com/in/ryanjoshuadc',
+  );
 
   await page.locator('#desktop-sidebar').getByRole('button', { name: 'Help' }).click();
   await expect(page.locator('h1')).toHaveText('Help');

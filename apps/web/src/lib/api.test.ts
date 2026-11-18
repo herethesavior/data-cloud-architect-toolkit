@@ -19,6 +19,7 @@ describe('web API session handling', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
@@ -165,5 +166,45 @@ describe('web API session handling', () => {
     expect(options?.method).toBe('POST');
     expect((options?.headers as Record<string, string>)['x-dcat-token']).toBe('old-token');
     expect(options?.body).toBeUndefined();
+  });
+
+  it('bounds a hanging inventory refresh with a hard timeout', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((path: string, options?: RequestInit) => {
+      if (path === '/api/session') return Promise.resolve(jsonResponse(session));
+      return new Promise((_resolve, reject) => {
+        if (options?.signal?.aborted) {
+          reject(new Error('aborted'));
+          return;
+        }
+        options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = api.inventory('prod-org', { force: true });
+    const assertion = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await assertion;
+  });
+
+  it('aborts an inventory refresh when the caller cancels', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn((path: string, options?: RequestInit) => {
+      if (path === '/api/session') return Promise.resolve(jsonResponse(session));
+      return new Promise((_resolve, reject) => {
+        if (options?.signal?.aborted) {
+          reject(new Error('aborted'));
+          return;
+        }
+        options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = api.inventory('prod-org', { force: true, signal: controller.signal });
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' });
   });
 });

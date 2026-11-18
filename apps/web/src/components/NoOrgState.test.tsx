@@ -18,6 +18,7 @@ function actions(overrides: Partial<InventoryActions> = {}): InventoryActions {
     onToggleMode: vi.fn(),
     isTogglingMode: false,
     refreshInventory: vi.fn(),
+    cancelRefresh: vi.fn(),
     isRefreshingInventory: false,
     refreshError: '',
     ...overrides,

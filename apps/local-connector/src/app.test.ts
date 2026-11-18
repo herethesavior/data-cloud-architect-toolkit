@@ -38,6 +38,10 @@ function liveCliRunner(): ProcessRunner {
     '/services/data/v65.0/ssot/data-transforms/Account_Transform/run-history': transformRunHistoryJson,
     '/services/data/v65.0/ssot/data-transforms/Account_Transform/schedule': transformScheduleJson,
   };
+  const restBody = (path: string): string | undefined => restBodies[path]
+    ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?dmoDeveloperName=')
+      ? mappingsJson
+      : undefined);
   return {
     run: vi.fn(async (args: readonly string[], _options?: RunOptions) => {
       if (args[0] === '--version') {
@@ -50,7 +54,7 @@ function liveCliRunner(): ProcessRunner {
         return { stdout: '', stderr: '', exitCode: 0 };
       }
       if (args[0] === 'api' && args[1] === 'request' && args[2] === 'rest') {
-        const body = restBodies[args[3] ?? ''];
+        const body = restBody(args[3] ?? '');
         if (body === undefined) {
           return { stdout: '', stderr: `Unexpected REST path: ${args[3] ?? ''}`, exitCode: 1 };
         }

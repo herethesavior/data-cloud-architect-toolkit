@@ -32,6 +32,41 @@ interface RequestOptions {
   token?: string;
   body?: unknown;
   signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+const SESSION_TIMEOUT_MS = 15_000;
+const RELAY_POLL_TIMEOUT_MS = 10_000;
+
+interface TimedSignal {
+  signal?: AbortSignal;
+  didTimeout: () => boolean;
+  cleanup: () => void;
+}
+
+/** Combine caller cancellation with a hard deadline so no request can hang forever. */
+function createTimedSignal(signal: AbortSignal | undefined, timeoutMs?: number): TimedSignal {
+  if (!signal && !timeoutMs) return { signal: undefined, didTimeout: () => false, cleanup: () => {} };
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const onAbort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) controller.abort(signal.reason);
+  else signal?.addEventListener('abort', onAbort, { once: true });
+
+  const timer = timeoutMs === undefined ? undefined : window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup: () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    },
+  };
 }
 
 /** Older bridges return `unknown`; upgrade them from the same safe URL metadata. */
@@ -45,32 +80,41 @@ function normalizeOrgs(orgs: OrgSummary[]): OrgSummary[] {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const response = await fetch(path, {
-    method: options.method ?? 'GET',
-    headers: {
-      ...(options.token ? { 'x-dcat-token': options.token } : {}),
-      ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    signal: options.signal,
-    credentials: 'same-origin',
-  });
+  const timed = createTimedSignal(options.signal, options.timeoutMs);
+  try {
+    const response = await fetch(path, {
+      method: options.method ?? 'GET',
+      headers: {
+        ...(options.token ? { 'x-dcat-token': options.token } : {}),
+        ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: timed.signal,
+      credentials: 'same-origin',
+    });
 
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as ErrorPayload | null;
-    throw new ApiError(
-      payload?.error?.code ?? 'REQUEST_FAILED',
-      payload?.error?.message ?? `Request failed with status ${response.status}.`,
-    );
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as ErrorPayload | null;
+      throw new ApiError(
+        payload?.error?.code ?? 'REQUEST_FAILED',
+        payload?.error?.message ?? `Request failed with status ${response.status}.`,
+      );
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (timed.didTimeout()) throw new ApiError('TIMEOUT', 'The request took too long. Try again.');
+    if (options.signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
+    throw error;
+  } finally {
+    timed.cleanup();
   }
-
-  return (await response.json()) as T;
 }
 
 let cachedSession: Promise<SessionInfo> | null = null;
 
 export function getSession(): Promise<SessionInfo> {
-  cachedSession ??= request<SessionInfo>('/api/session').catch((error: unknown) => {
+  cachedSession ??= request<SessionInfo>('/api/session', { timeoutMs: SESSION_TIMEOUT_MS }).catch((error: unknown) => {
     // A failed request must not poison the cache: "Try again" has to work.
     cachedSession = null;
     throw error;
@@ -125,8 +169,10 @@ const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
   'cli.status': 30_000,
   'org.list': 120_000,
   'org.connect': 6 * 60_000,
-  'inventory.get': 120_000,
-  'transform.get': 120_000,
+  // Keep the browser deadline aligned with the Worker so a timed-out retry
+  // cannot hit BRIDGE_BUSY while the original request is still running.
+  'inventory.get': 60_000,
+  'transform.get': 60_000,
   'mode.set': 30_000,
   'bridge.update': 5 * 60_000,
 };
@@ -153,19 +199,32 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       token: session.token,
       body: operation,
       signal,
+      timeoutMs: RELAY_POLL_TIMEOUT_MS,
     });
     const deadline = Date.now() + OPERATION_TIMEOUT_MS[operation.operation];
 
     while (Date.now() < deadline) {
-      const state = await request<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}`, {
-        token: session.token,
-        signal,
-      });
+      let state: RelayRequestState;
+      try {
+        state = await request<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}`, {
+          token: session.token,
+          signal,
+          timeoutMs: RELAY_POLL_TIMEOUT_MS,
+        });
+      } catch (error) {
+        // A slow status poll is recoverable until the operation deadline. Keep
+        // polling so a bridge that answers late still completes the user action.
+        if (error instanceof ApiError && error.code === 'TIMEOUT' && Date.now() < deadline) {
+          await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
+          continue;
+        }
+        throw error;
+      }
       if (state.status === 'completed') return state.result as T;
       if (state.status === 'failed' || state.status === 'expired') {
         throw new ApiError(state.error?.code ?? 'RELAY_FAILED', state.error?.message ?? 'The local bridge request failed.');
       }
-      await wait(1200, signal);
+      await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
     }
 
     throw new ApiError('RELAY_TIMEOUT', 'The local bridge did not answer in time. Check that it is still running.');
@@ -229,8 +288,14 @@ export const api = {
       const path = `/api/orgs/${encodeURIComponent(alias)}/inventory`;
       // A forced refresh bypasses the server cache and is token-protected.
       snapshot = options.force
-        ? await requestWithToken<InventorySnapshot>(`${path}?refresh=1`, { signal: options.signal })
-        : await request<InventorySnapshot>(path, { signal: options.signal });
+        ? await requestWithToken<InventorySnapshot>(`${path}?refresh=1`, {
+            signal: options.signal,
+            timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
+          })
+        : await request<InventorySnapshot>(path, {
+            signal: options.signal,
+            timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
+          });
     }
     return { ...snapshot, org: normalizeOrg(snapshot.org) };
   },

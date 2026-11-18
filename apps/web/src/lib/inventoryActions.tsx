@@ -9,6 +9,7 @@ export interface InventoryActions {
   onToggleMode: () => void;
   isTogglingMode: boolean;
   refreshInventory: () => void;
+  cancelRefresh: () => void;
   isRefreshingInventory: boolean;
   refreshError: string;
 }

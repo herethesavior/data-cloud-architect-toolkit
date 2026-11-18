@@ -166,7 +166,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 | ERD Explorer | Confirmed and inferred relationships with a certainty filter. |
 | Data Dictionary | Unified field reference. |
 | Settings & Diagnostics | Connector and CLI status plus privacy summary. |
-| Help | Tabbed documentation: What is DCAT?, How it works, Data Cloud glossary, and Privacy. |
+| Help | Tabbed documentation: What is DCAT?, How it works, Data Cloud glossary, Privacy, and About & contact (creator, role, repository, and LinkedIn). |
 
 The demo inventory is fully labelled and intentionally healthy. It contains eight DLOs, eight DMOs, seven field-level mappings, six streams, five transforms, and nine labelled ERD relationships so the explorers can be evaluated without implying that live data was discovered.
 

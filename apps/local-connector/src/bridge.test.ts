@@ -33,6 +33,13 @@ const restBodies: Record<string, string> = {
   '/services/data/v65.0/ssot/data-transforms/Account_Transform/schedule': transformScheduleJson,
 };
 
+function restBody(path: string): string | undefined {
+  return restBodies[path]
+    ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?dmoDeveloperName=')
+      ? mappingsJson
+      : undefined);
+}
+
 function createRunner(loginResult?: { stdout: string; stderr: string; exitCode: number }): ProcessRunner {
   return {
     run: vi.fn(async (args: readonly string[], _options?: RunOptions) => {
@@ -42,7 +49,7 @@ function createRunner(loginResult?: { stdout: string; stderr: string; exitCode: 
         return loginResult ?? { stdout: '', stderr: '', exitCode: 0 };
       }
       if (args[0] === 'api' && args[1] === 'request' && args[2] === 'rest') {
-        const body = restBodies[args[3] ?? ''];
+        const body = restBody(args[3] ?? '');
         return body === undefined
           ? { stdout: '', stderr: `Unexpected REST path: ${args[3] ?? ''}`, exitCode: 1 }
           : { stdout: body, stderr: '', exitCode: 0 };

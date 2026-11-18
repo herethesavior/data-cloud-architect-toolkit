@@ -154,4 +154,18 @@ describe('SalesforceCliAdapter', () => {
     expect(stripCliNotices(`${cliNotices}\nERROR running api request: authentication expired`))
       .toBe('ERROR running api request: authentication expired');
   });
+
+  it('surfaces an unfiltered mapping INVALID_INPUT body verbatim', async () => {
+    const stdout = JSON.stringify([{
+      errorCode: 'INVALID_INPUT',
+      message: 'DMO or Source Object (CRM) developer Name is missing',
+    }]);
+    const runner = fakeRunner({
+      run: vi.fn(async () => ({ stdout, stderr: cliNotices, exitCode: 1 })),
+    });
+    const adapter = new SalesforceCliAdapter(runner);
+
+    await expect(adapter.restGet('demo-uat', 'services/data/v65.0/ssot/data-model-object-mappings'))
+      .rejects.toThrow(/^Salesforce CLI command failed: INVALID_INPUT: DMO or Source Object \(CRM\) developer Name is missing$/);
+  });
 });

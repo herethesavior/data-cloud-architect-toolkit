@@ -27,6 +27,7 @@ function renderExplorer(inventory: InventorySnapshot = structuredClone(demoInven
         onToggleMode: vi.fn(),
         isTogglingMode: false,
         refreshInventory: vi.fn(),
+        cancelRefresh: vi.fn(),
         isRefreshingInventory: false,
         refreshError: '',
       }}>

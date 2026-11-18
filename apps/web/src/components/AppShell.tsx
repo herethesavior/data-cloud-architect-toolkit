@@ -49,8 +49,6 @@ interface AppShellProps {
   selectedAlias: string | null;
   onSelectOrg: (alias: string) => void;
   onGoToOrgs: () => void;
-  cliInstalled: boolean | null;
-  cliVersion?: string | null;
   theme: ThemeController;
   searchResults: CommandResult[];
   onSelectSearchResult: (result: CommandResult) => void;
@@ -203,8 +201,6 @@ export function AppShell({
   selectedAlias,
   onSelectOrg,
   onGoToOrgs,
-  cliInstalled,
-  cliVersion,
   theme,
   searchResults,
   onSelectSearchResult,
@@ -217,7 +213,6 @@ export function AppShell({
   const [metadataResult, setMetadataResult] = useState<CommandResult | null>(null);
   const selectedOrg = orgs.find((org) => org.alias === selectedAlias) ?? null;
   const groupLabel = NAV_GROUPS.find((group) => group.items.some((item) => item.id === page))?.label ?? 'Workspace';
-  const cliTone = cliInstalled === true ? 'success' : cliInstalled === false ? 'danger' : 'neutral';
   const badge = workspaceBadge(context);
   const activeMode = context?.mode ?? 'live';
 
@@ -401,11 +396,6 @@ export function AppShell({
                 >
                   <Icon name={theme.resolved === 'dark' ? 'sun' : 'moon'} size={17} />
                 </Button>
-                <Badge tone={cliTone} className="hidden xl:inline-flex" dot>
-                  <span title={cliVersion ?? undefined}>
-                    {cliInstalled === true ? 'SF CLI ready' : cliInstalled === false ? 'SF CLI missing' : 'SF CLI checking'}
-                  </span>
-                </Badge>
               </div>
             </div>
           </div>

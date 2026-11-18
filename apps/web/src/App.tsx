@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InventorySnapshot, OrgSummary, SessionInfo } from '@dcat/core';
-import { api, getSession, setCachedSession } from './lib/api.ts';
+import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { buildCommandResults } from './lib/commandSearch.ts';
 import { isHosted } from './lib/hosted.ts';
 import type { CommandResult } from './lib/commandSearch.ts';
@@ -18,7 +18,7 @@ import { useTheme } from './lib/useTheme.ts';
 import { useInventory } from './lib/useInventory.ts';
 import type { FocusObject } from './lib/objectDetail.ts';
 import { clearWorkspaceCaches, createWorkspaceContext } from './lib/workspace.ts';
-import type { WorkspaceMode } from './lib/workspace.ts';
+import type { WorkspaceContext, WorkspaceMode } from './lib/workspace.ts';
 import { AppShell } from './components/AppShell.tsx';
 import { ErrorState, LoadingState } from './components/DataStates.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
@@ -68,12 +68,6 @@ export function App() {
   // for that response so parallel first-load requests cannot create competing cookies.
   const sessionReady = Boolean(sessionQuery.data);
   const orgsQuery = useQuery({ queryKey: ['orgs'], queryFn: api.orgs, enabled: !hosted || sessionReady });
-  const healthQuery = useQuery({
-    queryKey: ['health'],
-    queryFn: api.health,
-    refetchInterval: 60_000,
-    enabled: !hosted || sessionReady,
-  });
 
   const [page, setPage] = useState<Page>('dashboard');
   const [selectedAlias, setSelectedAlias] = useState<string | null>(() => getSelectedOrg());
@@ -95,6 +89,13 @@ export function App() {
   const context = createWorkspaceContext(mode, selectedOrg);
   const inventoryQuery = useInventory(context);
   const searchResults = useMemo(() => buildCommandResults(inventoryQuery.data ?? null), [inventoryQuery.data]);
+
+  const activeContextIdRef = useRef<string | null>(context?.contextId ?? null);
+  activeContextIdRef.current = context?.contextId ?? null;
+  const refreshControllerRef = useRef<AbortController | null>(null);
+  const refreshContextRef = useRef<string | null>(context?.contextId ?? null);
+
+  const cancelRefresh = () => refreshControllerRef.current?.abort();
 
   const { mutate: mutateMode, isPending: isTogglingMode } = useMutation({
     mutationFn: api.setMode,
@@ -135,14 +136,37 @@ export function App() {
   });
 
   const refreshInventory = useMutation({
-    mutationFn: () => {
-      if (!context?.alias) throw new Error('Select an org first.');
-      return api.inventory(context.alias, { force: true });
+    mutationFn: async (target: WorkspaceContext | null) => {
+      // Supersede any refresh started under a previous org or mode.
+      refreshControllerRef.current?.abort();
+      const controller = new AbortController();
+      refreshControllerRef.current = controller;
+      refreshContextRef.current = target?.contextId ?? null;
+      try {
+        if (!target?.alias) throw new Error('Select an org first.');
+        return await api.inventory(target.alias, { force: true, signal: controller.signal });
+      } finally {
+        if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
+      }
     },
-    onSuccess: (snapshot: InventorySnapshot) => {
-      queryClient.setQueryData<InventorySnapshot>(['inventory', context?.contextId ?? 'none'], snapshot);
+    onSuccess: (snapshot: InventorySnapshot, target) => {
+      // A late response must never replace a different org's cached snapshot.
+      if (!target || target.contextId !== activeContextIdRef.current) return;
+      queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
+    },
+    onError: (error) => {
+      // Cancellation is a user action, not a failure worth surfacing as an error.
+      if (error instanceof ApiError && error.code === 'ABORTED') return;
     },
   });
+
+  useEffect(() => {
+    const nextContextId = context?.contextId ?? null;
+    if (refreshContextRef.current !== nextContextId) refreshControllerRef.current?.abort();
+    refreshContextRef.current = nextContextId;
+  }, [context?.contextId]);
+
+  useEffect(() => () => refreshControllerRef.current?.abort(), []);
 
   // Feedback is transient: it confirms the switch without becoming permanent chrome.
   useEffect(() => {
@@ -303,9 +327,12 @@ export function App() {
         onGoToOrgs: () => setPage('orgs'),
         onToggleMode: toggleMode,
         isTogglingMode,
-        refreshInventory: () => refreshInventory.mutate(),
+        refreshInventory: () => refreshInventory.mutate(context),
+        cancelRefresh,
         isRefreshingInventory: refreshInventory.isPending,
-        refreshError: refreshInventory.error?.message ?? '',
+        refreshError: refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
+          ? ''
+          : refreshInventory.error?.message ?? '',
       }}
     >
       <AppShell
@@ -321,8 +348,6 @@ export function App() {
         selectedAlias={selectedAlias}
         onSelectOrg={selectOrg}
         onGoToOrgs={() => setPage('orgs')}
-        cliInstalled={healthQuery.data?.cli.installed ?? null}
-        cliVersion={healthQuery.data?.cli.version ?? null}
         theme={theme}
         searchResults={searchResults}
         onSelectSearchResult={selectSearchResult}

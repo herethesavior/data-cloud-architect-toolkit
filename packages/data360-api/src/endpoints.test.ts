@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CliError } from '@dcat/salesforce-cli';
 import {
+  buildMappingPath,
   buildTransformDetailPath,
   buildTransformRunHistoryPath,
   buildTransformSchedulePath,
@@ -58,5 +59,15 @@ describe('allowlisted transform paths', () => {
       expect(() => buildTransformDetailPath('Account_Transform', version), version).toThrow(CliError);
     }
     expect(() => buildTransformSubresourcePath('Account_Transform', 'delete' as never, '65.0')).toThrow(CliError);
+  });
+
+  it('builds the required, encoded DMO filter for mapping lookups', () => {
+    expect(buildMappingPath('Account_DMO__dlm', '65.0')).toBe(
+      'services/data/v65.0/ssot/data-model-object-mappings?dmoDeveloperName=Account_DMO__dlm',
+    );
+    expect(buildMappingPath('Customer & Partner__dlm', '65.0')).toBe(
+      'services/data/v65.0/ssot/data-model-object-mappings?dmoDeveloperName=Customer%20%26%20Partner__dlm',
+    );
+    expect(() => buildMappingPath('Account_DMO__dlm', 'latest')).toThrow(CliError);
   });
 });

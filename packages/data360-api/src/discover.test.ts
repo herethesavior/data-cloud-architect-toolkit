@@ -18,9 +18,12 @@ import {
 import { classifyRestFailure } from './capabilities.ts';
 import { discoverInventory, extractHttpStatus } from './discover.ts';
 import type { RestClient } from './discover.ts';
+import { buildMappingPath } from './endpoints.ts';
 
 const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
+const dmoApiNames = ['Account_DMO__dlm', 'Contact_DMO__dlm', 'Order_DMO__dlm'];
+const mappingPaths = dmoApiNames.map((name) => buildMappingPath(name, '65.0'));
 const functionalityNotEnabled = JSON.stringify([{
   message: 'This feature is not currently enabled for this user type or org: [CdpDataSpace]',
   errorCode: 'FUNCTIONALITY_NOT_ENABLED',
@@ -33,6 +36,7 @@ function fakeCli(overrides: Record<string, string | Error | Array<string | Error
     [`${base}/data-lake-objects`]: dlosJson,
     [`${base}/data-model-objects`]: dmosJson,
     [`${base}/data-model-object-mappings`]: mappingsJson,
+    ...Object.fromEntries(dmoApiNames.map((name) => [buildMappingPath(name, '65.0'), mappingsJson])),
     [`${base}/data-streams`]: dataStreamsJson,
     [`${base}/data-transforms`]: dataTransformsJson,
     ...overrides,
@@ -72,7 +76,8 @@ describe('live Data 360 discovery', () => {
   });
 
   it('builds a complete normalized snapshot with provenance and certainty labels', async () => {
-    const inventory = await discoverInventory({ cli: fakeCli(), alias: org.alias, org });
+    const cli = fakeCli();
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
 
     expect(inventory).toMatchObject({
       mode: 'live',
@@ -87,6 +92,8 @@ describe('live Data 360 discovery', () => {
     expect(inventory.dataTransforms).toHaveLength(1);
     expect(inventory.capabilities.map((capability) => capability.status)).toEqual(Array(7).fill('available'));
     expect(inventory.warnings).toHaveLength(0);
+    expect(pathCalls(cli, `${base}/data-model-object-mappings`)).toBe(0);
+    for (const path of mappingPaths) expect(pathCalls(cli, path)).toBe(1);
     expect(inventory.dlos[0]?.provenance).toMatchObject({
       orgId: org.orgId,
       orgAlias: org.alias,
@@ -96,6 +103,77 @@ describe('live Data 360 discovery', () => {
     expect(inventory.dmos[0]?.fields[0]?.provenance.confidence).toBe('source');
     expect(inventory.relationships.some((edge) => edge.certainty === 'confirmed')).toBe(true);
     expect(inventory.relationships.some((edge) => edge.certainty === 'inferred')).toBe(true);
+  });
+
+  it('treats a live org with zero DMOs as an empty result and skips invalid mapping lookups', async () => {
+    const cli = fakeCli({
+      [`${base}/data-model-objects`]: JSON.stringify({ dataModelObject: [] }),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+
+    expect(inventory.mode).toBe('live');
+    expect(inventory.dmos).toEqual([]);
+    expect(inventory.relationships).toEqual([]);
+    expect(inventory.capabilities.find((entry) => entry.family === 'dmos')).toMatchObject({
+      status: 'available',
+      itemCount: 0,
+    });
+    expect(inventory.capabilities.find((entry) => entry.family === 'mappings')).toMatchObject({
+      status: 'not-started',
+      itemCount: 0,
+      message: /no DMOs were found/,
+    });
+    expect(inventory.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: 'mappings', code: 'MAPPINGS_SKIPPED', severity: 'info' }),
+    ]));
+    expect(inventory.warnings.some((warning) => warning.severity === 'error')).toBe(false);
+    expect(pathCalls(cli, `${base}/data-model-object-mappings`)).toBe(0);
+    for (const path of mappingPaths) expect(pathCalls(cli, path)).toBe(0);
+  });
+
+  it('queries mappings by encoded DMO developer name and accepts documented envelopes', async () => {
+    const dmoName = 'Customer & Partner__dlm';
+    const path = buildMappingPath(dmoName, '65.0');
+    const cli = fakeCli({
+      [`${base}/data-model-objects`]: JSON.stringify({ records: [{ apiName: dmoName }] }),
+      [path]: JSON.stringify({
+        objectSourceTargetMaps: [{
+          developerName: 'Customer_Map__m',
+          sourceEntityDeveloperName: 'Customer_DLO__dll',
+          targetEntityDeveloperName: dmoName,
+          fieldMappings: [{ sourceFieldDeveloperName: 'Id', targetFieldDeveloperName: 'Id' }],
+        }],
+      }),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+
+    expect(path).toContain('dmoDeveloperName=Customer%20%26%20Partner__dlm');
+    expect(pathCalls(cli, path)).toBe(1);
+    expect(pathCalls(cli, `${base}/data-model-object-mappings`)).toBe(0);
+    expect(inventory.mappings).toHaveLength(1);
+    expect(inventory.mappings[0]).toMatchObject({
+      apiName: 'Customer_Map__m',
+      sourceObject: 'Customer_DLO__dll',
+      targetObject: dmoName,
+      fieldMappings: [{ sourceField: 'Id', targetField: 'Id' }],
+    });
+  });
+
+  it('keeps real mapping lookup errors visible instead of treating them as empty data', async () => {
+    const message = 'Salesforce CLI command failed: INVALID_INPUT: DMO or Source Object (CRM) developer Name is missing';
+    const cli = fakeCli(Object.fromEntries(
+      mappingPaths.map((path) => [path, new CliError('COMMAND_FAILED', message)]),
+    ));
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+
+    expect(inventory.capabilities.find((entry) => entry.family === 'mappings')).toMatchObject({
+      status: 'error',
+      itemCount: 0,
+      message,
+    });
+    expect(inventory.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: 'mappings', code: 'ERROR', severity: 'error' }),
+    ]));
   });
 
   it('keeps other families when one endpoint is forbidden', async () => {
@@ -116,9 +194,9 @@ describe('live Data 360 discovery', () => {
   });
 
   it('treats a 404 as unsupported rather than an empty dataset', async () => {
-    const cli = fakeCli({
-      [`${base}/data-model-object-mappings`]: new CliError('COMMAND_FAILED', unsupportedRestOutput),
-    });
+    const cli = fakeCli(Object.fromEntries(
+      mappingPaths.map((path) => [path, new CliError('COMMAND_FAILED', unsupportedRestOutput)]),
+    ));
     const inventory = await discoverInventory({ cli, alias: org.alias, org });
     const capability = inventory.capabilities.find((entry) => entry.family === 'mappings');
 
@@ -136,7 +214,10 @@ describe('live Data 360 discovery', () => {
       [`${base}/data-spaces`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
       [`${base}/data-lake-objects`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
       [`${base}/data-model-objects`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
-      [`${base}/data-model-object-mappings`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+      ...Object.fromEntries(mappingPaths.map((path) => [
+        path,
+        new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+      ])),
       [`${base}/data-streams`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
       [`${base}/data-transforms`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
     });

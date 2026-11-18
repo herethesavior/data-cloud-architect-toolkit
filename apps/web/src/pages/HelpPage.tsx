@@ -8,6 +8,37 @@ interface HelpPageProps {
   onNavigate: (page: Page) => void;
 }
 
+const REPOSITORY_URL = 'https://github.com/herethesavior/data-cloud-architect-toolkit';
+const ISSUES_URL = `${REPOSITORY_URL}/issues`;
+const LINKEDIN_URL = 'https://www.linkedin.com/in/ryanjoshuadc';
+
+interface ExternalLinkProps {
+  href: string;
+  label: string;
+  description: string;
+  primary?: boolean;
+}
+
+function ExternalLink({ href, label, description, primary = false }: ExternalLinkProps) {
+  const openLabel = `${label} (opens in a new tab)`;
+  return (
+    <div className="rounded-lg border border-line bg-surface-alt p-3">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={openLabel}
+        title={openLabel}
+        className={`${primary ? 'btn-primary' : 'btn-secondary'} w-full`}
+      >
+        <span>{label}</span>
+        <Icon name="arrowRight" size={16} />
+      </a>
+      <p className="mt-2 text-xs text-ink-soft">{description}</p>
+    </div>
+  );
+}
+
 const editions: { title: string; description: string; icon: IconName }[] = [
   {
     title: 'Local edition',
@@ -299,6 +330,64 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
               Add them before using the hosted edition for regulated data. Report security issues privately through the
               repository’s security advisory feature, and never include real credentials or customer data in a report.
             </p>
+          </Panel>
+        </div>
+      ),
+    },
+    {
+      id: 'about',
+      label: 'About & contact',
+      content: (
+        <div className="space-y-5">
+          <Panel>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <span className="grid size-14 shrink-0 place-items-center rounded-xl bg-brand-soft text-base font-semibold text-brand">
+                RJ
+              </span>
+              <div className="min-w-0">
+                <p className="label-xs">Created by</p>
+                <h3 className="mt-1 text-lg font-semibold text-ink">Ryan Joshua Dela Cruz</h3>
+                <p className="mt-0.5 text-sm font-medium text-brand">Technical Architect at Salesforce</p>
+              </div>
+            </div>
+            <p className="mt-5 max-w-3xl text-sm leading-relaxed text-ink-soft">
+              DCAT grew out of a simple need: make Data 360 model discovery legible without turning it into a
+              credential-handling exercise. It replaces scattered CLI output and screenshots with a grounded,
+              status-aware view of Data Spaces, DLOs, DMOs, mappings, streams, and transforms.
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-soft">
+              The design goal is to show what metadata actually says — including gaps, unsupported endpoints, and
+              provenance — while keeping authentication with Salesforce CLI and exports under the user’s control.
+            </p>
+            <p className="mt-4 rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
+              Created in a personal capacity. DCAT is not an official Salesforce product.
+            </p>
+          </Panel>
+
+          <Panel>
+            <h3 className="text-lg font-semibold text-ink">Get in touch</h3>
+            <p className="mt-1 text-sm text-ink-soft">
+              Bug reports and feature requests are best tracked in the repository. For professional background, use
+              LinkedIn. Both links open in a new tab.
+            </p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <ExternalLink
+                href={ISSUES_URL}
+                label="Open GitHub Issues"
+                description="Report a bug, request a feature, or ask a question."
+                primary
+              />
+              <ExternalLink
+                href={REPOSITORY_URL}
+                label="View the repository"
+                description="Source, setup instructions, and release notes."
+              />
+              <ExternalLink
+                href={LINKEDIN_URL}
+                label="Connect on LinkedIn"
+                description="Professional profile and background."
+              />
+            </div>
           </Panel>
         </div>
       ),

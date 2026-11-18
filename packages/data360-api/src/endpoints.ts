@@ -20,6 +20,12 @@ export function buildData360Path(family: ResourceFamily, apiVersion: string): st
   return `services/data/v${apiVersion}${DATA360_ENDPOINT_REGISTRY[family]}`;
 }
 
+/** Salesforce requires a DMO developer name filter for mapping lookups. */
+export function buildMappingPath(dmoApiName: string, apiVersion: string): string {
+  const base = buildData360Path('mappings', apiVersion);
+  return `${base}?dmoDeveloperName=${encodeURIComponent(dmoApiName)}`;
+}
+
 export function buildVersionsPath(): string {
   return 'services/data/';
 }
