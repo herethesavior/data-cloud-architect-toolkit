@@ -51,6 +51,7 @@ describe('Dashboard discovery health', () => {
         <InventoryActionsProvider value={{
           context,
           mode: 'live',
+          orgList: { status: 'idle' },
           onGoToOrgs: vi.fn(),
           onToggleMode: vi.fn(),
           isTogglingMode: false,
@@ -69,5 +70,32 @@ describe('Dashboard discovery health', () => {
     expect(screen.queryByText('Inventory loaded with gaps')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
     expect(screen.getByText(/no retry is needed/)).toBeInTheDocument();
+  });
+
+  it('shows an org-check skeleton instead of the idle no-org state while discovery is running', () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <InventoryActionsProvider value={{
+          context: null,
+          mode: 'live',
+          orgList: { status: 'checking' },
+          onGoToOrgs: vi.fn(),
+          onToggleMode: vi.fn(),
+          isTogglingMode: false,
+          refreshInventory: vi.fn(),
+          cancelRefresh: vi.fn(),
+          isRefreshingInventory: false,
+          refreshError: '',
+        }}>
+          <Dashboard context={null} mode="live" onNavigate={vi.fn()} />
+        </InventoryActionsProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Checking for Salesforce orgs…');
+    expect(screen.getByRole('button', { name: 'Use demo mode' })).toBeInTheDocument();
+    expect(screen.queryByText('No org selected')).not.toBeInTheDocument();
   });
 });

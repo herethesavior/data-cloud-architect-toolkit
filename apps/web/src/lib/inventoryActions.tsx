@@ -2,9 +2,15 @@ import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import type { WorkspaceContext } from './workspace.ts';
 
+export type OrgListState =
+  | { status: 'checking' }
+  | { status: 'error'; message: string; retry: () => void }
+  | { status: 'idle' };
+
 export interface InventoryActions {
   context: WorkspaceContext | null;
   mode: 'demo' | 'live';
+  orgList: OrgListState;
   onGoToOrgs: () => void;
   onToggleMode: () => void;
   isTogglingMode: boolean;

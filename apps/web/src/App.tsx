@@ -6,6 +6,7 @@ import { buildCommandResults } from './lib/commandSearch.ts';
 import { isHosted } from './lib/hosted.ts';
 import type { CommandResult } from './lib/commandSearch.ts';
 import { InventoryActionsProvider } from './lib/inventoryActions.tsx';
+import type { OrgListState } from './lib/inventoryActions.tsx';
 import {
   getHiddenOrgs,
   getModePreference,
@@ -96,6 +97,11 @@ export function App() {
   const context = createWorkspaceContext(mode, selectedOrg);
   const inventoryQuery = useInventory(context);
   const searchResults = useMemo(() => buildCommandResults(inventoryQuery.data ?? null), [inventoryQuery.data]);
+  let orgList: OrgListState = { status: 'idle' };
+  if (orgsQuery.isFetching) orgList = { status: 'checking' };
+  else if (orgsQuery.isError) {
+    orgList = { status: 'error', message: orgsQuery.error.message, retry: () => void orgsQuery.refetch() };
+  }
 
   const activeContextIdRef = useRef<string | null>(context?.contextId ?? null);
   activeContextIdRef.current = context?.contextId ?? null;
@@ -373,6 +379,7 @@ export function App() {
       value={{
         context,
         mode,
+        orgList,
         onGoToOrgs: () => navigate('orgs'),
         onToggleMode: toggleMode,
         isTogglingMode,
@@ -394,6 +401,7 @@ export function App() {
         modeError={modeError}
         onRetryMode={retryMode}
         orgs={visibleOrgs}
+        orgsLoading={orgsQuery.isFetching}
         selectedAlias={selectedAlias}
         onSelectOrg={selectOrg}
         onGoToOrgs={() => navigate('orgs')}

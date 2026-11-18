@@ -23,6 +23,7 @@ function renderExplorer(inventory: InventorySnapshot = structuredClone(demoInven
       <InventoryActionsProvider value={{
         context,
         mode: 'live',
+        orgList: { status: 'idle' },
         onGoToOrgs: vi.fn(),
         onToggleMode: vi.fn(),
         isTogglingMode: false,

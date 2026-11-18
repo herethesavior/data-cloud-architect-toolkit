@@ -3,9 +3,14 @@ import { Icon } from './Icon.tsx';
 import type { IconName } from './Icon.tsx';
 import { Button } from './ui/index.ts';
 
-export function LoadingState({ label = 'Loading…' }: { label?: string }) {
+interface LoadingStateProps {
+  label?: string;
+  action?: ReactNode;
+}
+
+export function LoadingState({ label = 'Loading…', action }: LoadingStateProps) {
   return (
-    <div className="panel flex flex-col gap-3 px-6 py-9" role="status" aria-live="polite">
+    <div className="panel flex flex-col gap-3 px-6 py-9" role="status" aria-live="polite" aria-busy="true">
       <div className="flex items-center gap-2 text-sm text-ink-soft">
         <span aria-hidden="true" className="loading-dot size-2 rounded-full bg-brand" />
         <span>{label}</span>
@@ -15,6 +20,7 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
         <div className="skeleton h-3 w-full rounded" />
         <div className="skeleton h-3 w-5/6 rounded" />
       </div>
+      {action ? <div className="mt-1 flex flex-wrap justify-center gap-2">{action}</div> : null}
     </div>
   );
 }

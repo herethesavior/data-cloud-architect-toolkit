@@ -372,6 +372,38 @@ test('switching demo to live clears demo orgs from the live inventory list', asy
   await expect(page.getByText('demo-uat', { exact: true })).toHaveCount(0);
 });
 
+test('switching to live shows an org-check skeleton while the org list is pending', async ({ page }) => {
+  const state = createConnectorState();
+  await mockConnector(page, state);
+  await page.goto('/');
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+
+  let releaseOrgs!: () => void;
+  const orgsHeld = new Promise<void>((resolve) => {
+    releaseOrgs = resolve;
+  });
+  await page.route('**/api/orgs', async (route: Route) => {
+    await orgsHeld;
+    await route.fulfill({ json: [] });
+  });
+
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+
+  const status = page.getByRole('status').filter({ hasText: 'Checking for Salesforce orgs…' });
+  await expect(status).toBeVisible();
+  await expect(page.locator('#main-content').getByText('No org selected')).toHaveCount(0);
+  await expect(page.locator('#main-content').getByRole('button', { name: 'Use demo mode' })).toBeVisible();
+  await expect(page.getByLabel('Selected organization')).toContainText('Checking for orgs…');
+
+  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await expect(status).toBeVisible();
+  await expect(page.getByText('No authenticated orgs yet')).toHaveCount(0);
+
+  releaseOrgs();
+  await expect(page.getByText('No authenticated orgs yet')).toBeVisible();
+  await expect(status).toHaveCount(0);
+});
+
 test('live orgs can be hidden from DCAT and restored without logging out', async ({ page }) => {
   const state = createConnectorState();
   state.mode = 'live';

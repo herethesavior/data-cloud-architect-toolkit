@@ -202,6 +202,10 @@ export function OrgConnections({
   const step2Done = Boolean(connectedAlias)
     || activeOrgs.some((org) => org.connectedStatus === 'Connected');
   const inventoryLocked = liveMode && (!bridgeReady || !step2Done);
+  // `isFetching` covers both the first load and the refetch after a mode switch,
+  // when the shared cache was seeded with an empty list and `isPending` is false.
+  const orgListChecking = orgsQuery.isFetching;
+  const orgListReady = !orgListChecking && !orgsQuery.isError;
 
   useEffect(() => {
     if (confirmingAlias && !activeOrgs.some((org) => org.alias === confirmingAlias)) {
@@ -594,22 +598,30 @@ export function OrgConnections({
               {removalNotice}
             </p>
           ) : null}
-          {inventoryLocked && !bridgeReady ? (
+          {orgListChecking ? <LoadingState label="Checking for Salesforce orgs…" /> : null}
+          {!orgListChecking && orgsQuery.isError ? (
+            <ErrorState
+              title="Couldn't check for Salesforce orgs"
+              message={orgsQuery.error.message}
+              onRetry={() => void orgsQuery.refetch()}
+              retryLabel="Retry org check"
+            />
+          ) : null}
+          {orgListReady && inventoryLocked && !bridgeReady ? (
             <EmptyState
               icon="plug"
               title="Finish setup to view live inventory"
               description="Connect the local bridge in step 1, then authenticate an org in step 2. Demo mode works without setup."
             />
-          ) : inventoryLocked ? (
+          ) : null}
+          {orgListReady && inventoryLocked && bridgeReady ? (
             <EmptyState
               icon="plug"
               title="Connect an org to view live inventory"
               description="Authenticate an org in step 2. Its Data 360 metadata will appear here once the CLI reports it as connected."
             />
           ) : null}
-          {!inventoryLocked && orgsQuery.isPending ? <LoadingState label="Reading org list…" /> : null}
-          {!inventoryLocked && orgsQuery.isError ? <ErrorState message={orgsQuery.error.message} onRetry={() => void orgsQuery.refetch()} /> : null}
-          {!inventoryLocked && !orgsQuery.isPending && !orgsQuery.isError && activeOrgs.length === 0 ? (
+          {orgListReady && !inventoryLocked && activeOrgs.length === 0 ? (
             <EmptyState
               icon="plug"
               title="No authenticated orgs yet"
@@ -618,12 +630,12 @@ export function OrgConnections({
                 : 'Connect an org in step 2 to load its inventory, or use demo mode to explore sample metadata.'}
             />
           ) : null}
-          {!inventoryLocked && activeOrgs.length > 0 ? (
+          {orgListReady && !inventoryLocked && activeOrgs.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-line">
               <DataTable columns={columns} rows={activeOrgs} getRowKey={(org) => org.alias} ariaLabel="Authenticated Salesforce orgs" />
             </div>
           ) : null}
-          {showHidden && hiddenOrgs.length > 0 ? (
+          {orgListReady && showHidden && hiddenOrgs.length > 0 ? (
             <div className="mt-4 space-y-2 rounded-lg border border-line bg-surface-alt p-3">
               <p className="text-xs text-ink-soft">
                 Hidden from DCAT only. Restoring an org does not change Salesforce CLI authentication.
