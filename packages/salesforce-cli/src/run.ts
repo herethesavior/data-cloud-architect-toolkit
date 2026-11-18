@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import type { Readable } from 'node:stream';
 import { CliError } from './errors.ts';
 import { redactSensitive } from './redact.ts';
@@ -27,7 +27,7 @@ export function resolveSfShim(shimPath: string, depth = 0): ResolvedCliCommand |
   }
 
   const match = /"([^"]+node\.exe)"\s+--no-deprecation\s+"([^"]+run[^"]*)"/i.exec(contents);
-  const expand = (value: string): string => resolve(value.replace(/%~dp0/g, `${dirname(shimPath)}\\`));
+  const expand = (value: string): string => resolve(value.replace(/%~dp0/g, `${dirname(shimPath)}${sep}`));
   const nodeExe = match?.[1] ? expand(match[1]) : null;
   const rawRun = match?.[2] ? expand(match[2]) : null;
   if (!nodeExe || !rawRun || !existsSync(nodeExe)) return null;
