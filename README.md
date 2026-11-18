@@ -161,6 +161,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 | Data Spaces | Spaces with linked object and stream counts. |
 | DLO / DMO Explorer | Searchable objects, relationship badges, tabbed detail drawers, and exports. |
 | Mapping Explorer | Source-to-target mappings with field-level detail. |
+| Data Stream Explorer | Ingestion streams with source connectors, target objects, status, cadence, and provenance. |
 | Data Transform Explorer | Transform overview, lineage, definition, runs, schedules, and raw metadata. |
 | ERD Explorer | Confirmed and inferred relationships with a certainty filter. |
 | Data Dictionary | Unified field reference. |

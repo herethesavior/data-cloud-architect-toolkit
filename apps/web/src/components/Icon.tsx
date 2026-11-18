@@ -7,6 +7,7 @@ export type IconName =
   | 'database'
   | 'cube'
   | 'route'
+  | 'stream'
   | 'graph'
   | 'book'
   | 'settings'
@@ -73,6 +74,12 @@ const paths: Record<IconName, ReactNode> = {
       <circle cx="6" cy="19" r="2.5" />
       <circle cx="18" cy="5" r="2.5" />
       <path d="M8.5 19H14a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h3.5" />
+    </>
+  ),
+  stream: (
+    <>
+      <path d="M3 8h10a3 3 0 0 1 0 6h-2a3 3 0 0 0 0 6h10" />
+      <path d="m18 17 3 3-3 3" />
     </>
   ),
   graph: (

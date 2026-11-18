@@ -5,7 +5,7 @@ export type ExplorerKind = 'dlo' | 'dmo';
 
 /** Request from global search to open a specific drawer after navigation. */
 export interface FocusObject {
-  kind: ExplorerKind | 'transform';
+  kind: ExplorerKind | 'stream' | 'transform';
   apiName: string;
 }
 

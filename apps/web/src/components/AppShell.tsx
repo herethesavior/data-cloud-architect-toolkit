@@ -27,6 +27,7 @@ const pageIcons: Record<Page, IconName> = {
   dlos: 'database',
   dmos: 'cube',
   mappings: 'route',
+  'data-streams': 'stream',
   'data-transforms': 'sparkles',
   erd: 'graph',
   dictionary: 'book',
@@ -245,8 +246,11 @@ export function AppShell({
 
   const selectSearchResult = (result: CommandResult) => {
     setPaletteOpen(false);
-    if (result.kind === 'dlo' || result.kind === 'dmo' || result.kind === 'transform') onSelectSearchResult(result);
-    else setMetadataResult(result);
+    if (result.kind === 'dlo' || result.kind === 'dmo' || result.kind === 'stream' || result.kind === 'transform') {
+      onSelectSearchResult(result);
+    } else {
+      setMetadataResult(result);
+    }
   };
 
   return (

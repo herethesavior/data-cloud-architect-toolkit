@@ -470,6 +470,45 @@ test('live export surfaces the metadata sharing notice', async ({ page }) => {
   await expect(page.getByText(notice)).toBeVisible();
 });
 
+test('data stream explorer shows grounded source-to-target detail and visible exports', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Stream Explorer' }).click();
+  await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
+
+  const rows = page.getByRole('table', { name: 'Data Stream Explorer results' });
+  await expect(rows.getByText('Accounts Stream', { exact: true })).toBeVisible();
+  await expect(rows.getByText('Web Events Stream', { exact: true })).toBeVisible();
+  await expect(rows.getByText('Paused', { exact: true })).toBeVisible();
+
+  await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('Paused');
+  await expect(page.getByText('1 of 6 streams')).toBeVisible();
+  await expect(rows.getByText('Web Events Stream', { exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('all');
+
+  await rows.getByRole('button', { name: 'Details', exact: true }).first().click();
+  const drawer = page.getByRole('dialog', { name: 'Accounts Stream' });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText('Data Stream Explorer / Accounts Stream')).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Target DLO' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Raw Metadata' })).toBeVisible();
+
+  await drawer.getByRole('tab', { name: 'Target DLO' }).click();
+  await expect(drawer.getByText('Known in inventory')).toBeVisible();
+  await expect(drawer.getByText(/No stream lineage is inferred/)).toBeVisible();
+  await expect(drawer.getByText(/does not invent the target object/)).toHaveCount(0);
+
+  await drawer.getByRole('tab', { name: 'Raw Metadata' }).click();
+  await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();
+  await drawer.getByRole('button', { name: 'Close details' }).last().click();
+
+  await page.getByRole('button', { name: 'Export' }).click();
+  const menu = page.getByRole('menu', { name: 'Export' });
+  await expect(menu.getByRole('menuitem', { name: /CSV/ })).toContainText('Visible streams');
+  await expect(menu.getByRole('menuitem', { name: /JSON/ })).toContainText('Complete machine-readable inventory');
+  await page.keyboard.press('Escape');
+});
+
 test('data transform explorer shows grounded detail, lineage, and run states', async ({ page }) => {
   await openDemo(page);
   await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Transform Explorer' }).click();
@@ -661,6 +700,7 @@ test('every screen fits a phone viewport', async ({ page }) => {
     'DLO Explorer',
     'DMO Explorer',
     'Mapping Explorer',
+    'Data Stream Explorer',
     'Data Transform Explorer',
     'ERD Explorer',
     'Data Dictionary',
@@ -715,7 +755,7 @@ test('command palette Enter selects a DMO and navigates to its explorer', async 
   await expect(drawer.getByText('DMO Explorer / Click Event DMO')).toBeVisible();
 });
 
-test('command palette opens a read-only detail dialog for types without an explorer', async ({ page }) => {
+test('command palette opens stream results in the Data Stream Explorer', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await openDemo(page);
   await page.getByRole('button', { name: 'Search metadata' }).click();
@@ -724,12 +764,16 @@ test('command palette opens a read-only detail dialog for types without an explo
   await palette.getByRole('combobox', { name: 'Search inventory metadata' }).fill('Accounts Stream');
   await page.keyboard.press('Enter');
 
+  await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
   const drawer = page.getByRole('dialog', { name: 'Accounts Stream' });
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByText('Search / Data Stream')).toBeVisible();
+  await expect(drawer.getByText('Data Stream Explorer / Accounts Stream')).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Target DLO' })).toBeVisible();
   await expect(drawer.getByText('Salesforce CRM', { exact: true })).toBeVisible();
-  await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();
 
+  await drawer.getByRole('tab', { name: 'Raw Metadata' }).click();
+  await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();
   await drawer.getByRole('button', { name: 'Copy metadata JSON' }).click();
   await expect(drawer.getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('"apiName": "Accounts_Stream"');

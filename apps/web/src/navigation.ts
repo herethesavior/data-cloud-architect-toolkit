@@ -5,6 +5,7 @@ export type Page =
   | 'dlos'
   | 'dmos'
   | 'mappings'
+  | 'data-streams'
   | 'data-transforms'
   | 'erd'
   | 'dictionary'
@@ -35,6 +36,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'dlos', label: 'DLO Explorer' },
       { id: 'dmos', label: 'DMO Explorer' },
       { id: 'mappings', label: 'Mapping Explorer' },
+      { id: 'data-streams', label: 'Data Stream Explorer' },
       { id: 'data-transforms', label: 'Data Transform Explorer' },
       { id: 'erd', label: 'ERD Explorer' },
     ],
@@ -55,6 +57,7 @@ export const PAGE_TITLES: Record<Page, string> = {
   dlos: 'DLO Explorer',
   dmos: 'DMO Explorer',
   mappings: 'Mapping Explorer',
+  'data-streams': 'Data Stream Explorer',
   'data-transforms': 'Data Transform Explorer',
   erd: 'ERD Explorer',
   dictionary: 'Data Dictionary',
