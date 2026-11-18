@@ -59,16 +59,23 @@ function createConnectorState(): ConnectorState {
   };
 }
 
+interface MockConnectorOptions {
+  modeDelayMs?: number;
+  modeCalls?: string[];
+}
+
 /** Mock connector: no CLI, no real org, deterministic and mode-aware fixtures. */
-async function mockConnector(page: Page, state: ConnectorState) {
+async function mockConnector(page: Page, state: ConnectorState, options: MockConnectorOptions = {}) {
   await page.route('**/api/session', (route: Route) =>
     route.fulfill({ json: { token: 'e2e-token', mode: state.mode } }),
   );
   await page.route('**/api/mode', async (route: Route) => {
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON() as { mode?: string };
+      options.modeCalls?.push(body.mode ?? '');
       if (body.mode === 'demo' || body.mode === 'live') state.mode = body.mode;
     }
+    if (options.modeDelayMs) await new Promise((resolve) => setTimeout(resolve, options.modeDelayMs));
     await route.fulfill({ json: { mode: state.mode } });
   });
   await page.route('**/api/health', (route: Route) =>
@@ -968,4 +975,100 @@ test('command palette no-inventory state leads with org selection and demo fallb
   await expect(palette.getByText('No inventory available')).toBeVisible();
   await expect(palette.getByRole('button', { name: 'Select an org' })).toBeVisible();
   await expect(palette.getByRole('button', { name: 'Use demo mode' })).toBeVisible();
+});
+
+test('rapid mode toggles queue only one switch and settle in the requested mode', async ({ page }) => {
+  const state = createConnectorState();
+  const modeCalls: string[] = [];
+  await mockConnector(page, state, { modeDelayMs: 500, modeCalls });
+  await page.goto('/');
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+
+  const toggle = page.locator('header').getByRole('button', { name: 'Switch to live mode' });
+  await toggle.evaluate((button) => {
+    button.click();
+    button.click();
+    button.click();
+  });
+
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+  expect(modeCalls).toEqual(['live']);
+  await expect(page.locator('header').getByRole('button', { name: 'Switch to demo mode' })).toBeEnabled();
+});
+
+test('a refresh started before a mode switch cannot repopulate the old context', async ({ page }) => {
+  const state = createConnectorState();
+  await mockConnector(page, state);
+  await page.goto('/');
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+
+  let refreshCompleted = false;
+  await page.route('**/api/orgs/*/inventory?refresh=1', async (route: Route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.fulfill({ json: demoInventory });
+    refreshCompleted = true;
+  });
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  await page.getByRole('button', { name: 'Refresh inventory' }).click();
+  await expect(page.getByTestId('inventory-refresh-skeleton')).toBeVisible();
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+  await expect(page.getByTestId('inventory-refresh-skeleton')).toHaveCount(0);
+  await expect(page.getByText('Sample inventory')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect.poll(() => refreshCompleted).toBe(true);
+  expect(pageErrors).toEqual([]);
+
+  await page.getByRole('button', { name: 'Switch to demo mode' }).click();
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toHaveCount(0);
+});
+
+test('pending mode switches keep every demo recovery path disabled and single-shot', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  state.orgs = [];
+  const modeCalls: string[] = [];
+  await seedLiveMode(page);
+  await mockConnector(page, state, { modeDelayMs: 600, modeCalls });
+  await page.goto('/');
+
+  await expect(page.locator('header').getByText('LIVE · NOT CONNECTED', { exact: true })).toBeVisible();
+  const headerRecovery = page.locator('header').getByRole('button', { name: 'Switch to demo mode' });
+  await headerRecovery.click();
+  await expect(headerRecovery).toBeDisabled();
+
+  await page.keyboard.press('Control+k');
+  const palette = page.getByRole('dialog', { name: 'Search metadata' });
+  await expect(palette.getByRole('button', { name: 'Use demo mode' })).toBeDisabled();
+
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  expect(modeCalls).toEqual(['demo']);
+});
+
+test('browser history during a live org switch keeps the selected context', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/#dlos');
+
+  const rows = page.getByRole('table', { name: 'DLO Explorer results' });
+  await expect(rows.getByText('Production Account')).toBeVisible();
+  await page.getByLabel('Selected organization').selectOption('sandbox-org');
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+
+  await page.goBack();
+  await expect(page.locator('h1')).toHaveText('DLO Explorer');
+  await expect(rows.getByText('Sandbox Account')).toBeVisible();
+  await expect(rows.getByText('Production Account')).toHaveCount(0);
+
+  await page.goForward();
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+  await expect(page.getByText('Sandbox Account')).toHaveCount(0);
 });

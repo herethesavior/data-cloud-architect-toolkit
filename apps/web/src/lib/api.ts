@@ -188,34 +188,53 @@ async function hostedUsesFixtures(): Promise<boolean> {
 
 /** Send one typed operation to the paired local bridge and wait for its result. */
 async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
+
+  // A cancelled browser fetch does not cancel the bridge task. The caller is
+  // released immediately, but the queued execution keeps draining the request
+  // so the next operation cannot hit BRIDGE_BUSY while the old one is active.
+  let onAbort: (() => void) | undefined;
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new ApiError('ABORTED', 'Request cancelled.'));
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+
   const execute = async (): Promise<T> => {
     if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
     if (isHosted() && await hostedUsesFixtures() && operation.operation !== 'cli.status') {
       throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode to use the local bridge.');
     }
     const session = await getSession();
-    const created = await request<{ id: string }>('/api/relay/requests', {
+    const deadline = Date.now() + OPERATION_TIMEOUT_MS[operation.operation];
+    const createRequest = () => request<{ id: string }>('/api/relay/requests', {
       method: 'POST',
       token: session.token,
       body: operation,
-      signal,
       timeoutMs: RELAY_POLL_TIMEOUT_MS,
     });
-    const deadline = Date.now() + OPERATION_TIMEOUT_MS[operation.operation];
+
+    let created: { id: string };
+    try {
+      created = await createRequest();
+    } catch (error) {
+      // A slow creation response is recoverable: the Worker reuses the id of an
+      // identical active request, so retrying cannot enqueue a duplicate.
+      if (!(error instanceof ApiError && error.code === 'TIMEOUT') || Date.now() >= deadline) throw error;
+      created = await createRequest();
+    }
 
     while (Date.now() < deadline) {
       let state: RelayRequestState;
       try {
         state = await request<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}`, {
           token: session.token,
-          signal,
           timeoutMs: RELAY_POLL_TIMEOUT_MS,
         });
       } catch (error) {
         // A slow status poll is recoverable until the operation deadline. Keep
         // polling so a bridge that answers late still completes the user action.
         if (error instanceof ApiError && error.code === 'TIMEOUT' && Date.now() < deadline) {
-          await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
+          await wait(Math.min(1_200, Math.max(0, deadline - Date.now())));
           continue;
         }
         throw error;
@@ -224,7 +243,7 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       if (state.status === 'failed' || state.status === 'expired') {
         throw new ApiError(state.error?.code ?? 'RELAY_FAILED', state.error?.message ?? 'The local bridge request failed.');
       }
-      await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
+      await wait(Math.min(1_200, Math.max(0, deadline - Date.now())));
     }
 
     throw new ApiError('RELAY_TIMEOUT', 'The local bridge did not answer in time. Check that it is still running.');
@@ -232,7 +251,11 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
 
   const result = relayChain.then(execute);
   relayChain = result.catch(() => undefined);
-  return result;
+  try {
+    return await Promise.race([result, cancellation]);
+  } finally {
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
 }
 
 async function bridgeStatus(): Promise<BridgeStatus> {

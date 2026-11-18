@@ -15,6 +15,7 @@ interface CommandPaletteProps {
   onSelect: (result: CommandResult) => void;
   onGoToOrgs: () => void;
   onToggleMode: () => void;
+  isTogglingMode: boolean;
 }
 
 /** Global search over the current, context-scoped inventory only. */
@@ -26,6 +27,7 @@ export function CommandPalette({
   onSelect,
   onGoToOrgs,
   onToggleMode,
+  isTogglingMode,
 }: CommandPaletteProps) {
   const baseId = useId();
   const inputId = `${baseId}-input`;
@@ -156,7 +158,7 @@ export function CommandPalette({
                   <>
                     <Button variant="primary" onClick={() => useRecovery('orgs')}>Select an org</Button>
                     {mode === 'live' ? (
-                      <Button variant="secondary" onClick={() => useRecovery('demo')}>Use demo mode</Button>
+                      <Button variant="secondary" onClick={() => useRecovery('demo')} disabled={isTogglingMode}>Use demo mode</Button>
                     ) : null}
                   </>
                 ) : (

@@ -101,40 +101,59 @@ export function App() {
   activeContextIdRef.current = context?.contextId ?? null;
   const refreshControllerRef = useRef<AbortController | null>(null);
   const refreshContextRef = useRef<string | null>(context?.contextId ?? null);
+  const modePendingRef = useRef(false);
 
-  const cancelRefresh = () => refreshControllerRef.current?.abort();
+  const cancelRefresh = () => {
+    refreshControllerRef.current?.abort();
+    refreshControllerRef.current = null;
+  };
+
+  // Stop an in-flight refresh in the same tick as a context change. The query
+  // cache clear alone cannot cancel a manually invoked inventory request, and a
+  // late success could otherwise repopulate a cache that was just discarded.
+  const resetWorkspaceState = (activeContextId: string | null) => {
+    refreshControllerRef.current?.abort();
+    refreshControllerRef.current = null;
+    refreshContextRef.current = activeContextId;
+    clearWorkspaceCaches(queryClient, activeContextId);
+  };
 
   const { mutate: mutateMode, isPending: isTogglingMode } = useMutation({
     mutationFn: api.setMode,
     onSuccess: async (result, requestedMode) => {
-      // Update the cached session first so the mode-aware org query cannot read
-      // the previous mode's fixtures when it is re-enabled.
-      const session = sessionQuery.data;
-      if (session) {
-        const nextSession: SessionInfo = { ...session, mode: result.mode };
-        setCachedSession(nextSession);
-        queryClient.setQueryData<SessionInfo>(['session'], nextSession);
+      try {
+        // Update the cached session first so the mode-aware org query cannot read
+        // the previous mode's fixtures when it is re-enabled.
+        const session = sessionQuery.data;
+        if (session) {
+          const nextSession: SessionInfo = { ...session, mode: result.mode };
+          setCachedSession(nextSession);
+          queryClient.setQueryData<SessionInfo>(['session'], nextSession);
+        }
+        // Cancel an in-flight demo org fetch before replacing the cache. Without
+        // this, a late response could repopulate demo orgs under a Live label.
+        await queryClient.cancelQueries({ queryKey: ['orgs'] });
+        resetWorkspaceState(null);
+        queryClient.setQueryData<OrgSummary[]>(['orgs'], []);
+        setFocusObject(null);
+        setModePreference(requestedMode);
+        setSelectedAlias(null);
+        setSelectedOrg(null);
+        // The connector exposes a different org list in each mode. Refresh it so
+        // a mode switch cannot leave the UI stuck on the previous mode's orgs.
+        invalidateWorkspaceState(queryClient);
+        setModeError('');
+        setModeNotice(requestedMode === 'demo'
+          ? 'Now using demo mode — sample metadata only.'
+          : hosted
+            ? 'Now using live mode — reading metadata through your local SF CLI bridge.'
+            : 'Now using live mode — reading metadata from your Salesforce CLI.');
+      } finally {
+        modePendingRef.current = false;
       }
-      // Cancel an in-flight demo org fetch before replacing the cache. Without
-      // this, a late response could repopulate demo orgs under a Live label.
-      await queryClient.cancelQueries({ queryKey: ['orgs'] });
-      clearWorkspaceCaches(queryClient, null);
-      queryClient.setQueryData<OrgSummary[]>(['orgs'], []);
-      setFocusObject(null);
-      setModePreference(requestedMode);
-      setSelectedAlias(null);
-      setSelectedOrg(null);
-      // The connector exposes a different org list in each mode. Refresh it so
-      // a mode switch cannot leave the UI stuck on the previous mode's orgs.
-      invalidateWorkspaceState(queryClient);
-      setModeError('');
-      setModeNotice(requestedMode === 'demo'
-        ? 'Now using demo mode — sample metadata only.'
-        : hosted
-          ? 'Now using live mode — reading metadata through your local SF CLI bridge.'
-          : 'Now using live mode — reading metadata from your Salesforce CLI.');
     },
     onError: (error, requestedMode) => {
+      modePendingRef.current = false;
       modeAppliedRef.current = null;
       failedModeRef.current = requestedMode;
       setModeError(`Couldn't switch to ${requestedMode} mode. ${error.message}`);
@@ -210,8 +229,9 @@ export function App() {
       return;
     }
     const transitionKey = `${session.mode}->${preferredMode}`;
-    if (modeAppliedRef.current === transitionKey) return;
+    if (modePendingRef.current || modeAppliedRef.current === transitionKey) return;
     modeAppliedRef.current = transitionKey;
+    modePendingRef.current = true;
     mutateMode(preferredMode);
     // `mutate` is stable; depending on the whole mutation object re-ran this
     // effect after every failure and created a retry loop.
@@ -220,7 +240,7 @@ export function App() {
   useEffect(() => {
     if (selectedAlias && visibleOrgs.some((org) => org.alias === selectedAlias)) return;
     const first = visibleOrgs[0] ?? null;
-    clearWorkspaceCaches(queryClient, createWorkspaceContext(mode, first)?.contextId ?? null);
+    resetWorkspaceState(createWorkspaceContext(mode, first)?.contextId ?? null);
     setSelectedAlias(first?.alias ?? null);
     setSelectedOrg(first?.alias ?? null);
   }, [visibleOrgs, selectedAlias, mode, queryClient]);
@@ -243,7 +263,7 @@ export function App() {
     // observing query has re-rendered, and inventory must start in this tick.
     const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(['orgs']) ?? [];
     const next = createWorkspaceContext(mode, cachedOrgs.find((org) => org.alias === alias) ?? null);
-    clearWorkspaceCaches(queryClient, next?.contextId ?? null);
+    resetWorkspaceState(next?.contextId ?? null);
     setFocusObject(null);
     setSelectedAlias(alias);
     setSelectedOrg(alias);
@@ -255,7 +275,7 @@ export function App() {
     setHiddenOrgs(next);
     setHiddenAliases(next);
     if (selectedAlias === alias) {
-      clearWorkspaceCaches(queryClient, null);
+      resetWorkspaceState(null);
       setFocusObject(null);
       setSelectedAlias(null);
       setSelectedOrg(null);
@@ -269,12 +289,16 @@ export function App() {
   };
 
   const toggleMode = () => {
+    if (modePendingRef.current) return;
     modeAppliedRef.current = null;
+    modePendingRef.current = true;
     setModeError('');
     mutateMode(mode === 'demo' ? 'live' : 'demo');
   };
 
   const retryMode = () => {
+    if (modePendingRef.current) return;
+    modePendingRef.current = true;
     setModeError('');
     mutateMode(failedModeRef.current);
   };

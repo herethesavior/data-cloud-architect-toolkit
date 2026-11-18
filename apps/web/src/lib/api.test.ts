@@ -121,6 +121,46 @@ describe('web API session handling', () => {
     ]);
   });
 
+  it('keeps hosted relay serialization after a cancelled refresh', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let relayPosts = 0;
+    let firstDone = false;
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests' && options?.method === 'POST') {
+        relayPosts += 1;
+        return jsonResponse({ id: `req-${relayPosts}` });
+      }
+      if (path.startsWith('/api/relay/requests/')) {
+        const id = path.split('/').pop();
+        return jsonResponse({
+          id,
+          status: id === 'req-1' && !firstDone ? 'running' : 'completed',
+          result: [],
+          error: null,
+        });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const cancelled = api.inventory('prod-org', { force: true, signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ code: 'ABORTED' });
+
+    const next = api.orgs();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(relayPosts, 'the abandoned bridge request still owns the relay').toBe(1);
+
+    firstDone = true;
+    await vi.advanceTimersByTimeAsync(1_300);
+    await expect(next).resolves.toEqual([]);
+    expect(relayPosts).toBe(2);
+  });
+
   it('upgrades unknown live org environments from CLI URL metadata', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     const org: OrgSummary = {

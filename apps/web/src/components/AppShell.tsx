@@ -448,6 +448,7 @@ export function AppShell({
             onSelect={selectSearchResult}
             onGoToOrgs={() => navigate('orgs')}
             onToggleMode={onToggleMode}
+            isTogglingMode={isTogglingMode}
           />
         ) : null}
         {metadataResult ? (

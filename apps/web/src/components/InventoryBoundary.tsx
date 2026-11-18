@@ -69,8 +69,12 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   if (query.isPending) return <DiscoveryProgress stages={discoveryStages(null, true)} />;
   // Loading replaces the snapshot so stale rows cannot be mistaken for fresh
   // results. Once loading ends, the real result, empty, or error state returns.
-  if (query.isFetching || actions?.isRefreshingInventory) {
-    return <InventoryRefreshSkeleton onCancel={actions?.cancelRefresh} />;
+  const manualRefresh = Boolean(actions?.isRefreshingInventory);
+  if (query.isFetching || manualRefresh) {
+    // Only a manual refresh can be cancelled. An invalidation-triggered query
+    // refetch is owned by React Query, so offering Cancel there would spin
+    // forever after the click without actually stopping the request.
+    return <InventoryRefreshSkeleton onCancel={manualRefresh ? actions?.cancelRefresh : undefined} />;
   }
   if (query.isError) {
     return (
