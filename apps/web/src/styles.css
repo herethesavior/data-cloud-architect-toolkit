@@ -356,3 +356,201 @@ html[data-theme='dark'] {
     @apply flex items-center gap-3 rounded-lg border border-line bg-surface-alt px-3 py-2.5;
   }
 }
+
+@layer components {
+  .erd-stage {
+    height: min(62vh, 560px);
+    min-height: 420px;
+  }
+
+  .erd-canvas-shell:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .erd-canvas-shell:fullscreen .erd-stage {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .erd-canvas-shell .react-flow {
+    --xy-background-color: var(--color-surface-alt);
+    --xy-edge-stroke-default: var(--color-brand);
+    --xy-edge-stroke-selected-default: var(--color-brand-strong);
+    --xy-background-pattern-color: var(--color-line-strong);
+    --xy-minimap-background-color: var(--color-surface);
+    --xy-minimap-mask-background-color: var(--color-line);
+    --xy-minimap-node-background-color: var(--color-brand);
+    --xy-node-color: var(--color-ink);
+    --xy-edge-label-background-color: var(--color-surface);
+    --xy-edge-label-color: var(--color-ink-soft);
+    --xy-attribution-background-color: var(--color-surface-alt);
+  }
+
+  .react-flow__node-erdObject {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+  }
+
+  .erd-node {
+    box-sizing: border-box;
+    width: 280px;
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    border-radius: 10px;
+    background: var(--color-surface);
+    box-shadow: var(--shadow-panel);
+    transition: border-color var(--duration-fast) var(--ease-standard),
+      box-shadow var(--duration-fast) var(--ease-standard),
+      opacity var(--duration-fast) var(--ease-standard);
+  }
+
+  .erd-node-selected {
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 2px var(--color-brand-soft), var(--shadow-panel);
+  }
+
+  .erd-node-related {
+    border-color: var(--color-brand-strong);
+  }
+
+  .erd-node-dimmed {
+    opacity: 0.28;
+  }
+
+  .erd-node-header {
+    display: flex;
+    height: 52px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--color-line);
+    background: var(--color-surface-alt);
+  }
+
+  .erd-node-dot {
+    width: 3px;
+    height: 30px;
+    flex: 0 0 3px;
+    border-radius: 2px;
+    background: var(--color-brand);
+  }
+
+  .erd-node-count {
+    display: grid;
+    min-width: 22px;
+    height: 20px;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--color-brand-soft);
+    color: var(--color-brand);
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .erd-node-fields {
+    padding-block: 3px;
+  }
+
+  .erd-field-row {
+    position: relative;
+    display: flex;
+    height: 24px;
+    align-items: center;
+    gap: 6px;
+    padding-inline: 12px;
+  }
+
+  .erd-field-row:hover {
+    background: var(--color-surface-alt);
+  }
+
+  .erd-node-more {
+    display: flex;
+    height: 24px;
+    align-items: center;
+    padding-inline: 12px;
+    color: var(--color-ink-faint);
+    font-size: 10px;
+  }
+
+  .erd-key {
+    flex: 0 0 auto;
+    border-radius: 4px;
+    padding: 0 4px;
+    background: var(--color-brand-soft);
+    color: var(--color-brand);
+    font-size: 9px;
+    font-weight: 700;
+  }
+
+  .erd-key-fk {
+    background: var(--color-warning-soft);
+    color: var(--color-warning);
+  }
+
+  .erd-key-pk-fk {
+    background: var(--color-success-soft);
+    color: var(--color-success);
+  }
+
+  .erd-handle {
+    width: 7px !important;
+    height: 7px !important;
+    border: 1px solid var(--color-surface) !important;
+    background: var(--color-brand) !important;
+  }
+
+  .erd-handle-default {
+    opacity: 0.35;
+  }
+
+  .erd-legend {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    background: var(--color-surface);
+    padding: 6px 10px;
+    color: var(--color-ink-soft);
+    font-size: 11px;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .erd-fullscreen-exit {
+    display: flex;
+    border-radius: 8px;
+    background: var(--color-surface);
+    padding: 4px;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .erd-legend-line {
+    width: 22px;
+    border-top: 2px solid var(--color-brand);
+  }
+
+  .erd-legend-dashed {
+    border-top: 2px dashed var(--color-warning);
+  }
+
+  .erd-minimap {
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+  }
+
+  .react-flow__attribution {
+    background: var(--color-surface-alt);
+    color: var(--color-ink-faint);
+  }
+
+  .react-flow__attribution a {
+    color: var(--color-brand);
+  }
+}

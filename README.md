@@ -150,7 +150,8 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 - **Detail drawers:** open from object rows. They have breadcrumbs, tabs, copy actions, no dimming scrim, a width cap of 640px, and scrolling inside the viewport.
 - **Freshness:** a compact chip beside each explorer's filters shows **Updated …** with an exact-time tooltip and a stale dot when the live snapshot is cached. The icon-only refresh action is token-protected and only available with a selected org.
 - **No org selected:** inventory views show **Select an org** as the primary action and **Use demo mode** as the live-mode fallback.
-- **Exports:** available from each explorer's **Export** menu. Live exports first show a short notice that the file contains org metadata. All exports stay local.
+- **Exports:** available from each explorer's **Export** menu. Live exports first show a short notice that the file contains org metadata. All exports stay local. The ERD Explorer adds a portable Mermaid `.mmd` export.
+- **ERD Explorer:** pan, zoom, drag objects, fit or reset the view, toggle the grid and minimap, and use full screen. Auto-layout can arrange objects left-to-right or top-to-bottom and sort them by connections or alphabetically. Object search and detail panels support focusing one object or relationship. Certainty distinguishes source-confirmed links from inferred or unknown links. Layout and viewport preferences are stored per workspace context in this browser only.
 
 ## Screens
 
@@ -163,7 +164,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 | Mapping Explorer | Source-to-target mappings with field-level detail. |
 | Data Stream Explorer | Ingestion streams with source connectors, target objects, status, cadence, and provenance. |
 | Data Transform Explorer | Transform overview, lineage, definition, runs, schedules, and raw metadata. |
-| ERD Explorer | Confirmed and inferred relationships with a certainty filter. |
+| ERD Explorer | Interactive relationship canvas with drag, zoom/pan, full screen, auto-layout, search, details, certainty filtering, and local exports. |
 | Data Dictionary | Unified field reference. |
 | Settings & Diagnostics | Connector and CLI status plus privacy summary. |
 | Help | Tabbed documentation: What is DCAT?, How it works, Data Cloud glossary, Privacy, and About & contact (creator, role, repository, and LinkedIn). |

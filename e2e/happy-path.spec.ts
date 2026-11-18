@@ -662,10 +662,27 @@ test('ERD Explorer shows the richer demo model and filters grounded edges', asyn
   await expect(page.locator('h1')).toHaveText('ERD Explorer');
   await expect(page.getByText('8 objects', { exact: true })).toBeVisible();
   await expect(page.getByText('9 visible edges', { exact: true })).toBeVisible();
-  await expect(page.locator('svg[aria-labelledby="erd-title erd-description"]').getByText('Order Item DMO')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'ERD canvas' })).toBeVisible();
+  await expect(page.locator('.react-flow__node-erdObject')).toHaveCount(8);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(9);
+  await expect(page.locator('.react-flow__node-erdObject').getByText('Order Item DMO', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Full screen' }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+  await page.getByRole('region', { name: 'ERD canvas' })
+    .getByRole('button', { name: 'Exit full screen' })
+    .click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
 
   await page.getByRole('button', { name: 'Confirmed', exact: true }).click();
   await expect(page.getByText('3 visible edges', { exact: true })).toBeVisible();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(3);
+
+  await page.reload();
+  await page.locator('.react-flow__node-erdObject').first().waitFor();
+  await expect(page.getByRole('button', { name: 'Confirmed', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('3 visible edges', { exact: true })).toBeVisible();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(3);
 });
 
 test('export menu consolidates local export formats', async ({ page }) => {
