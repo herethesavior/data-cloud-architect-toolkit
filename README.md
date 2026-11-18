@@ -148,7 +148,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 - **Search:** press `Ctrl/Cmd+K` to search the current context's Data Spaces, DLOs, DMOs, streams, mappings, and transforms. Results open the matching explorer or a read-only detail dialog.
 - **Themes:** follow the device preference or choose **Light**, **Dark**, or **System** in Settings. The choice is saved as `dcat.theme`.
 - **Detail drawers:** open from object rows. They have breadcrumbs, tabs, copy actions, no dimming scrim, a width cap of 640px, and scrolling inside the viewport.
-- **Freshness:** the inventory strip shows **Updated …** or **Cached** and owns the contextual refresh action. Refresh is token-protected and only available with a selected org.
+- **Freshness:** a compact chip beside each explorer's filters shows **Updated …** with an exact-time tooltip and a stale dot when the live snapshot is cached. The icon-only refresh action is token-protected and only available with a selected org.
 - **No org selected:** inventory views show **Select an org** as the primary action and **Use demo mode** as the live-mode fallback.
 - **Exports:** available from each explorer's **Export** menu. Live exports first show a short notice that the file contains org metadata. All exports stay local.
 
@@ -166,6 +166,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 | ERD Explorer | Confirmed and inferred relationships with a certainty filter. |
 | Data Dictionary | Unified field reference. |
 | Settings & Diagnostics | Connector and CLI status plus privacy summary. |
+| Help | Tabbed documentation: What is DCAT?, How it works, Data Cloud glossary, Privacy, and About & contact (creator, role, repository, and LinkedIn). |
 
 The demo inventory is fully labelled and intentionally healthy. It contains eight DLOs, eight DMOs, seven field-level mappings, six streams, five transforms, and nine labelled ERD relationships so the explorers can be evaluated without implying that live data was discovered.
 

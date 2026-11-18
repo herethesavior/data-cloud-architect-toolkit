@@ -1,5 +1,6 @@
 import type {
   ApiCapability,
+  DataMapping,
   InventorySnapshot,
   OrgSummary,
   RelationshipEdge,
@@ -9,7 +10,7 @@ import type {
 import { RESOURCE_FAMILIES, inventorySnapshotSchema } from '@dcat/core';
 import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure } from './capabilities.ts';
-import { buildData360Path, buildVersionsPath, DATA360_ENDPOINT_REGISTRY } from './endpoints.ts';
+import { buildData360Path, buildMappingPath, buildVersionsPath, DATA360_ENDPOINT_REGISTRY } from './endpoints.ts';
 import {
   deriveInferredRelationships,
   extractCollection,
@@ -26,6 +27,7 @@ import type { NormalizeContext, NormalizedCollection, NormalizedDmos } from './n
 import { selectLatestApiVersion } from './versions.ts';
 
 const DEFAULT_MAX_PAGES = 20;
+const MAX_MAPPING_DMO_QUERIES = 25;
 
 /** Minimal surface the discovery layer needs; the CLI adapter satisfies it. */
 export interface RestClient {
@@ -236,6 +238,160 @@ async function retrieveFamily<T, N extends NormalizedCollection<T>>(
   }
 }
 
+function mappingIdentity(mapping: DataMapping): string {
+  const fields = mapping.fieldMappings
+    .map((field) => `${field.sourceField}->${field.targetField}`)
+    .join(',');
+  return `${mapping.apiName ?? ''}|${mapping.sourceObject}|${mapping.targetObject}|${fields}`;
+}
+
+function skippedMappings(
+  apiVersion: string,
+  base: Omit<NormalizeContext, 'apiVersion' | 'endpoint'>,
+  dmoCapability: ApiCapability,
+): FamilyResult<NormalizedCollection<DataMapping>> {
+  const dmosConfirmed = dmoCapability.status === 'available' || dmoCapability.status === 'partial';
+  const message = dmosConfirmed
+    ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
+    : 'Skipped: DMO lookup was unavailable; mapping lookup requires a DMO developer name.';
+  // Preserve a Data 360 disablement across every family instead of hiding it
+  // behind a generic skip when DMO discovery itself reported unsupported.
+  const status: ApiCapability['status'] = !dmosConfirmed && dmoCapability.status === 'unsupported'
+    ? 'unsupported'
+    : 'not-started';
+  return {
+    result: { items: [], skipped: 0 },
+    capability: {
+      family: 'mappings',
+      status,
+      endpoint: buildData360Path('mappings', apiVersion),
+      apiVersion,
+      message: status === 'unsupported'
+        ? (dmoCapability.message ?? message)
+        : message,
+      durationMs: 0,
+      itemCount: 0,
+    },
+    warnings: [dmosConfirmed
+      ? { family: 'mappings', code: 'MAPPINGS_SKIPPED', message, severity: 'info' }
+      : { family: 'mappings', code: status === 'unsupported' ? 'UNSUPPORTED' : 'MAPPINGS_SKIPPED', message, severity: status === 'unsupported' ? 'warning' : 'info' }],
+  };
+}
+
+/**
+ * Salesforce rejects an unfiltered mapping lookup. Query one allowlisted,
+ * encoded dmoDeveloperName at a time and merge the grounded results.
+ */
+async function retrieveMappingsByDmo(
+  cli: RestClient,
+  alias: string,
+  apiVersion: string,
+  base: Omit<NormalizeContext, 'apiVersion' | 'endpoint'>,
+  dmoApiNames: string[],
+  maxPages: number,
+): Promise<FamilyResult<NormalizedCollection<DataMapping>>> {
+  const started = Date.now();
+  const endpoint = buildData360Path('mappings', apiVersion);
+  const context: NormalizeContext = { ...base, apiVersion, endpoint };
+  const uniqueApiNames = [...new Set(dmoApiNames.filter((name) => name.trim().length > 0))];
+  const queried = uniqueApiNames.slice(0, MAX_MAPPING_DMO_QUERIES);
+  const items: DataMapping[] = [];
+  const warnings: RetrievalWarning[] = [];
+  const failures: ReturnType<typeof classifyRestFailure>[] = [];
+  let skipped = 0;
+  let retriedQueries = 0;
+
+  for (const apiName of queried) {
+    const path = buildMappingPath(apiName, apiVersion);
+    try {
+      const attempt = await withBoundedRetry(() => fetchCollection(cli, alias, path, 'mappings', maxPages));
+      const normalized = normalizeMappings(attempt.value.entries, context);
+      items.push(...normalized.items);
+      skipped += normalized.skipped;
+      if (attempt.retried) retriedQueries += 1;
+      warnings.push(...attempt.value.warnings.map((message) => ({
+        family: 'mappings' as const,
+        code: 'PAGINATION_LIMIT',
+        message,
+        severity: 'warning' as const,
+      })));
+    } catch (error) {
+      const message = safeErrorMessage(error);
+      const classified = classifyRestFailure(extractHttpStatus(message), message);
+      failures.push(classified);
+      warnings.push({
+        family: 'mappings',
+        code: classified.status.toUpperCase(),
+        message: `Mapping lookup for DMO ${apiName} failed. ${classified.message}`,
+        severity: classified.status === 'unsupported' ? 'warning' : 'error',
+      });
+    }
+  }
+
+  const seen = new Set<string>();
+  const deduped = items.filter((mapping) => {
+    const key = mappingIdentity(mapping);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (retriedQueries > 0) {
+    warnings.push({
+      family: 'mappings',
+      code: 'RETRY_SUCCEEDED',
+      message: `${retriedQueries} mapping lookup(s) succeeded after a transient retry.`,
+      severity: 'info',
+    });
+  }
+  if (skipped > 0) {
+    warnings.push({
+      family: 'mappings',
+      code: 'ITEMS_SKIPPED',
+      message: `${skipped} mapping item(s) were skipped because required identifying fields were missing.`,
+      severity: 'warning',
+    });
+  }
+  if (uniqueApiNames.length > queried.length) {
+    warnings.push({
+      family: 'mappings',
+      code: 'MAPPING_QUERY_LIMIT',
+      message: `Checked the first ${MAX_MAPPING_DMO_QUERIES} DMOs; remaining mapping lookups were not attempted.`,
+      severity: 'warning',
+    });
+  }
+
+  const allFailed = failures.length > 0 && failures.length === queried.length;
+  const status: ApiCapability['status'] = allFailed
+    ? failures.every((failure) => failure.status === 'unsupported')
+      ? 'unsupported'
+      : failures.every((failure) => failure.status === 'forbidden')
+        ? 'forbidden'
+        : 'error'
+    : warnings.some((warning) => warning.severity !== 'info')
+      ? 'partial'
+      : 'available';
+  const message = allFailed
+    ? (failures[0]?.message ?? 'Mapping lookup failed.')
+    : status === 'partial'
+      ? 'Retrieved mappings with warnings.'
+      : 'Retrieved successfully.';
+
+  return {
+    result: { items: deduped, skipped },
+    capability: {
+      family: 'mappings',
+      status,
+      endpoint,
+      apiVersion,
+      message,
+      durationMs: Date.now() - started,
+      itemCount: deduped.length,
+    },
+    warnings,
+  };
+}
+
 function dedupeRelationships(edges: RelationshipEdge[]): RelationshipEdge[] {
   const seen = new Set<string>();
   return edges.filter((edge) => {
@@ -332,14 +488,21 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
   }
 
   const version = apiVersion;
-  const [spaces, dlos, dmos, mappings, streams, transforms] = await Promise.all([
+  const [spaces, dlos, dmos, streams, transforms] = await Promise.all([
     retrieveFamily(cli, alias, 'data-spaces', version, base, normalizeDataSpaces, maxPages),
     retrieveFamily(cli, alias, 'dlos', version, base, normalizeDlos, maxPages),
     retrieveFamily(cli, alias, 'dmos', version, base, normalizeDmos, maxPages),
-    retrieveFamily(cli, alias, 'mappings', version, base, normalizeMappings, maxPages),
     retrieveFamily(cli, alias, 'data-streams', version, base, normalizeDataStreams, maxPages),
     retrieveFamily(cli, alias, 'data-transforms', version, base, normalizeDataTransforms, maxPages),
   ]);
+
+  // Mapping metadata needs a DMO developer name. An org with zero DMOs is a
+  // healthy empty result, not an error and not a reason to call Salesforce with
+  // an unfiltered request that Salesforce itself rejects.
+  const dmoApiNames = dmos.result.items.map((dmo) => dmo.apiName);
+  const mappings = dmoApiNames.length === 0
+    ? skippedMappings(version, base, dmos.capability)
+    : await retrieveMappingsByDmo(cli, alias, version, base, dmoApiNames, maxPages);
 
   capabilities.push(
     spaces.capability,

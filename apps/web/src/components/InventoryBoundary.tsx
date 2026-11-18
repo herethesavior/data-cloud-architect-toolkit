@@ -11,10 +11,53 @@ import { Icon } from './Icon.tsx';
 import { DiscoveryProgress, ResourceStatusNotice } from './ResourceStatusPanel.tsx';
 import { NoOrgState } from './NoOrgState.tsx';
 
+function InventoryRefreshSkeleton({ onCancel }: { onCancel?: () => void }) {
+  return (
+    <section
+      data-testid="inventory-refresh-skeleton"
+      aria-busy="true"
+      aria-live="polite"
+      aria-label="Refreshing inventory"
+      className="panel px-6 py-6"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="label-xs">Inventory refresh</p>
+          <h3 className="mt-1 flex items-center gap-2 text-base font-semibold text-ink">
+            <Icon name="refresh" size={17} className="animate-spin text-brand" />
+            Getting the latest metadata…
+          </h3>
+          <p className="mt-1 text-sm text-ink-soft">Previous results return when the refresh finishes.</p>
+        </div>
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Cancel refresh"
+            title="Cancel this refresh"
+            className="min-h-9 rounded-lg border border-line px-3 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink"
+          >
+            Cancel refresh
+          </button>
+        ) : null}
+      </div>
+      <div aria-hidden="true" className="mt-5 space-y-3">
+        <div className="skeleton h-3 w-2/3 rounded" />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="skeleton h-20 rounded-lg" />
+          <div className="skeleton h-20 rounded-lg" />
+          <div className="skeleton h-20 rounded-lg" />
+        </div>
+        <div className="skeleton h-28 rounded-lg" />
+      </div>
+    </section>
+  );
+}
+
 interface InventoryBoundaryProps {
   query: UseQueryResult<InventorySnapshot, Error>;
   context: WorkspaceContext | null;
-  children: (inventory: InventorySnapshot) => ReactNode;
+  children: (inventory: InventorySnapshot, freshness: ReactNode) => ReactNode;
 }
 
 export function InventoryBoundary({ query, context, children }: InventoryBoundaryProps) {
@@ -24,6 +67,15 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   // explorer would spin forever when live mode has no authenticated org.
   if (!context) return <NoOrgState />;
   if (query.isPending) return <DiscoveryProgress stages={discoveryStages(null, true)} />;
+  // Loading replaces the snapshot so stale rows cannot be mistaken for fresh
+  // results. Once loading ends, the real result, empty, or error state returns.
+  const manualRefresh = Boolean(actions?.isRefreshingInventory);
+  if (query.isFetching || manualRefresh) {
+    // Only a manual refresh can be cancelled. An invalidation-triggered query
+    // refetch is owned by React Query, so offering Cancel there would spin
+    // forever after the click without actually stopping the request.
+    return <InventoryRefreshSkeleton onCancel={manualRefresh ? actions?.cancelRefresh : undefined} />;
+  }
   if (query.isError) {
     return (
       <ErrorState
@@ -51,39 +103,54 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   const live = context.mode === 'live';
   const stale = live && isInventoryStale(inventory.generatedAt);
 
+  const freshness = (
+    <span data-testid="inventory-freshness" className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-surface-alt px-2 text-xs text-ink-soft">
+      <Icon name="clock" size={13} className="text-ink-faint" />
+      <span title={`Updated ${absolute}`} className="whitespace-nowrap">
+        Updated {formatUpdatedAt(inventory.generatedAt)}
+      </span>
+      {stale ? (
+        <span
+          aria-label="Cached snapshot"
+          title="Cached snapshot"
+          className="size-1.5 shrink-0 rounded-full bg-warning"
+        />
+      ) : null}
+      {actions && actions.isRefreshingInventory ? (
+        <button
+          type="button"
+          onClick={actions.cancelRefresh}
+          aria-label="Cancel refresh"
+          title="Cancel this refresh"
+          className="grid size-7 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
+        >
+          <Icon name="close" size={13} />
+        </button>
+      ) : actions ? (
+        <button
+          type="button"
+          onClick={actions.refreshInventory}
+          disabled={!context.alias}
+          aria-label="Refresh inventory"
+          title="Refresh this inventory from the local connector"
+          className="grid size-7 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-40"
+        >
+          <Icon name="refresh" size={13} />
+        </button>
+      ) : null}
+    </span>
+  );
+
   return (
     <>
       <ResourceStatusNotice inventory={inventory} />
-      <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-soft">
-        <Icon name="clock" size={14} className="text-ink-faint" />
-        <span>
-          Updated <span title={`Updated ${absolute}`}>{formatUpdatedAt(inventory.generatedAt)}</span>
-        </span>
-        {stale ? (
-          <span className="rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-warning">Cached</span>
-        ) : null}
-        {actions ? (
-          <Button
-            variant="quiet"
-            onClick={actions.refreshInventory}
-            disabled={!context.alias || actions.isRefreshingInventory}
-            aria-label="Refresh inventory"
-            aria-busy={actions.isRefreshingInventory}
-            title="Refresh this inventory from the local connector"
-            className="ml-auto px-2 py-1 text-xs"
-          >
-            <Icon name="refresh" size={14} className={actions.isRefreshingInventory ? 'animate-spin' : undefined} />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
-        ) : null}
-      </div>
       {actions?.refreshError ? (
         <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
           <span>Refresh failed: {actions.refreshError}</span>
           <button type="button" onClick={actions.refreshInventory} className="font-semibold underline underline-offset-2">Retry</button>
         </p>
       ) : null}
-      {children(inventory)}
+      {children(inventory, freshness)}
     </>
   );
 }

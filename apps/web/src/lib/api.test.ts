@@ -19,6 +19,7 @@ describe('web API session handling', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
@@ -120,6 +121,46 @@ describe('web API session handling', () => {
     ]);
   });
 
+  it('keeps hosted relay serialization after a cancelled refresh', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let relayPosts = 0;
+    let firstDone = false;
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests' && options?.method === 'POST') {
+        relayPosts += 1;
+        return jsonResponse({ id: `req-${relayPosts}` });
+      }
+      if (path.startsWith('/api/relay/requests/')) {
+        const id = path.split('/').pop();
+        return jsonResponse({
+          id,
+          status: id === 'req-1' && !firstDone ? 'running' : 'completed',
+          result: [],
+          error: null,
+        });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const cancelled = api.inventory('prod-org', { force: true, signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ code: 'ABORTED' });
+
+    const next = api.orgs();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(relayPosts, 'the abandoned bridge request still owns the relay').toBe(1);
+
+    firstDone = true;
+    await vi.advanceTimersByTimeAsync(1_300);
+    await expect(next).resolves.toEqual([]);
+    expect(relayPosts).toBe(2);
+  });
+
   it('upgrades unknown live org environments from CLI URL metadata', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     const org: OrgSummary = {
@@ -165,5 +206,45 @@ describe('web API session handling', () => {
     expect(options?.method).toBe('POST');
     expect((options?.headers as Record<string, string>)['x-dcat-token']).toBe('old-token');
     expect(options?.body).toBeUndefined();
+  });
+
+  it('bounds a hanging inventory refresh with a hard timeout', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((path: string, options?: RequestInit) => {
+      if (path === '/api/session') return Promise.resolve(jsonResponse(session));
+      return new Promise((_resolve, reject) => {
+        if (options?.signal?.aborted) {
+          reject(new Error('aborted'));
+          return;
+        }
+        options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = api.inventory('prod-org', { force: true });
+    const assertion = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await assertion;
+  });
+
+  it('aborts an inventory refresh when the caller cancels', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn((path: string, options?: RequestInit) => {
+      if (path === '/api/session') return Promise.resolve(jsonResponse(session));
+      return new Promise((_resolve, reject) => {
+        if (options?.signal?.aborted) {
+          reject(new Error('aborted'));
+          return;
+        }
+        options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = api.inventory('prod-org', { force: true, signal: controller.signal });
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' });
   });
 });

@@ -34,6 +34,20 @@ describe('ExportMenu', () => {
     expect(items[0]).toHaveFocus();
   });
 
+  it('portals the menu outside a clipping parent', async () => {
+    const user = userEvent.setup();
+    render(
+      <div data-testid="clipping-parent" style={{ overflow: 'hidden', width: 120, height: 32 }}>
+        <ExportMenu items={makeItems()} />
+      </div>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Export' }));
+
+    const menu = screen.getByRole('menu');
+    expect(menu.parentElement).toBe(document.body);
+    expect(screen.getByTestId('clipping-parent')).not.toContainElement(menu);
+  });
+
   it('navigates with arrow keys, Home, and End', async () => {
     const user = userEvent.setup();
     render(<ExportMenu items={makeItems()} />);

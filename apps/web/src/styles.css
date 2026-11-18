@@ -110,6 +110,16 @@ html[data-theme='dark'] {
   flex-basis: 72px;
 }
 
+@media (min-width: 1024px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+}
+
 .sidebar-label {
   overflow: hidden;
 }
@@ -320,6 +330,14 @@ html[data-theme='dark'] {
     background:
       radial-gradient(circle at 88% 8%, color-mix(in srgb, var(--color-brand) 12%, transparent), transparent 42%),
       var(--color-surface);
+  }
+
+  .hero-map {
+    background: linear-gradient(155deg, var(--color-surface), var(--color-surface-alt));
+  }
+
+  .flow-node-icon {
+    @apply grid size-8 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand;
   }
 
   .nav-item {

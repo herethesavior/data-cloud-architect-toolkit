@@ -35,6 +35,8 @@ describe('Data 360 response normalization', () => {
     expect(extractCollection([{ name: 'A' }], 'Test')).toHaveLength(1);
     expect(extractCollection({ records: [{ name: 'A' }] }, 'Test')).toHaveLength(1);
     expect(extractCollection({ result: { items: [] }, items: [{ name: 'B' }] }, 'Test')).toHaveLength(1);
+    expect(extractCollection({ dataModelObject: [] }, 'Data Model Objects')).toEqual([]);
+    expect(extractCollection({ objectSourceTargetMaps: [{ name: 'A' }] }, 'Mappings')).toHaveLength(1);
     expect(() => extractCollection({ unexpected: true }, 'Test')).toThrow(CliError);
     expect(() => parseJsonResponse('not json', 'Test')).toThrow(/not valid JSON/);
   });
@@ -114,6 +116,25 @@ describe('Data 360 response normalization', () => {
       { sourceField: 'Name', targetField: 'Name', transformation: 'trim' },
     ]);
     expect(result.items[1]).toMatchObject({ sourceObject: 'Order_DLO__dll', targetObject: 'Order_DMO__dlm' });
+  });
+
+  it('normalizes documented entity and field developer-name aliases', () => {
+    const result = normalizeMappings({
+      objectSourceTargetMaps: [{
+        developerName: 'Customer_Map__m',
+        sourceEntityDeveloperName: 'Customer_DLO__dll',
+        targetEntityDeveloperName: 'Customer_DMO__dlm',
+        fieldMappings: [{ sourceFieldDeveloperName: 'Id', targetFieldDeveloperName: 'Id' }],
+      }],
+    }, context);
+
+    expect(result.skipped).toBe(0);
+    expect(result.items[0]).toMatchObject({
+      apiName: 'Customer_Map__m',
+      sourceObject: 'Customer_DLO__dll',
+      targetObject: 'Customer_DMO__dlm',
+      fieldMappings: [{ sourceField: 'Id', targetField: 'Id' }],
+    });
   });
 
   it('normalizes enriched transform metadata from plausible aliases', () => {

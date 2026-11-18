@@ -42,7 +42,7 @@ export function parseJsonResponse(raw: string, label: string): unknown {
   }
 }
 
-const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObjects', 'mappings', 'dataModelObjectMappings', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions'];
+const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions'];
 const CONTAINER_KEYS = ['result', 'data', 'response', 'payload'];
 
 /**
@@ -345,8 +345,14 @@ export function normalizeMappings(raw: unknown, context: NormalizeContext): Norm
       skipped += 1;
       continue;
     }
-    const sourceObject = firstString(entry, ['sourceObject', 'sourceObjectName', 'sourceObjectApiName', 'source', 'from']);
-    const targetObject = firstString(entry, ['targetObject', 'targetObjectName', 'targetObjectApiName', 'target', 'to']);
+    const sourceObject = firstString(entry, [
+      'sourceObject', 'sourceObjectName', 'sourceObjectApiName', 'sourceEntityDeveloperName',
+      'sourceObjectDeveloperName', 'source', 'from',
+    ]);
+    const targetObject = firstString(entry, [
+      'targetObject', 'targetObjectName', 'targetObjectApiName', 'targetEntityDeveloperName',
+      'targetDmoDeveloperName', 'target', 'to',
+    ]);
     if (!sourceObject || !targetObject) {
       skipped += 1;
       continue;
@@ -357,8 +363,12 @@ export function normalizeMappings(raw: unknown, context: NormalizeContext): Norm
     if (Array.isArray(rawFields)) {
       for (const field of rawFields) {
         if (!isRecord(field)) continue;
-        const sourceField = firstString(field, ['sourceField', 'sourceFieldName', 'source', 'from']);
-        const targetField = firstString(field, ['targetField', 'targetFieldName', 'target', 'to']);
+        const sourceField = firstString(field, [
+          'sourceField', 'sourceFieldName', 'sourceFieldDeveloperName', 'source', 'from',
+        ]);
+        const targetField = firstString(field, [
+          'targetField', 'targetFieldName', 'targetFieldDeveloperName', 'target', 'to',
+        ]);
         if (!sourceField || !targetField) continue;
         fieldMappings.push({
           sourceField,

@@ -49,6 +49,26 @@ export function clearWorkspaceCaches(queryClient: QueryClient, activeContextId: 
   queryClient.removeQueries({ predicate: (query) => shouldDiscardQuery(query.queryKey, activeContextId) });
 }
 
+/**
+ * Bridge changes affect setup, diagnostics, and cached inventory, but must not
+ * re-enqueue `org.list`: a pairing refresh could then slip between `org.connect`
+ * and the first `inventory.get`. Active observers refetch immediately; inactive
+ * views are marked stale and refetch when opened.
+ */
+export function invalidateBridgeState(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: ['bridge-status'] });
+  void queryClient.invalidateQueries({ queryKey: ['health'] });
+  void queryClient.invalidateQueries({
+    predicate: (query) => isContextScopedQuery(query.queryKey),
+  });
+}
+
+/** Mode changes also replace the org list, so include it explicitly. */
+export function invalidateWorkspaceState(queryClient: QueryClient): void {
+  invalidateBridgeState(queryClient);
+  void queryClient.invalidateQueries({ queryKey: ['orgs'] });
+}
+
 export function workspaceBadge(context: WorkspaceContext | null): { label: string; tone: 'warning' | 'success' | 'neutral' } {
   if (!context) return { label: 'LIVE · NOT CONNECTED', tone: 'neutral' };
   if (context.mode === 'demo') return { label: 'DEMO DATA', tone: 'warning' };

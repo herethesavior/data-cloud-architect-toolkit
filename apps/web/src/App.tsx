@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InventorySnapshot, OrgSummary, SessionInfo } from '@dcat/core';
-import { api, getSession, setCachedSession } from './lib/api.ts';
+import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { buildCommandResults } from './lib/commandSearch.ts';
 import { isHosted } from './lib/hosted.ts';
 import type { CommandResult } from './lib/commandSearch.ts';
@@ -17,8 +17,8 @@ import {
 import { useTheme } from './lib/useTheme.ts';
 import { useInventory } from './lib/useInventory.ts';
 import type { FocusObject } from './lib/objectDetail.ts';
-import { clearWorkspaceCaches, createWorkspaceContext } from './lib/workspace.ts';
-import type { WorkspaceMode } from './lib/workspace.ts';
+import { clearWorkspaceCaches, createWorkspaceContext, invalidateWorkspaceState } from './lib/workspace.ts';
+import type { WorkspaceContext, WorkspaceMode } from './lib/workspace.ts';
 import { AppShell } from './components/AppShell.tsx';
 import { ErrorState, LoadingState } from './components/DataStates.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
@@ -31,6 +31,8 @@ import { DataStreamExplorer } from './pages/DataStreamExplorer.tsx';
 import { DataTransformExplorer } from './pages/DataTransformExplorer.tsx';
 import { ErdExplorer } from './pages/ErdExplorer.tsx';
 import { DataDictionary } from './pages/DataDictionary.tsx';
+import { HelpPage } from './pages/HelpPage.tsx';
+import { pageFromHash, pageHash, writePageHash } from './navigation.ts';
 import type { Page } from './navigation.ts';
 
 function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: string; onRetry?: () => void }) {
@@ -67,19 +69,19 @@ export function App() {
   // for that response so parallel first-load requests cannot create competing cookies.
   const sessionReady = Boolean(sessionQuery.data);
   const orgsQuery = useQuery({ queryKey: ['orgs'], queryFn: api.orgs, enabled: !hosted || sessionReady });
-  const healthQuery = useQuery({
-    queryKey: ['health'],
-    queryFn: api.health,
-    refetchInterval: 60_000,
-    enabled: !hosted || sessionReady,
-  });
 
-  const [page, setPage] = useState<Page>('dashboard');
+  const [page, setPage] = useState<Page>(() => pageFromHash(window.location.hash));
   const [selectedAlias, setSelectedAlias] = useState<string | null>(() => getSelectedOrg());
   const [hiddenAliases, setHiddenAliases] = useState<string[]>(() => getHiddenOrgs());
   const [modeNotice, setModeNotice] = useState('');
   const [modeError, setModeError] = useState('');
   const [focusObject, setFocusObject] = useState<FocusObject | null>(null);
+
+  const navigate = (nextPage: Page) => {
+    setPage(nextPage);
+    writePageHash(nextPage);
+  };
+
   const modeAppliedRef = useRef<string | null>(null);
   const failedModeRef = useRef<WorkspaceMode>('demo');
   const theme = useTheme();
@@ -95,38 +97,63 @@ export function App() {
   const inventoryQuery = useInventory(context);
   const searchResults = useMemo(() => buildCommandResults(inventoryQuery.data ?? null), [inventoryQuery.data]);
 
+  const activeContextIdRef = useRef<string | null>(context?.contextId ?? null);
+  activeContextIdRef.current = context?.contextId ?? null;
+  const refreshControllerRef = useRef<AbortController | null>(null);
+  const refreshContextRef = useRef<string | null>(context?.contextId ?? null);
+  const modePendingRef = useRef(false);
+
+  const cancelRefresh = () => {
+    refreshControllerRef.current?.abort();
+    refreshControllerRef.current = null;
+  };
+
+  // Stop an in-flight refresh in the same tick as a context change. The query
+  // cache clear alone cannot cancel a manually invoked inventory request, and a
+  // late success could otherwise repopulate a cache that was just discarded.
+  const resetWorkspaceState = (activeContextId: string | null) => {
+    refreshControllerRef.current?.abort();
+    refreshControllerRef.current = null;
+    refreshContextRef.current = activeContextId;
+    clearWorkspaceCaches(queryClient, activeContextId);
+  };
+
   const { mutate: mutateMode, isPending: isTogglingMode } = useMutation({
     mutationFn: api.setMode,
     onSuccess: async (result, requestedMode) => {
-      // Update the cached session first so the mode-aware org query cannot read
-      // the previous mode's fixtures when it is re-enabled.
-      const session = sessionQuery.data;
-      if (session) {
-        const nextSession: SessionInfo = { ...session, mode: result.mode };
-        setCachedSession(nextSession);
-        queryClient.setQueryData<SessionInfo>(['session'], nextSession);
+      try {
+        // Update the cached session first so the mode-aware org query cannot read
+        // the previous mode's fixtures when it is re-enabled.
+        const session = sessionQuery.data;
+        if (session) {
+          const nextSession: SessionInfo = { ...session, mode: result.mode };
+          setCachedSession(nextSession);
+          queryClient.setQueryData<SessionInfo>(['session'], nextSession);
+        }
+        // Cancel an in-flight demo org fetch before replacing the cache. Without
+        // this, a late response could repopulate demo orgs under a Live label.
+        await queryClient.cancelQueries({ queryKey: ['orgs'] });
+        resetWorkspaceState(null);
+        queryClient.setQueryData<OrgSummary[]>(['orgs'], []);
+        setFocusObject(null);
+        setModePreference(requestedMode);
+        setSelectedAlias(null);
+        setSelectedOrg(null);
+        // The connector exposes a different org list in each mode. Refresh it so
+        // a mode switch cannot leave the UI stuck on the previous mode's orgs.
+        invalidateWorkspaceState(queryClient);
+        setModeError('');
+        setModeNotice(requestedMode === 'demo'
+          ? 'Now using demo mode — sample metadata only.'
+          : hosted
+            ? 'Now using live mode — reading metadata through your local SF CLI bridge.'
+            : 'Now using live mode — reading metadata from your Salesforce CLI.');
+      } finally {
+        modePendingRef.current = false;
       }
-      // Cancel an in-flight demo org fetch before replacing the cache. Without
-      // this, a late response could repopulate demo orgs under a Live label.
-      await queryClient.cancelQueries({ queryKey: ['orgs'] });
-      clearWorkspaceCaches(queryClient, null);
-      queryClient.setQueryData<OrgSummary[]>(['orgs'], []);
-      setFocusObject(null);
-      setModePreference(requestedMode);
-      setSelectedAlias(null);
-      setSelectedOrg(null);
-      // The connector exposes a different org list in each mode. Refresh it so
-      // a mode switch cannot leave the UI stuck on the previous mode's orgs.
-      void queryClient.invalidateQueries({ queryKey: ['orgs'] });
-      void queryClient.invalidateQueries({ queryKey: ['health'] });
-      setModeError('');
-      setModeNotice(requestedMode === 'demo'
-        ? 'Now using demo mode — sample metadata only.'
-        : hosted
-          ? 'Now using live mode — reading metadata through your local SF CLI bridge.'
-          : 'Now using live mode — reading metadata from your Salesforce CLI.');
     },
     onError: (error, requestedMode) => {
+      modePendingRef.current = false;
       modeAppliedRef.current = null;
       failedModeRef.current = requestedMode;
       setModeError(`Couldn't switch to ${requestedMode} mode. ${error.message}`);
@@ -134,14 +161,37 @@ export function App() {
   });
 
   const refreshInventory = useMutation({
-    mutationFn: () => {
-      if (!context?.alias) throw new Error('Select an org first.');
-      return api.inventory(context.alias, { force: true });
+    mutationFn: async (target: WorkspaceContext | null) => {
+      // Supersede any refresh started under a previous org or mode.
+      refreshControllerRef.current?.abort();
+      const controller = new AbortController();
+      refreshControllerRef.current = controller;
+      refreshContextRef.current = target?.contextId ?? null;
+      try {
+        if (!target?.alias) throw new Error('Select an org first.');
+        return await api.inventory(target.alias, { force: true, signal: controller.signal });
+      } finally {
+        if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
+      }
     },
-    onSuccess: (snapshot: InventorySnapshot) => {
-      queryClient.setQueryData<InventorySnapshot>(['inventory', context?.contextId ?? 'none'], snapshot);
+    onSuccess: (snapshot: InventorySnapshot, target) => {
+      // A late response must never replace a different org's cached snapshot.
+      if (!target || target.contextId !== activeContextIdRef.current) return;
+      queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
+    },
+    onError: (error) => {
+      // Cancellation is a user action, not a failure worth surfacing as an error.
+      if (error instanceof ApiError && error.code === 'ABORTED') return;
     },
   });
+
+  useEffect(() => {
+    const nextContextId = context?.contextId ?? null;
+    if (refreshContextRef.current !== nextContextId) refreshControllerRef.current?.abort();
+    refreshContextRef.current = nextContextId;
+  }, [context?.contextId]);
+
+  useEffect(() => () => refreshControllerRef.current?.abort(), []);
 
   // Feedback is transient: it confirms the switch without becoming permanent chrome.
   useEffect(() => {
@@ -149,6 +199,25 @@ export function App() {
     const timer = window.setTimeout(() => setModeNotice(''), 5000);
     return () => window.clearTimeout(timer);
   }, [modeNotice]);
+
+  // The URL is the source of truth for deep links and browser history. Skip
+  // links stay fragment-only so assistive navigation never changes the view.
+  useEffect(() => {
+    const syncPageFromUrl = () => {
+      const hash = window.location.hash;
+      if (hash.replace(/^#/, '').toLowerCase() === 'main-content') return;
+      const nextPage = pageFromHash(hash);
+      setPage(nextPage);
+      if (hash !== pageHash(nextPage)) writePageHash(nextPage, 'replace');
+    };
+    syncPageFromUrl();
+    window.addEventListener('popstate', syncPageFromUrl);
+    window.addEventListener('hashchange', syncPageFromUrl);
+    return () => {
+      window.removeEventListener('popstate', syncPageFromUrl);
+      window.removeEventListener('hashchange', syncPageFromUrl);
+    };
+  }, []);
 
   useEffect(() => {
     const session = sessionQuery.data;
@@ -160,8 +229,9 @@ export function App() {
       return;
     }
     const transitionKey = `${session.mode}->${preferredMode}`;
-    if (modeAppliedRef.current === transitionKey) return;
+    if (modePendingRef.current || modeAppliedRef.current === transitionKey) return;
     modeAppliedRef.current = transitionKey;
+    modePendingRef.current = true;
     mutateMode(preferredMode);
     // `mutate` is stable; depending on the whole mutation object re-ran this
     // effect after every failure and created a retry loop.
@@ -170,7 +240,7 @@ export function App() {
   useEffect(() => {
     if (selectedAlias && visibleOrgs.some((org) => org.alias === selectedAlias)) return;
     const first = visibleOrgs[0] ?? null;
-    clearWorkspaceCaches(queryClient, createWorkspaceContext(mode, first)?.contextId ?? null);
+    resetWorkspaceState(createWorkspaceContext(mode, first)?.contextId ?? null);
     setSelectedAlias(first?.alias ?? null);
     setSelectedOrg(first?.alias ?? null);
   }, [visibleOrgs, selectedAlias, mode, queryClient]);
@@ -193,11 +263,11 @@ export function App() {
     // observing query has re-rendered, and inventory must start in this tick.
     const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(['orgs']) ?? [];
     const next = createWorkspaceContext(mode, cachedOrgs.find((org) => org.alias === alias) ?? null);
-    clearWorkspaceCaches(queryClient, next?.contextId ?? null);
+    resetWorkspaceState(next?.contextId ?? null);
     setFocusObject(null);
     setSelectedAlias(alias);
     setSelectedOrg(alias);
-    setPage('dashboard');
+    navigate('dashboard');
   };
 
   const hideOrg = (alias: string) => {
@@ -205,7 +275,7 @@ export function App() {
     setHiddenOrgs(next);
     setHiddenAliases(next);
     if (selectedAlias === alias) {
-      clearWorkspaceCaches(queryClient, null);
+      resetWorkspaceState(null);
       setFocusObject(null);
       setSelectedAlias(null);
       setSelectedOrg(null);
@@ -219,12 +289,16 @@ export function App() {
   };
 
   const toggleMode = () => {
+    if (modePendingRef.current) return;
     modeAppliedRef.current = null;
+    modePendingRef.current = true;
     setModeError('');
     mutateMode(mode === 'demo' ? 'live' : 'demo');
   };
 
   const retryMode = () => {
+    if (modePendingRef.current) return;
+    modePendingRef.current = true;
     setModeError('');
     mutateMode(failedModeRef.current);
   };
@@ -232,23 +306,23 @@ export function App() {
   const selectSearchResult = (result: CommandResult) => {
     if (result.kind === 'stream') {
       setFocusObject({ kind: 'stream', apiName: result.apiName });
-      setPage('data-streams');
+      navigate('data-streams');
       return;
     }
     if (result.kind === 'transform') {
       setFocusObject({ kind: 'transform', apiName: result.apiName });
-      setPage('data-transforms');
+      navigate('data-transforms');
       return;
     }
     if (result.kind !== 'dlo' && result.kind !== 'dmo') return;
     setFocusObject({ kind: result.kind, apiName: result.apiName });
-    setPage(result.kind === 'dlo' ? 'dlos' : 'dmos');
+    navigate(result.kind === 'dlo' ? 'dlos' : 'dmos');
   };
 
   const content = (() => {
     switch (page) {
       case 'dashboard':
-        return <Dashboard context={context} mode={mode} onNavigate={setPage} />;
+        return <Dashboard context={context} mode={mode} onNavigate={navigate} />;
       case 'orgs':
         return (
           <OrgConnections
@@ -289,6 +363,8 @@ export function App() {
         return <ErdExplorer context={context} />;
       case 'dictionary':
         return <DataDictionary context={context} />;
+      case 'help':
+        return <HelpPage onNavigate={navigate} />;
     }
   })();
 
@@ -297,17 +373,20 @@ export function App() {
       value={{
         context,
         mode,
-        onGoToOrgs: () => setPage('orgs'),
+        onGoToOrgs: () => navigate('orgs'),
         onToggleMode: toggleMode,
         isTogglingMode,
-        refreshInventory: () => refreshInventory.mutate(),
+        refreshInventory: () => refreshInventory.mutate(context),
+        cancelRefresh,
         isRefreshingInventory: refreshInventory.isPending,
-        refreshError: refreshInventory.error?.message ?? '',
+        refreshError: refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
+          ? ''
+          : refreshInventory.error?.message ?? '',
       }}
     >
       <AppShell
         page={page}
-        onNavigate={setPage}
+        onNavigate={navigate}
         context={context}
         onToggleMode={toggleMode}
         isTogglingMode={isTogglingMode}
@@ -317,9 +396,7 @@ export function App() {
         orgs={visibleOrgs}
         selectedAlias={selectedAlias}
         onSelectOrg={selectOrg}
-        onGoToOrgs={() => setPage('orgs')}
-        cliInstalled={healthQuery.data?.cli.installed ?? null}
-        cliVersion={healthQuery.data?.cli.version ?? null}
+        onGoToOrgs={() => navigate('orgs')}
         theme={theme}
         searchResults={searchResults}
         onSelectSearchResult={selectSearchResult}

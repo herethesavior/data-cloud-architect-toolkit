@@ -48,7 +48,7 @@ export function MappingExplorer({ context }: { context: WorkspaceContext | null 
 
   return (
     <InventoryBoundary query={query} context={context}>
-      {(inventory) => {
+      {(inventory, freshness) => {
         const mappings = filterByQuery(inventory.mappings, search, (mapping) => [
           mapping.apiName ?? '',
           mapping.sourceObject,
@@ -109,6 +109,7 @@ export function MappingExplorer({ context }: { context: WorkspaceContext | null 
                   <div className="w-full sm:w-72">
                     <SearchField value={search} onChange={setSearch} placeholder="Search mappings or fields" label="Search mappings" />
                   </div>
+                  {freshness}
                   <ExportMenu items={exportItems} />
                 </>
               }

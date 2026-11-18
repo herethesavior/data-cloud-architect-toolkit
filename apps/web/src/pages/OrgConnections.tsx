@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BridgeStatus, OrgSummary } from '@dcat/core';
 import { api } from '../lib/api.ts';
 import { isHosted } from '../lib/hosted.ts';
+import { invalidateBridgeState } from '../lib/workspace.ts';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
@@ -121,10 +122,7 @@ export function OrgConnections({
     enabled: !hosted || bridgeStatus?.mode === 'demo' || bridgeStatus?.paired === true,
   });
 
-  const invalidateSetup = () => {
-    void queryClient.invalidateQueries({ queryKey: ['bridge-status'] });
-    void queryClient.invalidateQueries({ queryKey: ['health'] });
-  };
+  const invalidateSetup = () => invalidateBridgeState(queryClient);
 
   const refreshCli = useMutation({
     mutationFn: api.refreshCli,
@@ -140,7 +138,7 @@ export function OrgConnections({
     onSuccess: (result) => {
       setSetupError('');
       setUpdateNotice(result.message);
-      void queryClient.invalidateQueries({ queryKey: ['bridge-status'] });
+      invalidateBridgeState(queryClient);
     },
     onError: (error: Error) => setSetupError(error.message),
   });
@@ -185,7 +183,7 @@ export function OrgConnections({
 
   const refreshOrgs = useMutation({
     mutationFn: api.refreshOrgs,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['orgs'] }),
+    onSuccess: () => invalidateBridgeState(queryClient),
   });
 
   const status = bridgeStatusQuery.data;

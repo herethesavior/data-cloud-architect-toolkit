@@ -474,7 +474,7 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
 
   await expect(page.locator('h1')).toHaveText('Dashboard');
   await expect(page.getByText('Live org metadata')).toBeVisible();
-  await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
+  await expect(page.locator('#main-content').getByTestId('inventory-freshness')).toBeVisible();
 
   expect(state.pairCalls).toBe(1);
   expect(state.pollCalls).toBeGreaterThan(0);
@@ -576,7 +576,7 @@ test('hosted demo stays fixture-backed, labelled, and gap-free', async ({ page }
   await expect(page.getByText('Sample inventory')).toBeVisible();
   await expect(page.getByText('Inventory loaded with gaps')).toHaveCount(0);
   await expect(page.locator('header').getByText(/^Updated /)).toHaveCount(0);
-  await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
+  await expect(page.locator('#main-content').getByTestId('inventory-freshness')).toBeVisible();
 
   expect(state.operations).toEqual([]);
   expect(state.pairCalls).toBe(0);

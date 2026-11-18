@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import type { OrgSummary } from '@dcat/core';
-import { NAV_GROUPS, PAGE_TITLES } from '../navigation.ts';
+import { NAV_GROUPS, PAGE_TITLES, pageHref } from '../navigation.ts';
 import type { Page } from '../navigation.ts';
 import type { CommandResult } from '../lib/commandSearch.ts';
 import { trapDialogFocus } from '../lib/focusTrap.ts';
@@ -33,6 +33,7 @@ const pageIcons: Record<Page, IconName> = {
   erd: 'graph',
   dictionary: 'book',
   settings: 'settings',
+  help: 'info',
 };
 
 interface AppShellProps {
@@ -48,8 +49,6 @@ interface AppShellProps {
   selectedAlias: string | null;
   onSelectOrg: (alias: string) => void;
   onGoToOrgs: () => void;
-  cliInstalled: boolean | null;
-  cliVersion?: string | null;
   theme: ThemeController;
   searchResults: CommandResult[];
   onSelectSearchResult: (result: CommandResult) => void;
@@ -61,6 +60,17 @@ interface NavigationListProps {
   onNavigate: (page: Page) => void;
   label: string;
   collapsed?: boolean;
+}
+
+/** Preserve browser behavior for modified clicks while routing plain clicks. */
+function navigateFromLink(
+  event: MouseEvent<HTMLAnchorElement>,
+  page: Page,
+  onNavigate: (page: Page) => void,
+) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  onNavigate(page);
 }
 
 function NavigationList({ page, onNavigate, label, collapsed = false }: NavigationListProps) {
@@ -76,10 +86,10 @@ function NavigationList({ page, onNavigate, label, collapsed = false }: Navigati
             {group.items.map((item) => {
               const active = item.id === page;
               return (
-                <button
+                <a
                   key={item.id}
-                  type="button"
-                  onClick={() => onNavigate(item.id)}
+                  href={pageHref(item.id)}
+                  onClick={(event) => navigateFromLink(event, item.id, onNavigate)}
                   aria-current={active ? 'page' : undefined}
                   aria-label={collapsed ? item.label : undefined}
                   title={collapsed ? item.label : undefined}
@@ -90,7 +100,7 @@ function NavigationList({ page, onNavigate, label, collapsed = false }: Navigati
                   {active ? (
                     <span aria-hidden="true" className="sidebar-active-dot ml-auto size-1.5 rounded-full bg-brand" />
                   ) : null}
-                </button>
+                </a>
               );
             })}
           </div>
@@ -202,8 +212,6 @@ export function AppShell({
   selectedAlias,
   onSelectOrg,
   onGoToOrgs,
-  cliInstalled,
-  cliVersion,
   theme,
   searchResults,
   onSelectSearchResult,
@@ -216,7 +224,6 @@ export function AppShell({
   const [metadataResult, setMetadataResult] = useState<CommandResult | null>(null);
   const selectedOrg = orgs.find((org) => org.alias === selectedAlias) ?? null;
   const groupLabel = NAV_GROUPS.find((group) => group.items.some((item) => item.id === page))?.label ?? 'Workspace';
-  const cliTone = cliInstalled === true ? 'success' : cliInstalled === false ? 'danger' : 'neutral';
   const badge = workspaceBadge(context);
   const activeMode = context?.mode ?? 'live';
 
@@ -272,14 +279,20 @@ export function AppShell({
             <p className="truncate text-xs text-ink-soft">Data Cloud Architect Toolkit</p>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-3 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           <NavigationList page={page} onNavigate={navigate} label="Main navigation" collapsed={sidebarCollapsed} />
         </div>
         <div className="sidebar-footer border-t border-line p-4">
           <div className="rounded-lg bg-surface-alt p-3">
-            <div className="sidebar-footer-heading flex items-center gap-2 text-ink-soft">
+            <div
+              className="sidebar-footer-heading flex items-center gap-2 text-ink-soft"
+              title={hosted ? 'Hosted edition — read-only metadata' : 'Local-first — read-only metadata'}
+            >
               <Icon name="shield" size={16} />
               <p className="label-xs sidebar-label">{hosted ? 'Hosted edition' : 'Local-first'}</p>
+              {sidebarCollapsed ? (
+                <span className="sr-only">{hosted ? 'Hosted edition' : 'Local-first'}</span>
+              ) : null}
             </div>
             <p className="sidebar-label mt-1.5 text-xs text-ink-soft">
               {hosted
@@ -377,6 +390,16 @@ export function AppShell({
                 </Button>
                 <Button
                   variant="quiet"
+                  onClick={() => navigate('help')}
+                  aria-label="Help"
+                  title="Help and documentation"
+                  className="px-2"
+                >
+                  <Icon name="info" size={17} />
+                  <span className="hidden xl:inline">Help</span>
+                </Button>
+                <Button
+                  variant="quiet"
                   onClick={theme.toggle}
                   aria-label={`Switch to ${theme.resolved === 'dark' ? 'light' : 'dark'} theme`}
                   title={`Switch to ${theme.resolved === 'dark' ? 'light' : 'dark'} theme`}
@@ -384,11 +407,6 @@ export function AppShell({
                 >
                   <Icon name={theme.resolved === 'dark' ? 'sun' : 'moon'} size={17} />
                 </Button>
-                <Badge tone={cliTone} className="hidden xl:inline-flex" dot>
-                  <span title={cliVersion ?? undefined}>
-                    {cliInstalled === true ? 'SF CLI ready' : cliInstalled === false ? 'SF CLI missing' : 'SF CLI checking'}
-                  </span>
-                </Badge>
               </div>
             </div>
           </div>
@@ -430,6 +448,7 @@ export function AppShell({
             onSelect={selectSearchResult}
             onGoToOrgs={() => navigate('orgs')}
             onToggleMode={onToggleMode}
+            isTogglingMode={isTogglingMode}
           />
         ) : null}
         {metadataResult ? (

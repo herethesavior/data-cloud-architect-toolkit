@@ -204,7 +204,7 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
 
   return (
     <InventoryBoundary query={query} context={context}>
-      {(inventory) => {
+      {(inventory, freshness) => {
         const capability = findCapability(inventory, 'data-streams');
         const statusOptions = [...new Set(
           inventory.dataStreams.map((stream) => streamValue(stream.status, 'Status unknown')),
@@ -340,6 +340,7 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
                       {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
                     </select>
                   </label>
+                  {freshness}
                   <ExportMenu items={exportItems} />
                 </>
               }

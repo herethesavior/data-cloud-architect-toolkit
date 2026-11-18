@@ -43,9 +43,10 @@ export function isUnsupportedWarning(warning: RetrievalWarning): boolean {
   return warning.code === 'UNSUPPORTED' || disabledText.test(warning.message);
 }
 
-/** Unsupported families are a capability finding, not something a retry can fix. */
+/** Unsupported and informational findings are context, not something a retry can fix. */
 export function actionableWarnings(inventory: InventorySnapshot): RetrievalWarning[] {
-  return inventory.warnings.filter((warning) => !isUnsupportedWarning(warning));
+  return inventory.warnings.filter((warning) =>
+    warning.severity !== 'info' && !isUnsupportedWarning(warning));
 }
 
 export function data360NotEnabled(inventory: InventorySnapshot): boolean {
@@ -73,7 +74,7 @@ export function resourceStatusMessage(capability: ApiCapability): string {
     const count = capability.itemCount ?? 0;
     return `${count} ${count === 1 ? 'item' : 'items'} loaded; some results may be missing. ${capability.message ?? ''}`.trim();
   }
-  if (capability.status === 'not-started') return 'Not started.';
+  if (capability.status === 'not-started') return capability.message ?? 'Not started.';
   return capability.message ?? 'Loaded successfully.';
 }
 
@@ -88,7 +89,8 @@ function aggregateState(capabilities: ApiCapability[], loading: boolean): Resour
   if (loading && capabilities.length === 0) return 'loading';
   if (capabilities.some((capability) => capability.status === 'error' || capability.status === 'forbidden')) return 'blocked';
   if (capabilities.some((capability) => capability.status === 'partial')) return 'partial';
-  if (capabilities.length > 0 && capabilities.every((capability) => capability.status === 'available')) return 'complete';
+  if (capabilities.length > 0 && capabilities.every((capability) =>
+    capability.status === 'available' || capability.status === 'not-started')) return 'complete';
   if (capabilities.some((capability) => capability.status === 'unsupported')) return 'partial';
   return 'pending';
 }
@@ -131,6 +133,7 @@ export function discoveryStages(
     const blocking = capabilities.find((capability) => capability.status === 'error' || capability.status === 'forbidden');
     const partial = capabilities.find((capability) => capability.status === 'partial');
     const unsupported = capabilities.filter((capability) => capability.status === 'unsupported');
+    const skipped = capabilities.find((capability) => capability.status === 'not-started');
 
     let detail = 'Waiting for the inventory snapshot.';
     if (state === 'loading') detail = `Checking ${stage.families.map(humanizeResource).join(', ')}…`;
@@ -140,6 +143,7 @@ export function discoveryStages(
     } else if (unsupported.length > 0) {
       detail = `${unsupported.length} ${unsupported.length === 1 ? 'family' : 'families'} unavailable for this org.`;
     } else if (partial) detail = resourceStatusMessage(partial);
+    else if (skipped) detail = resourceStatusMessage(skipped);
     else if (capabilities.length > 0) detail = `${loaded} ${loaded === 1 ? 'item' : 'items'} across ${stage.families.map(humanizeResource).join(', ')}.`;
 
     return { id: stage.id, label: stage.label, state, detail };

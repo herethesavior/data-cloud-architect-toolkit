@@ -25,7 +25,7 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
 
   return (
     <InventoryBoundary query={query} context={context}>
-      {(inventory) => {
+      {(inventory, freshness) => {
         const spaces = filterByQuery(inventory.dataSpaces, search, (space) => [
           space.apiName,
           space.label ?? '',
@@ -95,6 +95,7 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
                   <div className="w-full sm:w-64">
                     <SearchField value={search} onChange={setSearch} placeholder="Search spaces" label="Search data spaces" />
                   </div>
+                  {freshness}
                   <ExportMenu items={exportItems} />
                 </>
               }

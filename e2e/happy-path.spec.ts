@@ -59,16 +59,23 @@ function createConnectorState(): ConnectorState {
   };
 }
 
+interface MockConnectorOptions {
+  modeDelayMs?: number;
+  modeCalls?: string[];
+}
+
 /** Mock connector: no CLI, no real org, deterministic and mode-aware fixtures. */
-async function mockConnector(page: Page, state: ConnectorState) {
+async function mockConnector(page: Page, state: ConnectorState, options: MockConnectorOptions = {}) {
   await page.route('**/api/session', (route: Route) =>
     route.fulfill({ json: { token: 'e2e-token', mode: state.mode } }),
   );
   await page.route('**/api/mode', async (route: Route) => {
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON() as { mode?: string };
+      options.modeCalls?.push(body.mode ?? '');
       if (body.mode === 'demo' || body.mode === 'live') state.mode = body.mode;
     }
+    if (options.modeDelayMs) await new Promise((resolve) => setTimeout(resolve, options.modeDelayMs));
     await route.fulfill({ json: { mode: state.mode } });
   });
   await page.route('**/api/health', (route: Route) =>
@@ -141,6 +148,7 @@ test('demo first impression shows the inventory and the CTA opens an explorer', 
   );
   await expect(page.getByText('Sample metadata only — no Salesforce org is connected.')).toHaveCount(0);
   await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect(page.locator('header').getByText(/SF CLI (ready|missing|checking)/)).toHaveCount(0);
   await expect(page.getByText('Your Data 360 model, clearly mapped.')).toBeVisible();
   await expect(page.getByText('Data Lake Objects')).toBeVisible();
   await expect(page.getByText('Complete · 100%')).toBeVisible();
@@ -162,6 +170,34 @@ test('org switcher and details page use the authenticated demo org', async ({ pa
   await expect(
     page.getByRole('table', { name: 'Authenticated Salesforce orgs' }).getByText('demo-uat', { exact: true }),
   ).toBeVisible();
+});
+
+test('menu links use fragments and browser history restores the right view', async ({ page }) => {
+  await openDemo(page);
+  const sidebar = page.locator('#desktop-sidebar');
+
+  await expect(sidebar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', './');
+  const dloLink = sidebar.getByRole('link', { name: 'DLO Explorer' });
+  await expect(dloLink).toHaveAttribute('href', '#dlos');
+
+  await dloLink.click();
+  await expect.poll(() => new URL(page.url()).hash).toBe('#dlos');
+  await expect(page.locator('h1')).toHaveText('DLO Explorer');
+
+  await page.goBack();
+  await expect.poll(() => new URL(page.url()).hash).toBe('');
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+
+  await page.goForward();
+  await expect.poll(() => new URL(page.url()).hash).toBe('#dlos');
+  await expect(page.locator('h1')).toHaveText('DLO Explorer');
+
+  await page.goto('/#does-not-exist');
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+  await expect.poll(() => new URL(page.url()).hash).toBe('');
+
+  await page.goto('/#data-streams');
+  await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
 });
 
 test('switching to live mode announces the context and never flashes demo metadata', async ({ page }) => {
@@ -191,7 +227,7 @@ test('switching to live mode announces the context and never flashes demo metada
   await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
   await expect(page.getByText('Live org metadata')).toBeVisible();
 
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
   const liveRows = page.getByRole('table', { name: 'DLO Explorer results' });
   await expect(liveRows.getByText('Production Account')).toBeVisible();
   await expect(liveRows.getByText('Account DLO', { exact: true })).toHaveCount(0);
@@ -200,7 +236,7 @@ test('switching to live mode announces the context and never flashes demo metada
   await page.evaluate(() => window.__switchObserver?.disconnect());
 });
 
-test('switching demo to live keeps the header height stable and freshness in the inventory strip', async ({ page }) => {
+test('switching demo to live keeps the header height stable and freshness in a compact chip', async ({ page }) => {
   await openDemo(page);
   await expect(page.getByText('Sample inventory')).toBeVisible();
 
@@ -209,9 +245,18 @@ test('switching demo to live keeps the header height stable and freshness in the
   const titleHeight = () => titleBlock.evaluate((element) => element.getBoundingClientRect().height);
   const demoTitleHeight = await titleHeight();
   await expect(header.getByText(/^Updated /)).toHaveCount(0);
-  const freshness = page.locator('#main-content').getByText(/^Updated /);
+  const freshness = page.locator('#main-content').getByTestId('inventory-freshness');
   await expect(freshness).toBeVisible();
+  await expect(freshness).toHaveText(/^Updated /);
   await expect(freshness.locator('[title^="Updated "]')).toHaveAttribute('title', /Updated .*\d{4}/);
+  const chip = await freshness.boundingBox();
+  expect(chip, 'freshness chip bounds').not.toBeNull();
+  expect(chip!.height).toBeLessThanOrEqual(40);
+  expect(chip!.width).toBeLessThan(280);
+  await expect(freshness.getByRole('button', { name: 'Refresh inventory' })).toHaveAttribute(
+    'title',
+    'Refresh this inventory from the local connector',
+  );
 
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
   await expect(header.getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
@@ -219,7 +264,19 @@ test('switching demo to live keeps the header height stable and freshness in the
 
   expect(await titleHeight()).toBe(demoTitleHeight);
   await expect(header.getByText(/^Updated /)).toHaveCount(0);
-  await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
+  await expect(page.locator('#main-content').getByTestId('inventory-freshness')).toBeVisible();
+});
+
+test('mode changes refresh diagnostics in the currently open view', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+
+  const modeFact = page.locator('dt').filter({ hasText: /^Mode$/ }).locator('..');
+  await expect(modeFact).toContainText('demo');
+
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await expect(modeFact).toContainText('live');
 });
 
 test('live Discovery Health and Needs attention stay inside the viewport', async ({ page }) => {
@@ -348,7 +405,7 @@ test('switching live orgs replaces cached metadata instead of showing the previo
   await page.goto('/');
 
   await expect(page.getByLabel('Selected organization')).toHaveValue('prod-org');
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
   const rows = page.getByRole('table', { name: 'DLO Explorer results' });
   await expect(rows.getByText('Production Account')).toBeVisible();
   await expect(rows.getByText('Sandbox Account')).toHaveCount(0);
@@ -358,7 +415,7 @@ test('switching live orgs replaces cached metadata instead of showing the previo
   // Selecting an org returns to the Dashboard to establish the new context.
   await expect(page.locator('h1')).toHaveText('Dashboard');
   await expect(page.locator('header').getByText('LIVE · SANDBOX', { exact: true })).toBeVisible();
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
   await expect(rows.getByText('Sandbox Account')).toBeVisible();
   await expect(rows.getByText('Production Account')).toHaveCount(0);
 });
@@ -366,7 +423,7 @@ test('switching live orgs replaces cached metadata instead of showing the previo
 test('object details use tabs, breadcrumbs, and metadata copy actions', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
 
   const rows = page.getByRole('table', { name: 'DLO Explorer results' });
   await expect(rows.getByText('Has mapping').first()).toBeVisible();
@@ -395,7 +452,7 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
   await expect(page.locator('header').getByRole('button', { name: 'Refresh inventory' })).toHaveCount(0);
   await expect(page.getByRole('main').getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
 
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
   await expect(page.getByRole('main').getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
 
   await page.getByRole('table', { name: 'DLO Explorer results' }).getByRole('button', { name: 'Details', exact: true }).first().click();
@@ -439,10 +496,33 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
   expect(catcherStyle.backdrop).toBe('none');
 });
 
+test('a slow refresh can be cancelled instead of leaving a permanent spinner', async ({ page }) => {
+  await openDemo(page);
+  let routeFinished = false;
+  await page.route('**/api/orgs/*/inventory?refresh=1', async (route: Route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await route.fulfill({ json: demoInventory });
+    routeFinished = true;
+  });
+
+  await page.getByRole('button', { name: 'Refresh inventory' }).click();
+  const skeleton = page.getByTestId('inventory-refresh-skeleton');
+  await expect(skeleton).toBeVisible();
+  await expect(page.getByText('Sample inventory')).toHaveCount(0);
+  await expect(skeleton.getByRole('button', { name: 'Cancel refresh' })).toBeVisible();
+  await skeleton.getByRole('button', { name: 'Cancel refresh' }).click();
+
+  await expect(skeleton).toBeHidden();
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect.poll(() => routeFinished).toBe(true);
+});
+
 test('detail drawer content scrolls inside a short viewport', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 520 });
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Transform Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Transform Explorer' }).click();
   await page.getByRole('table', { name: 'Data Transform Explorer results' })
     .getByRole('button', { name: 'Details', exact: true })
     .first()
@@ -475,16 +555,16 @@ test('live export surfaces the metadata sharing notice', async ({ page }) => {
   await page.goto('/');
 
   const notice = "This export contains metadata about your Salesforce org. Store and share it according to your organization's security policies.";
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Dictionary' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
   await expect(page.getByText(notice)).toBeVisible();
 
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'ERD Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'ERD Explorer' }).click();
   await expect(page.getByText(notice)).toBeVisible();
 });
 
 test('data stream explorer shows grounded source-to-target detail and visible exports', async ({ page }) => {
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Stream Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Stream Explorer' }).click();
   await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
 
   const rows = page.getByRole('table', { name: 'Data Stream Explorer results' });
@@ -523,7 +603,7 @@ test('data stream explorer shows grounded source-to-target detail and visible ex
 
 test('data transform explorer shows grounded detail, lineage, and run states', async ({ page }) => {
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Transform Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Transform Explorer' }).click();
   await expect(page.locator('h1')).toHaveText('Data Transform Explorer');
 
   const rows = page.getByRole('table', { name: 'Data Transform Explorer results' });
@@ -577,7 +657,7 @@ test('data transform explorer shows grounded detail, lineage, and run states', a
 
 test('ERD Explorer shows the richer demo model and filters grounded edges', async ({ page }) => {
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'ERD Explorer' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'ERD Explorer' }).click();
 
   await expect(page.locator('h1')).toHaveText('ERD Explorer');
   await expect(page.getByText('8 objects', { exact: true })).toBeVisible();
@@ -590,7 +670,7 @@ test('ERD Explorer shows the richer demo model and filters grounded edges', asyn
 
 test('export menu consolidates local export formats', async ({ page }) => {
   await openDemo(page);
-  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Dictionary' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
 
   const trigger = page.getByRole('button', { name: 'Export' });
   await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
@@ -598,6 +678,8 @@ test('export menu consolidates local export formats', async ({ page }) => {
 
   const menu = page.getByRole('menu', { name: 'Export' });
   await expect(menu).toBeVisible();
+  expect(await menu.evaluate((element) => element.parentElement === document.body)).toBe(true);
+  expect(await menu.evaluate((element) => Boolean(element.closest('#main-content')))).toBe(false);
   for (const format of ['CSV', 'JSON', 'Markdown']) {
     await expect(menu.getByRole('menuitem', { name: new RegExp(format) })).toBeVisible();
   }
@@ -605,6 +687,40 @@ test('export menu consolidates local export formats', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test('Help page explains DCAT, Data Cloud terms, privacy, and authorship', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('header').getByRole('button', { name: 'Help' }).click();
+
+  await expect(page.locator('h1')).toHaveText('Help');
+  await expect(page.getByRole('heading', { name: 'Help & documentation' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'What is DCAT?' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText(/Read metadata with allowlisted, read-only Salesforce CLI commands/)).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Data Cloud glossary' }).click();
+  await expect(page.getByText('Data Lake Object (DLO)')).toBeVisible();
+  await expect(page.getByText('Discovery Health')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Privacy' }).click();
+  await expect(page.getByText('No hosted OAuth')).toBeVisible();
+  await expect(page.getByText(/\/api\/auth\/\* routes are intentionally removed and return 404/)).toBeVisible();
+
+  await page.getByRole('tab', { name: 'About & contact' }).click();
+  await expect(page.getByText('Ryan Joshua Dela Cruz')).toBeVisible();
+  await expect(page.getByText('Technical Architect at Salesforce')).toBeVisible();
+  await expect(page.getByText(/Created in a personal capacity/)).toBeVisible();
+  await expect(page.getByRole('link', { name: /Open GitHub Issues \(opens in a new tab\)/ })).toHaveAttribute(
+    'href',
+    'https://github.com/herethesavior/data-cloud-architect-toolkit/issues',
+  );
+  await expect(page.getByRole('link', { name: /Connect on LinkedIn \(opens in a new tab\)/ })).toHaveAttribute(
+    'href',
+    'https://www.linkedin.com/in/ryanjoshuadc',
+  );
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Help' }).click();
+  await expect(page.locator('h1')).toHaveText('Help');
 });
 
 test('theme toggle switches to dark and persists across reloads', async ({ page }) => {
@@ -645,12 +761,16 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute('aria-expanded', 'false');
   await expect(sidebar).toHaveAttribute('data-collapsed', 'true');
   await expect(sidebar.locator('img[src="/dcat-icon-192.png"]')).toBeVisible();
-  const dloItem = sidebar.getByRole('button', { name: 'DLO Explorer' });
+  const dloItem = sidebar.getByRole('link', { name: 'DLO Explorer' });
   await expect(dloItem).toBeVisible();
   await expect(sidebar.locator('.sidebar-label').first()).toBeHidden();
   await expect(sidebar.locator('.nav-item svg').first()).toHaveAttribute('width', '20');
   expect((await dloItem.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
-  await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(2);
+  await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(3);
+  await expect(sidebar.locator('.sidebar-footer-heading')).toHaveAttribute(
+    'title',
+    'Local-first — read-only metadata',
+  );
   const collapsedWidth = (await sidebar.boundingBox())?.width ?? 0;
   expect(collapsedWidth).toBeLessThan(expandedWidth - 150);
 
@@ -661,6 +781,27 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await expect(page.locator('#desktop-sidebar .sidebar-label').first()).toBeVisible();
   await expect(page.locator('#desktop-sidebar .nav-item svg').first()).toHaveAttribute('width', '18');
   await expect(page.locator('#desktop-sidebar nav > div > div[aria-hidden="true"]')).toHaveCount(0);
+});
+
+test('edition status stays visible while long pages scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
+  await expect(page.locator('h1')).toHaveText('Data Dictionary');
+
+  const scrollY = await page.evaluate(() => {
+    window.scrollTo(0, document.body.scrollHeight);
+    return window.scrollY;
+  });
+  expect(scrollY).toBeGreaterThan(0);
+
+  const footer = page.locator('#desktop-sidebar .sidebar-footer');
+  await expect(footer).toBeVisible();
+  await expect(footer).toContainText('Local-first');
+  const box = await footer.boundingBox();
+  expect(box, 'sidebar footer bounds').not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(-1);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(521);
 });
 
 test('detail drawer contains keyboard focus and closes on Escape', async ({ page }) => {
@@ -689,8 +830,12 @@ test('reduced motion disables transitions and entrance animations', async ({ pag
       page: pageContent ? getComputedStyle(pageContent).animationDuration : 'missing',
     };
   });
-  expect(parseFloat(durations.sidebar)).toBeLessThan(0.001);
-  expect(parseFloat(durations.page)).toBeLessThan(0.001);
+  const toMilliseconds = (value: string) => {
+    const amount = parseFloat(value);
+    return value.endsWith('ms') ? amount : amount * 1000;
+  };
+  expect(toMilliseconds(durations.sidebar)).toBeLessThan(1);
+  expect(toMilliseconds(durations.page)).toBeLessThan(1);
 });
 
 test('layout has no horizontal overflow at laptop, tablet, and phone widths', async ({ page }) => {
@@ -726,9 +871,10 @@ test('every screen fits a phone viewport', async ({ page }) => {
     'ERD Explorer',
     'Data Dictionary',
     'Settings & Diagnostics',
+    'Help',
   ]) {
     await page.getByRole('button', { name: 'Open navigation' }).click();
-    await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name }).click();
+    await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('link', { name }).click();
     await expect(page.locator('h1')).toHaveText(name);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -829,4 +975,100 @@ test('command palette no-inventory state leads with org selection and demo fallb
   await expect(palette.getByText('No inventory available')).toBeVisible();
   await expect(palette.getByRole('button', { name: 'Select an org' })).toBeVisible();
   await expect(palette.getByRole('button', { name: 'Use demo mode' })).toBeVisible();
+});
+
+test('rapid mode toggles queue only one switch and settle in the requested mode', async ({ page }) => {
+  const state = createConnectorState();
+  const modeCalls: string[] = [];
+  await mockConnector(page, state, { modeDelayMs: 500, modeCalls });
+  await page.goto('/');
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+
+  const toggle = page.locator('header').getByRole('button', { name: 'Switch to live mode' });
+  await toggle.evaluate((button) => {
+    button.click();
+    button.click();
+    button.click();
+  });
+
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+  expect(modeCalls).toEqual(['live']);
+  await expect(page.locator('header').getByRole('button', { name: 'Switch to demo mode' })).toBeEnabled();
+});
+
+test('a refresh started before a mode switch cannot repopulate the old context', async ({ page }) => {
+  const state = createConnectorState();
+  await mockConnector(page, state);
+  await page.goto('/');
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+
+  let refreshCompleted = false;
+  await page.route('**/api/orgs/*/inventory?refresh=1', async (route: Route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.fulfill({ json: demoInventory });
+    refreshCompleted = true;
+  });
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  await page.getByRole('button', { name: 'Refresh inventory' }).click();
+  await expect(page.getByTestId('inventory-refresh-skeleton')).toBeVisible();
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+  await expect(page.getByTestId('inventory-refresh-skeleton')).toHaveCount(0);
+  await expect(page.getByText('Sample inventory')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect.poll(() => refreshCompleted).toBe(true);
+  expect(pageErrors).toEqual([]);
+
+  await page.getByRole('button', { name: 'Switch to demo mode' }).click();
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toHaveCount(0);
+});
+
+test('pending mode switches keep every demo recovery path disabled and single-shot', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  state.orgs = [];
+  const modeCalls: string[] = [];
+  await seedLiveMode(page);
+  await mockConnector(page, state, { modeDelayMs: 600, modeCalls });
+  await page.goto('/');
+
+  await expect(page.locator('header').getByText('LIVE · NOT CONNECTED', { exact: true })).toBeVisible();
+  const headerRecovery = page.locator('header').getByRole('button', { name: 'Switch to demo mode' });
+  await headerRecovery.click();
+  await expect(headerRecovery).toBeDisabled();
+
+  await page.keyboard.press('Control+k');
+  const palette = page.getByRole('dialog', { name: 'Search metadata' });
+  await expect(palette.getByRole('button', { name: 'Use demo mode' })).toBeDisabled();
+
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  expect(modeCalls).toEqual(['demo']);
+});
+
+test('browser history during a live org switch keeps the selected context', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/#dlos');
+
+  const rows = page.getByRole('table', { name: 'DLO Explorer results' });
+  await expect(rows.getByText('Production Account')).toBeVisible();
+  await page.getByLabel('Selected organization').selectOption('sandbox-org');
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+
+  await page.goBack();
+  await expect(page.locator('h1')).toHaveText('DLO Explorer');
+  await expect(rows.getByText('Sandbox Account')).toBeVisible();
+  await expect(rows.getByText('Production Account')).toHaveCount(0);
+
+  await page.goForward();
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+  await expect(page.getByText('Sandbox Account')).toHaveCount(0);
 });
