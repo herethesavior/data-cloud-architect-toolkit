@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrgSummary, SessionInfo } from '@dcat/core';
+import { demoInventory } from '@dcat/test-fixtures';
 import { api, clearCachedSession, getSession } from './api.ts';
 
 function jsonResponse(body: unknown, status = 200) {
@@ -246,5 +247,52 @@ describe('web API session handling', () => {
     controller.abort();
 
     await expect(pending).rejects.toMatchObject({ code: 'ABORTED' });
+  });
+
+  it('applies resume only to the first status poll', async () => {
+    vi.useFakeTimers();
+    const running = {
+      ...demoInventory,
+      progress: {
+        sessionId: 'session-1',
+        generation: 'gen-1',
+        state: 'running' as const,
+        loaded: 1,
+        total: null,
+        families: [],
+        message: 'Loading metadata in small batches.',
+      },
+    };
+    const complete = {
+      ...running,
+      progress: {
+        ...running.progress,
+        state: 'complete' as const,
+        message: 'All discovered metadata is loaded.',
+      },
+    };
+    let statusCalls = 0;
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/orgs/prod-org/inventory/session/session-1') {
+        statusCalls += 1;
+        return jsonResponse({ sessionId: 'session-1', snapshot: statusCalls === 1 ? running : complete });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = api.inventory('prod-org', { sessionId: 'session-1', resume: true, family: 'dlos' });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(750);
+
+    await expect(pending).resolves.toMatchObject({ progress: { state: 'complete' } });
+    const statusBodies = fetchMock.mock.calls
+      .filter(([path]) => path === '/api/orgs/prod-org/inventory/session/session-1')
+      .map(([, options]) => JSON.parse(String(options?.body ?? '{}')));
+    expect(statusBodies).toEqual([
+      { resume: true, family: 'dlos' },
+      { resume: false, family: 'dlos' },
+    ]);
   });
 });

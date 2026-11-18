@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
+import type { ResourceFamily } from '@dcat/core';
 import type { WorkspaceContext } from './workspace.ts';
 
 export type OrgListState =
@@ -18,6 +19,8 @@ export interface InventoryActions {
   cancelRefresh: () => void;
   isRefreshingInventory: boolean;
   refreshError: string;
+  resumeDiscovery?: (family?: ResourceFamily) => void;
+  isResumingDiscovery?: boolean;
 }
 
 const InventoryActionsContext = createContext<InventoryActions | null>(null);

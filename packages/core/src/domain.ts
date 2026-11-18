@@ -264,6 +264,47 @@ export const retrievalWarningSchema = z.object({
 
 export type RetrievalWarning = z.infer<typeof retrievalWarningSchema>;
 
+export const DISCOVERY_SESSION_STATES = ['running', 'partial', 'complete', 'failed'] as const;
+export type DiscoverySessionState = (typeof DISCOVERY_SESSION_STATES)[number];
+
+export const FAMILY_PROGRESS_STATES = [
+  'not-started',
+  'running',
+  'partial',
+  'complete',
+  'failed',
+  'skipped',
+] as const;
+export type FamilyProgressState = (typeof FAMILY_PROGRESS_STATES)[number];
+
+/**
+ * Per-family retrieval counters. `total` is null until Salesforce reports one;
+ * the UI must never turn an unknown total into a misleading denominator.
+ */
+export const familyProgressSchema = z.object({
+  family: z.enum(RESOURCE_FAMILIES),
+  status: z.enum(FAMILY_PROGRESS_STATES),
+  loaded: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative().nullable(),
+  pagesFetched: z.number().int().nonnegative(),
+  hasMore: z.boolean(),
+  error: z.string().nullish(),
+});
+
+export type FamilyProgress = z.infer<typeof familyProgressSchema>;
+
+export const discoveryProgressSchema = z.object({
+  sessionId: z.string(),
+  generation: z.string(),
+  state: z.enum(DISCOVERY_SESSION_STATES),
+  loaded: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative().nullable(),
+  families: z.array(familyProgressSchema),
+  message: z.string().nullish(),
+});
+
+export type DiscoveryProgress = z.infer<typeof discoveryProgressSchema>;
+
 export const inventorySnapshotSchema = z.object({
   org: orgSummarySchema,
   apiVersion: z.string().nullish(),
@@ -278,6 +319,7 @@ export const inventorySnapshotSchema = z.object({
   dataTransforms: z.array(dataTransformSchema),
   relationships: z.array(relationshipEdgeSchema),
   warnings: z.array(retrievalWarningSchema),
+  progress: discoveryProgressSchema.optional(),
 });
 
 export type InventorySnapshot = z.infer<typeof inventorySnapshotSchema>;

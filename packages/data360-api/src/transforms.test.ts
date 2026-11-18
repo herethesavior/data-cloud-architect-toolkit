@@ -6,7 +6,6 @@ import {
   forbiddenRestOutput,
   transformDetailJson,
   transformRunHistoryJson,
-  transformRunHistoryPage1Json,
   transformScheduleEmptyJson,
   transformScheduleJson,
   unsupportedRestOutput,
@@ -146,11 +145,21 @@ describe('lazy transform bundle retrieval', () => {
   });
 
   it('bounds run-history pagination without affecting other sections', async () => {
-    const tokenPath = `${runPath}?nextToken=transform-page-2`;
+    // Use a distinct cursor and record on every page so the cap, not dedupe
+    // or loop detection, is what stops retrieval.
+    const pages: Record<string, string> = {
+      [runPath]: JSON.stringify({ records: [{ runId: 'run-0' }], nextToken: 'token-1' }),
+    };
+    for (let page = 1; page < MAX_TRANSFORM_RUN_PAGES; page += 1) {
+      pages[`${runPath}?nextToken=token-${page}`] = JSON.stringify({
+        records: [{ runId: `run-${page}` }],
+        // Keep a cursor on the final page so the cap, not exhaustion, is hit.
+        nextToken: `token-${page + 1}`,
+      });
+    }
     const client = fakeClient({
       [detailPath]: transformDetailJson,
-      [runPath]: transformRunHistoryPage1Json,
-      [tokenPath]: transformRunHistoryPage1Json,
+      ...pages,
       [schedulePath]: transformScheduleJson,
     });
 

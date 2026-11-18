@@ -202,6 +202,16 @@ function resultFor(state: HostedState, operation: RelayOperation): unknown {
     }
     case 'inventory.get':
       return state.inventories[operation.alias] ?? liveInventory(demoOrgs[0]!, 'Live Account DLO');
+    case 'inventory.start':
+      return {
+        sessionId: `e2e-${operation.alias}`,
+        snapshot: state.inventories[operation.alias] ?? liveInventory(demoOrgs[0]!, 'Live Account DLO'),
+      };
+    case 'inventory.status':
+      return {
+        sessionId: operation.sessionId,
+        snapshot: state.inventories[operation.alias] ?? liveInventory(demoOrgs[0]!, 'Live Account DLO'),
+      };
     case 'transform.get': {
       const bundle = demoTransformBundles[operation.id];
       if (!bundle) throw new Error(`Unknown transform fixture: ${operation.id}`);
@@ -239,7 +249,13 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
         ? json(route, bundle)
         : json(route, { error: { code: 'TRANSFORM_NOT_FOUND', message: 'Unknown transform' } }, 404);
     }
-    if (segments[3] === 'inventory') return json(route, demoInventory);
+    if (segments[3] === 'inventory') {
+      const inventory = state.mode === 'demo' ? demoInventory : state.inventories[alias] ?? demoInventory;
+      if (segments[4] === 'session') {
+        return json(route, { sessionId: segments[5] ?? 'e2e-session', snapshot: inventory });
+      }
+      return json(route, inventory);
+    }
     const org = demoOrgs.find((entry) => entry.alias === alias);
     return org
       ? json(route, org)
@@ -480,15 +496,15 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   expect(state.pollCalls).toBeGreaterThan(0);
   expect(state.respondCalls).toBeGreaterThanOrEqual(2);
   expect(state.operations.map((operation) => operation.operation)).toEqual(
-    expect.arrayContaining(['org.list', 'org.connect', 'inventory.get']),
+    expect.arrayContaining(['org.list', 'org.connect', 'inventory.start']),
   );
   expect(state.operationBodies).toContainEqual({ operation: 'org.connect', alias: 'prod-org' });
-  expect(state.operationBodies).toContainEqual({ operation: 'inventory.get', alias: 'prod-org' });
+  expect(state.operationBodies).toContainEqual({ operation: 'inventory.start', alias: 'prod-org' });
 
   // Connecting must feed the selection directly; a fresh `org.list` must not
   // become a blocking step before the dashboard can start its inventory load.
   const connectIndex = state.operations.findIndex((operation) => operation.operation === 'org.connect');
-  const inventoryIndex = state.operations.findIndex((operation) => operation.operation === 'inventory.get');
+  const inventoryIndex = state.operations.findIndex((operation) => operation.operation === 'inventory.start');
   const operationNames = state.operations.map((operation) => operation.operation).join(', ');
   expect(connectIndex, `operations: ${operationNames}`).toBeGreaterThanOrEqual(0);
   expect(inventoryIndex, `operations: ${operationNames}`).toBe(connectIndex + 1);

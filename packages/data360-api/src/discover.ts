@@ -14,7 +14,6 @@ import { buildData360Path, buildMappingPath, buildVersionsPath, DATA360_ENDPOINT
 import {
   deriveInferredRelationships,
   extractCollection,
-  isRecord,
   normalizeDataSpaces,
   normalizeDataStreams,
   normalizeDataTransforms,
@@ -24,10 +23,13 @@ import {
   parseJsonResponse,
 } from './normalize.ts';
 import type { NormalizeContext, NormalizedCollection, NormalizedDmos } from './normalize.ts';
+import { buildNextPath, extractContinuation } from './pagination.ts';
 import { selectLatestApiVersion } from './versions.ts';
 
-const DEFAULT_MAX_PAGES = 20;
-const MAX_MAPPING_DMO_QUERIES = 25;
+// A high safety ceiling rather than a result limit. Progressive discovery uses
+// checkpoints and stops on exhaustion; this only guards against a looping token.
+export const DEFAULT_MAX_PAGES = 1_000;
+export const MAX_MAPPING_DMO_QUERIES = 500;
 
 /** Minimal surface the discovery layer needs; the CLI adapter satisfies it. */
 export interface RestClient {
@@ -58,20 +60,10 @@ export function extractHttpStatus(message: string): number | null {
   return null;
 }
 
+/** Backward-compatible helper for callers that only need the opaque cursor. */
 export function extractContinuationToken(value: unknown): string | null {
-  if (!isRecord(value)) return null;
-  for (const key of ['nextToken', 'nextPageToken', 'continuationToken', 'paginationToken', 'next']) {
-    const candidate = value[key];
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
-  }
-  for (const key of ['pagination', 'meta', 'metadata']) {
-    const nested = value[key];
-    if (isRecord(nested)) {
-      const token = extractContinuationToken(nested);
-      if (token) return token;
-    }
-  }
-  return null;
+  const continuation = extractContinuation(value);
+  return continuation.cursor ?? continuation.nextPath;
 }
 
 export interface FetchedCollection {
@@ -88,22 +80,32 @@ export async function fetchCollection(
 ): Promise<FetchedCollection> {
   const entries: unknown[] = [];
   const warnings: string[] = [];
-  let token: string | null = null;
+  const seen = new Set<string>();
+  let requestPath = path;
   let pages = 0;
 
-  do {
-    const requestPath = token
-      ? `${path}${path.includes('?') ? '&' : '?'}nextToken=${encodeURIComponent(token)}`
-      : path;
+  while (pages < maxPages) {
     const decoded = parseJsonResponse(await cli.restGet(alias, requestPath), label);
-    entries.push(...extractCollection(decoded, label));
-    token = extractContinuationToken(decoded);
+    for (const entry of extractCollection(decoded, label)) {
+      const key = JSON.stringify(entry);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push(entry);
+    }
     pages += 1;
-    if (token && pages >= maxPages) {
+
+    const continuation = extractContinuation(decoded);
+    if (!continuation.hasMore) break;
+    if (continuation.uncertain || (!continuation.cursor && !continuation.nextPath)) {
+      warnings.push('The response reported more results but did not include a usable continuation cursor.');
+      break;
+    }
+    if (pages >= maxPages) {
       warnings.push(`Pagination stopped after ${maxPages} page(s); results may be incomplete.`);
       break;
     }
-  } while (token);
+    requestPath = buildNextPath(requestPath, continuation);
+  }
 
   return { entries, warnings };
 }
@@ -170,7 +172,7 @@ async function retrieveFamily<T, N extends NormalizedCollection<T>>(
     const normalized = normalizer(fetched.entries, context);
     const dataWarnings: RetrievalWarning[] = fetched.warnings.map((message) => ({
       family,
-      code: 'PAGINATION_LIMIT',
+      code: message.startsWith('Pagination stopped') ? 'PAGINATION_LIMIT' : 'CONTINUATION_MISSING',
       message,
       severity: 'warning',
     }));
@@ -311,7 +313,7 @@ async function retrieveMappingsByDmo(
       if (attempt.retried) retriedQueries += 1;
       warnings.push(...attempt.value.warnings.map((message) => ({
         family: 'mappings' as const,
-        code: 'PAGINATION_LIMIT',
+        code: message.startsWith('Pagination stopped') ? 'PAGINATION_LIMIT' : 'CONTINUATION_MISSING',
         message,
         severity: 'warning' as const,
       })));
@@ -401,7 +403,7 @@ function dedupeRelationships(edges: RelationshipEdge[]): RelationshipEdge[] {
   });
 }
 
-function finalize(snapshot: InventorySnapshot): InventorySnapshot {
+export function validateInventorySnapshot(snapshot: InventorySnapshot): InventorySnapshot {
   const parsed = inventorySnapshotSchema.safeParse(snapshot);
   if (!parsed.success) {
     throw new CliError(
@@ -470,7 +472,7 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
         itemCount: null,
       });
     }
-    return finalize({
+    return validateInventorySnapshot({
       org,
       apiVersion: null,
       generatedAt,
@@ -531,7 +533,7 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     ...deriveInferredRelationships(dmos.result.items, dmoContext),
   ]);
 
-  return finalize({
+  return validateInventorySnapshot({
     org,
     apiVersion: version,
     generatedAt,
