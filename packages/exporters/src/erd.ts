@@ -1,6 +1,17 @@
 import type { InventorySnapshot } from '@dcat/core';
 
 export type ErdCertaintyFilter = 'all' | 'confirmed' | 'inferred';
+export type ErdLayoutDirection = 'LR' | 'TB';
+
+/** Unknown certainty is drawn as inferred, so the filter must count it the same way. */
+export function matchesErdFilter(
+  certainty: 'confirmed' | 'inferred' | 'unknown',
+  filter: ErdCertaintyFilter,
+): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'confirmed') return certainty === 'confirmed';
+  return certainty !== 'confirmed';
+}
 
 export interface ErdNodeLayout {
   id: string;
@@ -170,11 +181,7 @@ export function exportErdSvg(
   filter: ErdCertaintyFilter = 'all',
 ): string {
   const layout = buildErdLayout(inventory);
-  const edges = layout.edges.filter((edge) =>
-    filter === 'all'
-      || (filter === 'confirmed' && edge.certainty === 'confirmed')
-      || (filter === 'inferred' && edge.certainty === 'inferred'),
-  );
+  const edges = layout.edges.filter((edge) => matchesErdFilter(edge.certainty, filter));
 
   const lines = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" width="${layout.width}" height="${layout.height}" role="img">`,
@@ -220,4 +227,139 @@ export function exportErdSvg(
   );
 
   return `${lines.join('\n')}\n`;
+}
+
+const mermaidNamePattern = /^[A-Za-z][A-Za-z0-9_\-[\]()]*$/;
+
+function mermaidToken(value: string, fallback: string): string {
+  const cleaned = value.trim().replace(/[^A-Za-z0-9_\-[\]()]/g, '_');
+  if (!cleaned) return fallback;
+  return mermaidNamePattern.test(cleaned) ? cleaned : `${fallback}_${cleaned}`;
+}
+
+function mermaidQuoted(value: string): string {
+  return value.replace(/["\r\n]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function mermaidCardinality(cardinality: string | null | undefined): [string, string] {
+  switch (cardinality?.replace(/\s/g, '').toLowerCase()) {
+    case '1:1':
+    case 'one-to-one':
+      return ['||', '||'];
+    case '1:n':
+    case '1:m':
+    case 'one-to-many':
+      return ['||', 'o{'];
+    case 'n:1':
+    case 'm:1':
+    case 'many-to-one':
+      return ['}o', '||'];
+    case 'n:n':
+    case 'm:m':
+    case 'many-to-many':
+      return ['}o', 'o{'];
+    default:
+      // Do not claim a cardinality the snapshot did not provide.
+      return ['}o', 'o{'];
+  }
+}
+
+function mermaidRelation(
+  sourceId: string,
+  targetId: string,
+  cardinality: string | null | undefined,
+  certainty: 'confirmed' | 'inferred' | 'unknown',
+  label: string,
+): string {
+  const [left, right] = mermaidCardinality(cardinality);
+  const line = certainty === 'confirmed' ? '--' : '..';
+  const suffix = certainty === 'confirmed' ? '' : ` (${certainty})`;
+  return `  ${sourceId} ${left}${line}${right} ${targetId} : "${mermaidQuoted(label)}${suffix}"`;
+}
+
+/** Generates a portable Mermaid ER definition. No Mermaid runtime is bundled. */
+export function exportErdMermaid(
+  inventory: InventorySnapshot,
+  filter: ErdCertaintyFilter = 'all',
+  direction: ErdLayoutDirection = 'LR',
+): string {
+  const objects = [...inventory.dmos].sort((left, right) =>
+    (left.label ?? left.apiName).localeCompare(right.label ?? right.apiName)
+    || left.apiName.localeCompare(right.apiName),
+  );
+  const usedIds = new Set<string>();
+  const ids = new Map<string, string>();
+  for (const object of objects) {
+    const base = mermaidToken(object.apiName, 'OBJ');
+    let id = base;
+    let suffix = 2;
+    while (usedIds.has(id)) {
+      id = `${base}_${suffix}`;
+      suffix += 1;
+    }
+    usedIds.add(id);
+    ids.set(object.apiName, id);
+  }
+
+  const relationships = inventory.relationships
+    .filter((edge) => ids.has(edge.source) && ids.has(edge.target) && matchesErdFilter(edge.certainty, filter))
+    .sort((left, right) => left.source.localeCompare(right.source)
+      || left.target.localeCompare(right.target)
+      || String(left.label ?? '').localeCompare(String(right.label ?? ''))
+      || left.id.localeCompare(right.id));
+
+  const foreignKeys = new Map<string, Set<string>>();
+  for (const relationship of relationships) {
+    const source = inventory.dmos.find((object) => object.apiName === relationship.source);
+    const joinField = relationship.label?.trim();
+    if (!source || !joinField) continue;
+    const target = joinField.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const field = source.fields.find((candidate) => {
+      const name = candidate.apiName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return name === target || name.endsWith(target);
+    });
+    if (!field) continue;
+    const keys = foreignKeys.get(source.apiName) ?? new Set<string>();
+    keys.add(field.apiName);
+    foreignKeys.set(source.apiName, keys);
+  }
+
+  const confirmed = relationships.filter((edge) => edge.certainty === 'confirmed').length;
+  const inferred = relationships.length - confirmed;
+  const lines = [
+    'erDiagram',
+    `  accTitle: ${mermaidQuoted(`Data 360 entity relationships for ${inventory.org.alias}`)}`,
+    `  accDescr: ${objects.length} data model objects and ${relationships.length} relationships. ${confirmed} source-confirmed and ${inferred} inferred or unknown. Solid lines are confirmed; dashed lines are not source facts.`,
+    `  direction ${direction}`,
+    '',
+  ];
+
+  for (const object of objects) {
+    const id = ids.get(object.apiName)!;
+    const label = mermaidQuoted(object.label ?? object.apiName);
+    lines.push(`  ${id}["${label}"] {`);
+    const fields = [...object.fields].sort((left, right) => left.apiName.localeCompare(right.apiName));
+    for (const field of fields) {
+      const type = mermaidToken(field.dataType ?? 'string', 'string');
+      const name = mermaidToken(field.apiName, 'field');
+      const keys = [
+        field.isPrimaryKey ? 'PK' : '',
+        foreignKeys.get(object.apiName)?.has(field.apiName) ? 'FK' : '',
+      ].filter(Boolean).join(', ');
+      lines.push(`    ${type} ${name}${keys ? ` ${keys}` : ''}`);
+    }
+    lines.push('  }', '');
+  }
+
+  for (const relationship of relationships) {
+    lines.push(mermaidRelation(
+      ids.get(relationship.source)!,
+      ids.get(relationship.target)!,
+      relationship.cardinality,
+      relationship.certainty,
+      relationship.label ?? relationship.certainty,
+    ));
+  }
+
+  return `${lines.join('\n').trimEnd()}\n`;
 }

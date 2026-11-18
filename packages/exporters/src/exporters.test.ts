@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { demoInventory } from '@dcat/test-fixtures';
-import { buildErdLayout, exportErdSvg, exportInventoryCsv, exportInventoryMarkdown } from './index.ts';
+import {
+  buildErdLayout,
+  exportErdMermaid,
+  exportErdSvg,
+  exportInventoryCsv,
+  exportInventoryMarkdown,
+} from './index.ts';
 
 const palette = {
   surface: 'surface',
@@ -88,5 +94,29 @@ describe('inventory exporters', () => {
     expect(svg).not.toContain('>ContactId<');
     expect(svg).not.toContain('>AccountId<');
     expect(svg.match(/stroke-dasharray="6 5"/g)).toHaveLength(1);
+  });
+
+  it('writes a portable Mermaid ER definition with accessible metadata', () => {
+    const mermaid = exportErdMermaid(demoInventory);
+    expect(mermaid).toContain('erDiagram');
+    expect(mermaid).toContain('accTitle: Data 360 entity relationships for demo-uat');
+    expect(mermaid).toContain('accDescr: 8 data model objects and 9 relationships.');
+    expect(mermaid).toContain('direction LR');
+    expect(mermaid).toContain('Account_DMO__dlm["Account DMO"]');
+    expect(mermaid).toContain('String Id PK');
+    expect(mermaid).toContain('String PrimaryCampaignId FK');
+    expect(mermaid).toContain('Contact_DMO__dlm }o--|| Account_DMO__dlm : "Account Contact"');
+  });
+
+  it('keeps Mermaid certainty and filtering explicit', () => {
+    const confirmed = exportErdMermaid(demoInventory, 'confirmed');
+    expect(confirmed).toContain('3 source-confirmed');
+    expect(confirmed).not.toContain('(inferred)');
+    expect(confirmed).not.toContain('String AccountId FK');
+
+    const inferred = exportErdMermaid(demoInventory, 'inferred');
+    expect(inferred).toContain('6 inferred or unknown');
+    expect(inferred).toContain('(inferred)');
+    expect(inferred).toContain('..||');
   });
 });
