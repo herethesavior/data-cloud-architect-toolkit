@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { cliVersionOutput, orgListJson } from '@dcat/test-fixtures';
 import { SalesforceCliAdapter, validateAlias, validateRestPath } from './adapter.ts';
 import { CliError } from './errors.ts';
+import { stripCliNotices } from './redact.ts';
 import type { ProcessRunner, RunOptions } from './run.ts';
 
 function fakeRunner(overrides: Partial<ProcessRunner> = {}): ProcessRunner {
@@ -14,6 +15,11 @@ function fakeRunner(overrides: Partial<ProcessRunner> = {}): ProcessRunner {
     ...overrides,
   };
 }
+
+const cliNotices = [
+  '»   Warning: @salesforce/cli update available from 2.116.6 to 2.158.7.',
+  "Warning: This command is currently in beta. Any aspect of this command can change without advanced notice. Don't use beta commands in your scripts.",
+].join('\n');
 
 describe('SalesforceCliAdapter', () => {
   it('uses only fixed, allowlisted arguments', async () => {
@@ -119,5 +125,33 @@ describe('SalesforceCliAdapter', () => {
     const adapter = new SalesforceCliAdapter(runner);
 
     await expect(adapter.loginOrg('demo-uat')).rejects.toThrow(/login was cancelled/);
+  });
+
+  it('ignores update and beta notices on a successful REST command', async () => {
+    const runner = fakeRunner({
+      run: vi.fn(async () => ({ stdout: orgListJson, stderr: cliNotices, exitCode: 0 })),
+    });
+    const adapter = new SalesforceCliAdapter(runner);
+
+    await expect(adapter.restGet('demo-uat', 'services/data/')).resolves.toBe(orgListJson);
+  });
+
+  it('reports the Salesforce API error body instead of advisory CLI notices', async () => {
+    const stdout = JSON.stringify([{
+      message: 'This feature is not currently enabled for this user type or org: [CdpDataSpace]',
+      errorCode: 'FUNCTIONALITY_NOT_ENABLED',
+    }]);
+    const runner = fakeRunner({
+      run: vi.fn(async () => ({ stdout, stderr: cliNotices, exitCode: 1 })),
+    });
+    const adapter = new SalesforceCliAdapter(runner);
+
+    await expect(adapter.restGet('demo-uat', 'services/data/v65.0/ssot/data-spaces'))
+      .rejects.toThrow(/FUNCTIONALITY_NOT_ENABLED: This feature is not currently enabled/);
+  });
+
+  it('keeps real CLI errors when stripping advisory notices', async () => {
+    expect(stripCliNotices(`${cliNotices}\nERROR running api request: authentication expired`))
+      .toBe('ERROR running api request: authentication expired');
   });
 });

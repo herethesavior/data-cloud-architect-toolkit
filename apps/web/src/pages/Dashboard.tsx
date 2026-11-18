@@ -15,6 +15,8 @@ import type { BadgeTone } from '../components/ui/index.ts';
 import { discoverySummary } from '../lib/inventory.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
 import {
+  actionableWarnings,
+  data360NotEnabled,
   discoveryStages,
   resourceStatusMessage,
   retryableFamilyCount,
@@ -74,6 +76,8 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
         const summary = discoverySummary(inventory);
         const stages = discoveryStages(inventory);
         const retryableCount = retryableFamilyCount(inventory);
+        const data360Unavailable = data360NotEnabled(inventory);
+        const attentionWarnings = actionableWarnings(inventory);
 
         const download = (format: 'csv' | 'json' | 'markdown') => {
           if (format === 'csv') {
@@ -252,9 +256,19 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
               <Panel>
                 <SectionHeading
                   title="Discovery health"
-                  description={`${summary.available} of ${summary.total} families available · ${summary.partial} partial`}
-                  action={<Badge tone={summary.issues > 0 ? 'warning' : 'success'} dot>{summary.label} · {summary.score}%</Badge>}
+                  description={`${summary.available} of ${summary.total} families available · ${summary.partial} partial${
+                    summary.unsupported > 0 ? ` · ${summary.unsupported} not enabled` : ''
+                  }`}
+                  action={<Badge tone={summary.issues > 0 ? 'warning' : data360Unavailable ? 'neutral' : 'success'} dot>
+                    {summary.label} · {summary.score}%
+                  </Badge>}
                 />
+                {data360Unavailable ? (
+                  <div className="mb-3 flex items-start gap-2 rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm text-ink-soft" role="status">
+                    <Icon name="info" size={16} className="mt-0.5 shrink-0 text-brand" />
+                    <span>Data 360 is not enabled for this user or org. Ask an administrator to enable Data Cloud, then refresh the inventory.</span>
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   {inventory.capabilities.map((capability) => (
                     <div
@@ -279,17 +293,27 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
               <Panel>
                 <SectionHeading
                   title="Needs attention"
-                  description={summary.issues === 0 ? 'No gaps reported during discovery.' : `${summary.issues} items to review.`}
+                  description={attentionWarnings.length === 0
+                    ? data360Unavailable ? 'No actionable gaps.' : 'No gaps reported during discovery.'
+                    : `${attentionWarnings.length} items to review.`}
                 />
-                {inventory.warnings.length === 0 ? (
-                  <div className="flex items-start gap-3 rounded-lg border border-success/20 bg-success-soft px-4 py-3 text-sm text-success">
-                    <Icon name="check" size={17} />
-                    <span>Nothing needs attention. All requested metadata families were retrieved.</span>
+                {attentionWarnings.length === 0 ? (
+                  <div className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${
+                    data360Unavailable
+                      ? 'border-line bg-surface-alt text-ink-soft'
+                      : 'border-success/20 bg-success-soft text-success'
+                  }`}>
+                    <Icon name={data360Unavailable ? 'info' : 'check'} size={17} />
+                    <span>
+                      {data360Unavailable
+                        ? 'Data 360 is not enabled for this user or org. The unavailable families are listed in Discovery health; no retry is needed.'
+                        : 'Nothing needs attention. All requested metadata families were retrieved.'}
+                    </span>
                   </div>
                 ) : (
                   <ul className="space-y-2.5">
-                    {inventory.warnings.map((warning) => (
-                      <li key={`${warning.family}-${warning.code}`} className="rounded-lg border border-line bg-surface-alt px-3 py-2.5">
+                    {attentionWarnings.map((warning, index) => (
+                      <li key={`${warning.family}-${warning.code}-${index}`} className="rounded-lg border border-line bg-surface-alt px-3 py-2.5">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge tone={warning.severity === 'error' ? 'danger' : warning.severity === 'warning' ? 'warning' : 'neutral'}>
                             {humanize(warning.family)}

@@ -110,6 +110,7 @@ export class NodeProcessRunner implements ProcessRunner {
           env: {
             ...process.env,
             SF_DISABLE_AUTOUPDATE: '1',
+            SF_SKIP_NEW_VERSION_CHECK: '1',
             SF_DISABLE_TELEMETRY: 'true',
           },
         });

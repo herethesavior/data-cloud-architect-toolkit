@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { ApiCapability, InventorySnapshot } from '@dcat/core';
 import { demoInventory } from '@dcat/test-fixtures';
 import {
+  actionableWarnings,
+  data360NotEnabled,
   discoveryStages,
   findCapability,
   hasDegradedResources,
+  isUnsupportedWarning,
   resourceStatusMessage,
   retryableFamilyCount,
 } from './resourceStatus.ts';
@@ -73,5 +76,51 @@ describe('resource status model', () => {
     expect(hasDegradedResources(demoInventory)).toBe(false);
     expect(demoInventory.warnings).toHaveLength(0);
     expect(discoveryStages(demoInventory).every((stage) => stage.state === 'complete')).toBe(true);
+  });
+});
+
+const disabledMessage = 'Data 360 is not enabled for this user or org. FUNCTIONALITY_NOT_ENABLED.';
+
+function disabledInventory(): InventorySnapshot {
+  return {
+    ...structuredClone(demoInventory),
+    capabilities: demoInventory.capabilities.map((entry) => ({
+      ...entry,
+      status: 'unsupported' as const,
+      message: disabledMessage,
+    })),
+    warnings: demoInventory.capabilities.map((entry) => ({
+      family: entry.family,
+      code: 'UNSUPPORTED',
+      message: disabledMessage,
+      severity: 'warning' as const,
+    })),
+  };
+}
+
+describe('unavailable Data 360 resources', () => {
+  it('recognizes Data 360 disablement as a capability finding', () => {
+    const inventory = disabledInventory();
+
+    expect(data360NotEnabled(inventory)).toBe(true);
+    expect(inventory.warnings.every(isUnsupportedWarning)).toBe(true);
+    expect(actionableWarnings(inventory)).toEqual([]);
+    expect(retryableFamilyCount(inventory)).toBe(0);
+    expect(resourceStatusMessage(inventory.capabilities[0]!)).toBe('Data 360 is not enabled for this user or org.');
+    expect(discoveryStages(inventory).some((stage) => stage.state === 'blocked')).toBe(false);
+  });
+
+  it('keeps real warnings actionable when only one family is unsupported', () => {
+    const inventory = disabledInventory();
+    inventory.capabilities[0] = { ...inventory.capabilities[0]!, status: 'available', message: 'Retrieved successfully.' };
+    inventory.warnings.push({
+      family: 'dlos',
+      code: 'PAGINATION_LIMIT',
+      message: 'Pagination stopped after 20 pages.',
+      severity: 'warning',
+    });
+
+    expect(data360NotEnabled(inventory)).toBe(false);
+    expect(actionableWarnings(inventory).map((warning) => warning.code)).toEqual(['PAGINATION_LIMIT']);
   });
 });

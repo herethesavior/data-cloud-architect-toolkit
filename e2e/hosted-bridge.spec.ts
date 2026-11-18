@@ -435,12 +435,20 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
 
   expect(state.pairCalls).toBe(1);
   expect(state.pollCalls).toBeGreaterThan(0);
-  expect(state.respondCalls).toBeGreaterThanOrEqual(3);
+  expect(state.respondCalls).toBeGreaterThanOrEqual(2);
   expect(state.operations.map((operation) => operation.operation)).toEqual(
     expect.arrayContaining(['org.list', 'org.connect', 'inventory.get']),
   );
   expect(state.operationBodies).toContainEqual({ operation: 'org.connect', alias: 'prod-org' });
   expect(state.operationBodies).toContainEqual({ operation: 'inventory.get', alias: 'prod-org' });
+
+  // Connecting must feed the selection directly; a fresh `org.list` must not
+  // become a blocking step before the dashboard can start its inventory load.
+  const connectIndex = state.operations.findIndex((operation) => operation.operation === 'org.connect');
+  const inventoryIndex = state.operations.findIndex((operation) => operation.operation === 'inventory.get');
+  expect(connectIndex).toBeGreaterThanOrEqual(0);
+  expect(inventoryIndex).toBe(connectIndex + 1);
+  expect(state.operations.slice(connectIndex + 1).some((operation) => operation.operation === 'org.list')).toBe(false);
   expect(state.csrf['/api/relay/pairing']).toBeGreaterThan(0);
   expect(state.csrf['/api/relay/requests']).toBeGreaterThan(0);
   expect(state.csrf['/api/relay/requests/:id']).toBeGreaterThan(0);

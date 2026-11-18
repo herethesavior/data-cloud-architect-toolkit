@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InventorySnapshot, SessionInfo } from '@dcat/core';
+import type { InventorySnapshot, OrgSummary, SessionInfo } from '@dcat/core';
 import { api, getSession, setCachedSession } from './lib/api.ts';
 import { buildCommandResults } from './lib/commandSearch.ts';
 import { isHosted } from './lib/hosted.ts';
@@ -173,7 +173,10 @@ export function App() {
   }
 
   const selectOrg = (alias: string) => {
-    const next = createWorkspaceContext(mode, orgsQuery.data?.find((org) => org.alias === alias) ?? null);
+    // Read the cache directly: a just-connected org may be present before the
+    // observing query has re-rendered, and inventory must start in this tick.
+    const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(['orgs']) ?? [];
+    const next = createWorkspaceContext(mode, cachedOrgs.find((org) => org.alias === alias) ?? null);
     clearWorkspaceCaches(queryClient, next?.contextId ?? null);
     setFocusObject(null);
     setSelectedAlias(alias);

@@ -21,6 +21,10 @@ import type { RestClient } from './discover.ts';
 
 const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
+const functionalityNotEnabled = JSON.stringify([{
+  message: 'This feature is not currently enabled for this user type or org: [CdpDataSpace]',
+  errorCode: 'FUNCTIONALITY_NOT_ENABLED',
+}]);
 
 function fakeCli(overrides: Record<string, string | Error | Array<string | Error>> = {}): RestClient {
   const paths: Record<string, string | Error | Array<string | Error>> = {
@@ -63,6 +67,8 @@ describe('live Data 360 discovery', () => {
     expect(classifyRestFailure(extractHttpStatus('Exited with code 403.'), 'Exited with code 403.').status).toBe('forbidden');
     expect(classifyRestFailure(null, 'user not found for this org').status).toBe('error');
     expect(classifyRestFailure(null, 'endpoint not found').status).toBe('unsupported');
+    expect(classifyRestFailure(null, `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`).status)
+      .toBe('unsupported');
   });
 
   it('builds a complete normalized snapshot with provenance and certainty labels', async () => {
@@ -122,6 +128,25 @@ describe('live Data 360 discovery', () => {
     expect(inventory.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ family: 'mappings', severity: 'warning' }),
     ]));
+  });
+
+  it('treats FUNCTIONALITY_NOT_ENABLED as a capability gap rather than a failed family', async () => {
+    const cli = fakeCli({
+      'services/data/': versionsJson,
+      [`${base}/data-spaces`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+      [`${base}/data-lake-objects`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+      [`${base}/data-model-objects`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+      [`${base}/data-model-object-mappings`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+      [`${base}/data-streams`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+      [`${base}/data-transforms`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+
+    expect(inventory.capabilities.slice(1).every((capability) => capability.status === 'unsupported')).toBe(true);
+    expect(inventory.capabilities[1]?.message).toMatch(/Data 360 is not enabled for this user or org/);
+    expect(inventory.warnings.filter((warning) => warning.code === 'UNSUPPORTED')).toHaveLength(6);
+    expect(inventory.warnings.every((warning) => warning.severity !== 'error')).toBe(true);
+    expect(pathCalls(cli, `${base}/data-spaces`)).toBe(1);
   });
 
   it('reports malformed responses as errors instead of inventing empty results', async () => {

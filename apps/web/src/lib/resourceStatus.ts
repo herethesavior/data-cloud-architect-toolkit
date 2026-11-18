@@ -1,4 +1,11 @@
-import type { ApiCapability, InventorySnapshot, ResourceFamily, RetrievalStatus } from '@dcat/core';
+import {
+  RESOURCE_FAMILIES,
+  type ApiCapability,
+  type InventorySnapshot,
+  type ResourceFamily,
+  type RetrievalStatus,
+  type RetrievalWarning,
+} from '@dcat/core';
 
 export type ResourceStageState = 'complete' | 'loading' | 'partial' | 'blocked' | 'pending';
 
@@ -30,12 +37,33 @@ export function statusLabel(status: RetrievalStatus | ResourceStageState): strin
   return humanizeResource(status);
 }
 
+const disabledText = /\bFUNCTIONALITY_NOT_ENABLED\b|\bnot\s+(?:currently\s+)?enabled\s+for\s+this\s+(?:user\s+type\s+or\s+org|org)\b/i;
+
+export function isUnsupportedWarning(warning: RetrievalWarning): boolean {
+  return warning.code === 'UNSUPPORTED' || disabledText.test(warning.message);
+}
+
+/** Unsupported families are a capability finding, not something a retry can fix. */
+export function actionableWarnings(inventory: InventorySnapshot): RetrievalWarning[] {
+  return inventory.warnings.filter((warning) => !isUnsupportedWarning(warning));
+}
+
+export function data360NotEnabled(inventory: InventorySnapshot): boolean {
+  const families = inventory.capabilities.filter((capability) =>
+    (RESOURCE_FAMILIES as readonly string[]).includes(capability.family),
+  );
+  return families.length > 0 && families.every((capability) => capability.status === 'unsupported');
+}
+
 /** Explains the actual retrieval outcome; an empty list is never treated as failure. */
 export function resourceStatusMessage(capability: ApiCapability): string {
   if (capability.status === 'forbidden') {
     return 'Access denied. Check Data 360 permissions or API access for this user.';
   }
   if (capability.status === 'unsupported') {
+    if (disabledText.test(capability.message ?? '')) {
+      return 'Data 360 is not enabled for this user or org.';
+    }
     return capability.message ?? 'This endpoint is unavailable for this org or API version.';
   }
   if (capability.status === 'error') {
@@ -102,11 +130,16 @@ export function discoveryStages(
     const loaded = capabilities.reduce((sum, capability) => sum + (capability.itemCount ?? 0), 0);
     const blocking = capabilities.find((capability) => capability.status === 'error' || capability.status === 'forbidden');
     const partial = capabilities.find((capability) => capability.status === 'partial');
+    const unsupported = capabilities.filter((capability) => capability.status === 'unsupported');
 
     let detail = 'Waiting for the inventory snapshot.';
     if (state === 'loading') detail = `Checking ${stage.families.map(humanizeResource).join(', ')}…`;
     else if (blocking) detail = resourceStatusMessage(blocking);
-    else if (partial) detail = resourceStatusMessage(partial);
+    else if (unsupported.length === capabilities.length && capabilities.length > 0) {
+      detail = resourceStatusMessage(unsupported[0]!);
+    } else if (unsupported.length > 0) {
+      detail = `${unsupported.length} ${unsupported.length === 1 ? 'family' : 'families'} unavailable for this org.`;
+    } else if (partial) detail = resourceStatusMessage(partial);
     else if (capabilities.length > 0) detail = `${loaded} ${loaded === 1 ? 'item' : 'items'} across ${stage.families.map(humanizeResource).join(', ')}.`;
 
     return { id: stage.id, label: stage.label, state, detail };

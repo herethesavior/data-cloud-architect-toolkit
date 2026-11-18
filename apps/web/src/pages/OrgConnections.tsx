@@ -132,7 +132,13 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
     onSuccess: (org) => {
       setConnectError('');
       setConnectedAlias(org.alias);
-      void queryClient.invalidateQueries({ queryKey: ['orgs'] });
+      // Seed the shared org cache before selection so the workbench has a
+      // context immediately; a background `org.list` must not gate inventory.
+      queryClient.setQueryData<OrgSummary[]>(['orgs'], (current = []) => [
+        org,
+        ...current.filter((entry) => entry.alias !== org.alias),
+      ]);
+      void queryClient.invalidateQueries({ queryKey: ['orgs'], refetchType: 'none' });
       onSelect(org.alias);
     },
     onError: (error: Error) => setConnectError(error.message),

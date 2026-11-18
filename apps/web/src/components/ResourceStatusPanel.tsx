@@ -2,7 +2,7 @@ import type { InventorySnapshot } from '@dcat/core';
 import { Badge } from './ui/index.ts';
 import type { BadgeTone } from './ui/index.ts';
 import { Icon } from './Icon.tsx';
-import { hasDegradedResources, statusLabel } from '../lib/resourceStatus.ts';
+import { data360NotEnabled, hasDegradedResources, statusLabel } from '../lib/resourceStatus.ts';
 import type { ResourceStage, ResourceStageState } from '../lib/resourceStatus.ts';
 
 const stateTone: Record<ResourceStageState, BadgeTone> = {
@@ -68,22 +68,29 @@ export function DiscoveryProgress({ stages, label = 'Discovering your Data 360 i
 
 /** Surfaced on every inventory view so one failed family cannot look like empty data. */
 export function ResourceStatusNotice({ inventory, onReview }: { inventory: InventorySnapshot; onReview?: () => void }) {
-  if (!hasDegradedResources(inventory)) return null;
+  const data360Unavailable = data360NotEnabled(inventory);
+  if (!data360Unavailable && !hasDegradedResources(inventory)) return null;
 
   const failures = inventory.capabilities.filter((capability) =>
     capability.status === 'error' || capability.status === 'forbidden',
   );
   const partial = inventory.capabilities.filter((capability) => capability.status === 'partial');
-  const title = failures.length > 0
-    ? 'Some inventory families need attention'
-    : 'Inventory loaded with gaps';
-  const detail = failures.length > 0
-    ? `${failures.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} could not be retrieved. Other families are still available.`
-    : `${partial.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} returned partial results.`;
+  const title = data360Unavailable
+    ? 'Data 360 is not enabled for this org'
+    : failures.length > 0
+      ? 'Some inventory families need attention'
+      : 'Inventory loaded with gaps';
+  const detail = data360Unavailable
+    ? 'Ask an administrator to enable Data Cloud for this user or org. No metadata families are available to retry.'
+    : failures.length > 0
+      ? `${failures.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} could not be retrieved. Other families are still available.`
+      : `${partial.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} returned partial results.`;
 
   return (
-    <div className="mb-4 flex flex-wrap items-start gap-3 rounded-lg border border-warning/25 bg-warning-soft px-4 py-3" role="note">
-      <Icon name="warning" size={17} className="mt-0.5 shrink-0 text-warning" />
+    <div className={`mb-4 flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3 ${
+      data360Unavailable ? 'border-line bg-surface-alt' : 'border-warning/25 bg-warning-soft'
+    }`} role="note">
+      <Icon name={data360Unavailable ? 'info' : 'warning'} size={17} className={`mt-0.5 shrink-0 ${data360Unavailable ? 'text-brand' : 'text-warning'}`} />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-ink">{title}</p>
         <p className="mt-0.5 text-xs text-ink-soft">{detail}</p>

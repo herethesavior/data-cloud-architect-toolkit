@@ -70,10 +70,37 @@ describe('inventory helpers', () => {
     expect(summary).toMatchObject({
       available: 6,
       partial: 0,
+      unsupported: 0,
       issues: 0,
       total: 6,
       score: 100,
       label: 'Complete',
+    });
+  });
+
+  it('does not count Data 360 disablement as a retryable issue', () => {
+    const message = 'Data 360 is not enabled for this user or org. FUNCTIONALITY_NOT_ENABLED.';
+    const inventory = {
+      ...structuredClone(demoInventory),
+      capabilities: demoInventory.capabilities.map((capability) => ({
+        ...capability,
+        status: 'unsupported' as const,
+        message,
+      })),
+      warnings: demoInventory.capabilities.map((capability) => ({
+        family: capability.family,
+        code: 'UNSUPPORTED',
+        message,
+        severity: 'warning' as const,
+      })),
+    };
+
+    expect(discoverySummary(inventory)).toMatchObject({
+      available: 0,
+      partial: 0,
+      unsupported: 6,
+      issues: 0,
+      label: 'Not enabled',
     });
   });
 });

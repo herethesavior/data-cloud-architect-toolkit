@@ -1,7 +1,7 @@
 import type { CliStatus, OrgSummary } from '@dcat/core';
 import { CliError } from './errors.ts';
 import { parseCliVersion, parseOrgDisplay, parseOrgList } from './parse.ts';
-import { redactSensitive, safeErrorMessage } from './redact.ts';
+import { redactSensitive, safeErrorMessage, stripCliNotices } from './redact.ts';
 import { NodeProcessRunner } from './run.ts';
 import type { ProcessRunner, RunOptions } from './run.ts';
 
@@ -19,6 +19,33 @@ const LOGIN_TIMEOUT_MS = 5 * 60_000;
 // Local-only org listing skips the network status probe and returns quickly.
 const LOCAL_ORG_TIMEOUT_MS = 15_000;
 const ORG_DETECT_INTERVAL_MS = 2_000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * `sf api request rest` writes the Salesforce API body to stdout even on a
+ * non-zero exit. Prefer that structured error over advisory CLI stderr.
+ */
+function extractApiErrorDetail(stdout: string): string | null {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    const entries = Array.isArray(parsed) ? parsed : [parsed];
+    const details = entries.flatMap((entry) => {
+      if (!isRecord(entry)) return [];
+      const code = typeof entry.errorCode === 'string' ? entry.errorCode.trim() : '';
+      const message = typeof entry.message === 'string' ? entry.message.trim() : '';
+      if (!code && !message) return [];
+      return [code && message ? `${code}: ${message}` : code || message];
+    });
+    return details.length > 0 ? details.join('; ') : null;
+  } catch {
+    return null;
+  }
+}
 
 export function validateAlias(alias: string): string {
   if (!ALIAS_PATTERN.test(alias)) {
@@ -63,7 +90,11 @@ export class SalesforceCliAdapter {
     try {
       const result = await this.runner.run(['--version'], { timeoutMs: 15_000 });
       if (result.exitCode !== 0) {
-        return { installed: true, version: null, error: result.stderr.slice(0, 300) || 'CLI version check failed.' };
+        return {
+          installed: true,
+          version: null,
+          error: stripCliNotices(result.stderr).slice(0, 300) || 'CLI version check failed.',
+        };
       }
       return { installed: true, version: parseCliVersion(result.stdout), error: null };
     } catch (error) {
@@ -188,7 +219,9 @@ export class SalesforceCliAdapter {
   private async run(args: readonly string[], options?: RunOptions) {
     const result = await this.runner.run(args, options);
     if (result.exitCode !== 0) {
-      const detail = result.stderr.trim() || result.stdout.trim() || 'Unknown CLI error.';
+      const stderr = stripCliNotices(result.stderr);
+      const stdout = stripCliNotices(result.stdout);
+      const detail = extractApiErrorDetail(result.stdout) || stderr || stdout || 'Unknown CLI error.';
       throw new CliError('COMMAND_FAILED', redactSensitive(`Salesforce CLI command failed: ${detail}`).slice(0, 500));
     }
     return result;

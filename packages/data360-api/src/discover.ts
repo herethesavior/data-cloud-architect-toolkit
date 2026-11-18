@@ -302,10 +302,11 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
   }
 
   if (!apiVersion) {
+    const unavailableStatus = capabilities[0]?.status === 'unsupported' ? 'unsupported' : 'error';
     for (const family of RESOURCE_FAMILIES) {
       capabilities.push({
         family,
-        status: 'error',
+        status: unavailableStatus,
         endpoint: DATA360_ENDPOINT_REGISTRY[family],
         apiVersion: null,
         message: 'API version could not be discovered; no metadata was requested.',

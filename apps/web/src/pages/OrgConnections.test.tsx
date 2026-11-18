@@ -84,17 +84,19 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.getByText('Complete step 1 first')).toBeInTheDocument();
   });
 
-  it('selects the newly connected org so its inventory loads in the workbench', async () => {
+  it('seeds the connected org into the shared cache before selection so inventory starts immediately', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
-    vi.mocked(api.orgs).mockResolvedValue([connectedOrg]);
+    vi.mocked(api.orgs).mockResolvedValue([]);
     const connect = vi.spyOn(api, 'connectOrg').mockResolvedValue(connectedOrg);
-    const { onSelect } = renderOrgConnections();
+    const { onSelect, queryClient } = renderOrgConnections();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Connect org' }));
 
     await waitFor(() => expect(connect).toHaveBeenCalledWith('my-data360-org', '', undefined));
+    await waitFor(() => expect(queryClient.getQueryData<OrgSummary[]>(['orgs'])).toEqual([connectedOrg]));
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('prod-org'));
     expect(await screen.findByText(/prod-org is connected/)).toBeInTheDocument();
+    expect(vi.mocked(api.orgs).mock.calls).toHaveLength(1);
   });
 
   it('ignores repeated Connect org clicks while a login is in flight', async () => {

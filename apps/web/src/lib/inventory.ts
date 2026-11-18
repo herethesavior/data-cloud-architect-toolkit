@@ -1,4 +1,5 @@
 import type { DataField, InventorySnapshot } from '@dcat/core';
+import { data360NotEnabled, isUnsupportedWarning } from './resourceStatus.ts';
 
 export type DictionaryObjectType = 'DLO' | 'DMO';
 
@@ -14,10 +15,11 @@ export interface DictionaryRow {
 export interface DiscoverySummary {
   available: number;
   partial: number;
+  unsupported: number;
   issues: number;
   total: number;
   score: number;
-  label: 'Complete' | 'Mostly complete' | 'Partial' | 'Limited';
+  label: 'Complete' | 'Mostly complete' | 'Partial' | 'Limited' | 'Not enabled';
 }
 
 const statusWeights: Record<string, number> = {
@@ -93,10 +95,13 @@ export function discoverySummary(inventory: InventorySnapshot): DiscoverySummary
   const capabilities = inventory.capabilities;
   const available = capabilities.filter((capability) => capability.status === 'available').length;
   const partial = capabilities.filter((capability) => capability.status === 'partial').length;
+  const unsupported = capabilities.filter((capability) => capability.status === 'unsupported').length;
   const issueCapabilities = capabilities.filter((capability) =>
-    capability.status === 'error' || capability.status === 'forbidden' || capability.status === 'unsupported',
+    capability.status === 'error' || capability.status === 'forbidden',
   ).length;
-  const issueWarnings = inventory.warnings.filter((warning) => warning.severity !== 'info').length;
+  const issueWarnings = inventory.warnings.filter((warning) =>
+    warning.severity !== 'info' && !isUnsupportedWarning(warning),
+  ).length;
   const total = capabilities.length;
   const earned = capabilities.reduce((sum, capability) => sum + (statusWeights[capability.status] ?? 0), 0);
   const score = total === 0 ? 0 : Math.round((earned / total) * 100);
@@ -105,10 +110,12 @@ export function discoverySummary(inventory: InventorySnapshot): DiscoverySummary
   if (score >= 100) label = 'Complete';
   else if (score >= 70) label = 'Mostly complete';
   else if (score >= 40) label = 'Partial';
+  if (data360NotEnabled(inventory)) label = 'Not enabled';
 
   return {
     available,
     partial,
+    unsupported,
     issues: issueCapabilities + issueWarnings,
     total,
     score,
