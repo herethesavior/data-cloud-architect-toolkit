@@ -93,7 +93,7 @@ Record the namespace id or note the namespace name; you will select it in the Pa
 
    | Setting | Value |
    | --- | --- |
-   | Project name | `data-cloud-architect-toolkit` (or your preferred name) |
+   | Project name | `sfdcat` (or your preferred name) |
    | Production branch | `main` |
    | Framework preset | **None** |
    | Root directory | Leave blank (repository root) |
@@ -120,7 +120,7 @@ Do not put the namespace id in `apps/hosted-worker/wrangler.jsonc` for the Pages
 
 ## 5. Verify the live deployment
 
-Open the Cloudflare-provided URL (for example, `https://data-cloud-architect-toolkit.pages.dev`).
+Open the Cloudflare-provided URL (for example, `https://sfdcat.pages.dev`).
 
 - The workbench loads and Demo mode is clearly labelled.
 - `GET /api/health` returns JSON with `"status":"ok"`.

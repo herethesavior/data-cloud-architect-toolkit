@@ -12,7 +12,7 @@ There are two ways to use it:
 Both modes include a clearly labelled **Demo** mode. Demo mode needs no Salesforce CLI, no org, and no network access to Salesforce.
 
 - Repository: https://github.com/herethesavior/data-cloud-architect-toolkit
-- Hosted site: https://data-cloud-architect-toolkit.pages.dev/
+- Hosted site: https://sfdcat.pages.dev/
 
 > Release status: local discovery, hosted live-org inventory, the outbound bridge, and CI are in place. This release adds the **Data Stream Explorer** described under [What changed](README.md#what-changed).
 
@@ -64,7 +64,7 @@ The mode choice is saved as `dcat.mode` in local browser storage. The local conn
 
 ### Use the hosted site with a live org
 
-1. Open **https://data-cloud-architect-toolkit.pages.dev/**.
+1. Open **https://sfdcat.pages.dev/**.
 2. Open **Org Connections** and start **Step 1: Set up SF CLI**.
 3. Create a pairing code and run the command shown on screen:
 
