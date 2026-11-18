@@ -1,4 +1,5 @@
 import type { DataStream, InventorySnapshot } from '@dcat/core';
+import { safeDateText } from './inventory.ts';
 
 export type StreamStatusTone = 'neutral' | 'success' | 'warning' | 'danger';
 
@@ -9,9 +10,7 @@ export function streamValue(value: string | null | undefined, fallback = 'Not pr
 
 /** Invalid source timestamps are shown verbatim instead of "Invalid Date". */
 export function streamDateText(value: string | null | undefined): string {
-  if (!value || !value.trim()) return 'Not provided';
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : value;
+  return safeDateText(value);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DataTransform, InventorySnapshot, RetrievalStatus, TransformRun } from '@dcat/core';
 import { downloadTextFile, exportCsvTable, exportInventoryJson, exportInventoryMarkdown } from '@dcat/exporters';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates.tsx';
@@ -10,7 +10,7 @@ import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from '../components/ui/index.ts';
 import type { DataTableColumn, TabItem } from '../components/ui/index.ts';
-import { filterByQuery } from '../lib/inventory.ts';
+import { filterByQuery, safeDateText } from '../lib/inventory.ts';
 import type { FocusObject } from '../lib/objectDetail.ts';
 import { findCapability, resourceStatusMessage } from '../lib/resourceStatus.ts';
 import { useInventory } from '../lib/useInventory.ts';
@@ -29,12 +29,6 @@ function transformId(transform: DataTransform): string {
 
 function shown(value: string | null | undefined, fallback = 'Not provided'): string {
   return value && value.trim() ? value : fallback;
-}
-
-function dateText(value: string | null | undefined): string {
-  if (!value || !value.trim()) return 'Not provided';
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : value;
 }
 
 function typeTone(type: string | null | undefined): 'brand' | 'neutral' {
@@ -110,8 +104,8 @@ function runColumns(): DataTableColumn<TransformRun>[] {
       header: 'Status',
       render: (run) => <Badge tone={run.status ? 'brand' : 'neutral'}>{shown(run.status, 'Unknown')}</Badge>,
     },
-    { key: 'started', header: 'Started', hideBelow: 'md', render: (run) => dateText(run.startedAt) },
-    { key: 'ended', header: 'Ended', hideBelow: 'lg', render: (run) => dateText(run.endedAt) },
+    { key: 'started', header: 'Started', hideBelow: 'md', render: (run) => safeDateText(run.startedAt) },
+    { key: 'ended', header: 'Ended', hideBelow: 'lg', render: (run) => safeDateText(run.endedAt) },
     {
       key: 'duration',
       header: 'Duration',
@@ -176,9 +170,9 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
             <OverviewField label="Data space" value={shown(detail.dataSpace, 'Not provided')} />
             <OverviewField label="Schedule / cadence" value={shown(schedule?.cadence ?? detail.schedule, 'No schedule data returned')} />
             <OverviewField label="Owner" value={shown(detail.owner, 'Not provided')} />
-            <OverviewField label="Created" value={dateText(detail.createdAt)} />
-            <OverviewField label="Modified" value={dateText(detail.modifiedAt)} />
-            <OverviewField label="Last run" value={dateText(detail.lastRunAt ?? schedule?.lastRunAt)} />
+            <OverviewField label="Created" value={safeDateText(detail.createdAt)} />
+            <OverviewField label="Modified" value={safeDateText(detail.modifiedAt)} />
+            <OverviewField label="Last run" value={safeDateText(detail.lastRunAt ?? schedule?.lastRunAt)} />
           </div>
 
           <div>
@@ -194,8 +188,8 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
             <dl className="mt-3 grid gap-2 text-xs text-ink-soft sm:grid-cols-2">
               <div className="flex justify-between gap-3"><dt>Enabled</dt><dd>{schedule?.enabled === true ? 'Yes' : schedule?.enabled === false ? 'No' : 'Not provided'}</dd></div>
               <div className="flex justify-between gap-3"><dt>Timezone</dt><dd>{shown(schedule?.timezone)}</dd></div>
-              <div className="flex justify-between gap-3"><dt>Next run</dt><dd>{dateText(schedule?.nextRunAt)}</dd></div>
-              <div className="flex justify-between gap-3"><dt>Last run</dt><dd>{dateText(schedule?.lastRunAt)}</dd></div>
+              <div className="flex justify-between gap-3"><dt>Next run</dt><dd>{safeDateText(schedule?.nextRunAt)}</dd></div>
+              <div className="flex justify-between gap-3"><dt>Last run</dt><dd>{safeDateText(schedule?.lastRunAt)}</dd></div>
             </dl>
             {sections.schedule === 'unsupported' || sections.schedule === 'forbidden' || sections.schedule === 'error' ? (
               <p className="mt-3 text-xs text-ink-soft">
@@ -210,7 +204,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
               <div className="flex justify-between gap-3"><dt>Endpoint</dt><dd className="mono truncate">{detail.provenance.sourceEndpoint}</dd></div>
               <div className="flex justify-between gap-3"><dt>API version</dt><dd>{detail.provenance.apiVersion}</dd></div>
               <div className="flex justify-between gap-3"><dt>Confidence</dt><dd>{detail.provenance.confidence}</dd></div>
-              <div className="flex justify-between gap-3"><dt>Retrieved</dt><dd>{dateText(detail.provenance.retrievedAt)}</dd></div>
+              <div className="flex justify-between gap-3"><dt>Retrieved</dt><dd>{safeDateText(detail.provenance.retrievedAt)}</dd></div>
             </dl>
           </div>
         </div>
@@ -327,6 +321,8 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
   const [type, setType] = useState('all');
   const [selectedApiName, setSelectedApiName] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState('');
+  const focusHandledRef = useRef(onFocusHandled);
+  focusHandledRef.current = onFocusHandled;
 
   useEffect(() => {
     if (!focusObject || focusObject.kind !== 'transform' || !query.isSuccess) return;
@@ -336,8 +332,8 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
       setSearch('');
       setType('all');
     }
-    onFocusHandled?.();
-  }, [focusObject, query.isSuccess, query.data, onFocusHandled]);
+    focusHandledRef.current?.();
+  }, [focusObject, query.isSuccess, query.data]);
 
   return (
     <InventoryBoundary query={query} context={context}>
@@ -423,7 +419,7 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
             render: (transform) => (
               <div>
                 <p className="text-sm text-ink">{shown(transform.lastRunStatus, 'No run data')}</p>
-                {transform.lastRunAt ? <p className="text-xs text-ink-faint">{dateText(transform.lastRunAt)}</p> : null}
+                {transform.lastRunAt ? <p className="text-xs text-ink-faint">{safeDateText(transform.lastRunAt)}</p> : null}
               </div>
             ),
           },

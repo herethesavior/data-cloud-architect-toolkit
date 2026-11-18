@@ -51,6 +51,18 @@ export function ExportMenu({ items, label = 'Export', disabled = false, classNam
     if (returnFocus) focusTrigger();
   };
 
+  const focusOutsideMenu = (backwards: boolean) => {
+    const selector = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusables = Array.from(document.querySelectorAll<HTMLElement>(selector));
+    const trigger = wrapperRef.current?.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]');
+    const triggerIndex = trigger ? focusables.indexOf(trigger) : -1;
+    if (triggerIndex < 0) return;
+    const candidates = backwards
+      ? focusables.slice(0, triggerIndex).reverse()
+      : focusables.slice(triggerIndex + 1);
+    candidates.find((element) => !wrapperRef.current?.contains(element))?.focus();
+  };
+
   const moveFocus = (index: number) => {
     if (items.length === 0) return;
     const next = ((index % items.length) + items.length) % items.length;
@@ -77,9 +89,15 @@ export function ExportMenu({ items, label = 'Export', disabled = false, classNam
         moveFocus(items.length - 1);
         break;
       case 'Escape':
-      case 'Tab':
         event.preventDefault();
         close(true);
+        break;
+      case 'Tab':
+        // Skip the menu items (which are removed on the same render) and move
+        // focus to the next/previous control outside the menu.
+        event.preventDefault();
+        close(false);
+        focusOutsideMenu(event.shiftKey);
         break;
       default:
         break;

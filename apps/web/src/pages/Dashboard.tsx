@@ -12,7 +12,7 @@ import type { IconName } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, Panel, SectionHeading } from '../components/ui/index.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
-import { discoverySummary } from '../lib/inventory.ts';
+import { discoverySummary, safeDateText } from '../lib/inventory.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
 import {
   actionableWarnings,
@@ -198,7 +198,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                     ))}
                   </div>
                   <p className="mt-4 text-xs text-ink-soft">
-                    Generated {new Date(inventory.generatedAt).toLocaleString()} · API v{inventory.apiVersion ?? '—'}
+                    Generated {safeDateText(inventory.generatedAt, 'time unavailable')} · API v{inventory.apiVersion ?? '—'}
                   </p>
                 </div>
               </div>

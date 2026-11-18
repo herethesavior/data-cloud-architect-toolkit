@@ -14,7 +14,7 @@ Both modes include a clearly labelled **Demo** mode. Demo mode needs no Salesfor
 - Repository: https://github.com/herethesavior/data-cloud-architect-toolkit
 - Hosted site: https://data-cloud-architect-toolkit.pages.dev/
 
-> Release status: local discovery, hosted live-org inventory, the outbound bridge, and CI are in place. This branch adds the live-org hardening described under [What changed](README.md#what-changed).
+> Release status: local discovery, hosted live-org inventory, the outbound bridge, and CI are in place. This release adds the **Data Stream Explorer** described under [What changed](README.md#what-changed).
 
 ## Quick start
 
@@ -259,6 +259,8 @@ Live-site checks covered `/api/health`, `/api/relay/status`, built assets, and t
 
 ## What changed
 
+- The new **Data Stream Explorer** lists streams with their source connector, target DLO, status, cadence, and provenance. Command-search stream results open it directly, and its detail drawer keeps the shared breadcrumb, tab, copy, and no-scrim behavior.
+- Shared drawers and menus now restore focus only after close animations finish, allow Tab to leave an open export menu, and show a visible message when clipboard access is blocked.
 - Connected orgs are classified as sandbox or production from CLI metadata (`isSandbox`, `isScratch`, `isDevHub`) plus safe URL inference. A hyphenated Developer Edition host is no longer mislabeled as a sandbox, and older bridges returning `unknown` are normalized in the web client.
 - Switching between demo and live cancels in-flight org fetches, clears the shared org cache, and filters `demo-fixture` orgs out of live views.
 - **View inventory** has a per-row **Remove** action with confirmation. It hides the org from DCAT only; Salesforce CLI authentication is untouched. **Show removed orgs** restores it, and reconnecting the alias restores it automatically.
