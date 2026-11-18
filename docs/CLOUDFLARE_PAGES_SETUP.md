@@ -12,7 +12,7 @@ The root `wrangler.jsonc` has two jobs: it stops Cloudflare from running Wrangle
 - Production branch: `main`
 - Node.js 22.12+ (set `NODE_VERSION=22.12.0`)
 - A Cloudflare KV namespace bound as `DCAT_SESSIONS` (for Workers Builds, its id goes in the root `wrangler.jsonc`)
-- For hosted live-org connections: `@dcat-toolkit/bridge@0.1.2` is published publicly (Demo mode works without it)
+- For hosted live-org connections: `@dcat-toolkit/bridge@0.1.3` is published publicly (Demo mode works without it)
 
 There are **no OAuth settings, client secrets, callback URLs, or token encryption keys** to configure.
 
@@ -54,7 +54,7 @@ The deploy command bundles `apps/hosted-worker/src/pages.ts` from the root confi
 
 ## 1. Bridge package
 
-`@dcat-toolkit/bridge@0.1.2` is already published publicly, and the hosted wizard uses `npx -y @dcat-toolkit/bridge@latest ...`. No npm credentials or publish step are needed to deploy the Pages site.
+`@dcat-toolkit/bridge@0.1.3` is already published publicly, and the hosted wizard uses `npx -y @dcat-toolkit/bridge@latest ...`. No npm credentials or publish step are needed to deploy the Pages site.
 
 For a future release, from a machine that owns the `@dcat-toolkit` npm scope:
 

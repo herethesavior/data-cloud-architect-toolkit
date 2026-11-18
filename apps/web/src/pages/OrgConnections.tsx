@@ -96,7 +96,16 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
       return 5_000;
     },
   });
-  const orgsQuery = useQuery({ queryKey: ['orgs'], queryFn: api.orgs });
+  // The App root also observes ['orgs']. In hosted live mode, only start this
+  // observer once a bridge is paired so a second org.list cannot be enqueued
+  // after a connect request and delay the first inventory load. Demo mode uses
+  // fixtures, so it never needs this guard.
+  const bridgeStatus = bridgeStatusQuery.data;
+  const orgsQuery = useQuery({
+    queryKey: ['orgs'],
+    queryFn: api.orgs,
+    enabled: !hosted || bridgeStatus?.mode === 'demo' || bridgeStatus?.paired === true,
+  });
 
   const invalidateSetup = () => {
     void queryClient.invalidateQueries({ queryKey: ['bridge-status'] });
@@ -133,12 +142,13 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
       setConnectError('');
       setConnectedAlias(org.alias);
       // Seed the shared org cache before selection so the workbench has a
-      // context immediately; a background `org.list` must not gate inventory.
+      // context immediately. Do not invalidate ['orgs'] here: an invalidated
+      // observer can refetch on a later focus/mount and put a blocking
+      // `org.list` between the connect request and the first inventory load.
       queryClient.setQueryData<OrgSummary[]>(['orgs'], (current = []) => [
         org,
         ...current.filter((entry) => entry.alias !== org.alias),
       ]);
-      void queryClient.invalidateQueries({ queryKey: ['orgs'], refetchType: 'none' });
       onSelect(org.alias);
     },
     onError: (error: Error) => setConnectError(error.message),

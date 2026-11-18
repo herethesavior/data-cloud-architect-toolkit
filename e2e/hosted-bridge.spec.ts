@@ -446,8 +446,9 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   // become a blocking step before the dashboard can start its inventory load.
   const connectIndex = state.operations.findIndex((operation) => operation.operation === 'org.connect');
   const inventoryIndex = state.operations.findIndex((operation) => operation.operation === 'inventory.get');
-  expect(connectIndex).toBeGreaterThanOrEqual(0);
-  expect(inventoryIndex).toBe(connectIndex + 1);
+  const operationNames = state.operations.map((operation) => operation.operation).join(', ');
+  expect(connectIndex, `operations: ${operationNames}`).toBeGreaterThanOrEqual(0);
+  expect(inventoryIndex, `operations: ${operationNames}`).toBe(connectIndex + 1);
   expect(state.operations.slice(connectIndex + 1).some((operation) => operation.operation === 'org.list')).toBe(false);
   expect(state.csrf['/api/relay/pairing']).toBeGreaterThan(0);
   expect(state.csrf['/api/relay/requests']).toBeGreaterThan(0);

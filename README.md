@@ -2,7 +2,23 @@
 
 A local-first, read-only workbench for discovering Salesforce Data Cloud / Data 360 metadata through Salesforce CLI. Run it locally, or use the public hosted site with a small outbound bridge agent on your own machine. Salesforce authentication always happens in Salesforce CLI on that machine — DCAT never hosts OAuth and never collects credentials.
 
-> **Foundation and live discovery are complete.** Org connection, demo mode, and read-only live Data 360 discovery all work. Live inventory is discovered through the Salesforce CLI; unsupported, forbidden, or malformed responses are reported honestly instead of being shown as empty results.
+> **Foundation, live discovery, and hosted reliability are complete.** Org connection, demo mode, and read-only live Data 360 discovery all work. After the bridge and org login steps, inventory starts immediately; CLI update/beta notices are treated as noise, and a disabled Data 360 feature is reported as a capability state rather than a failed retrieval.
+
+## Current release status
+
+- Repository: `https://github.com/herethesavior/data-cloud-architect-toolkit.git` (clean history under the `herethesavior` identity).
+- Hosted site: `https://data-cloud-architect-toolkit.pages.dev/`.
+- Salesforce CLI verified on Windows at `@salesforce/cli/2.158.7`; beta commands are accepted and their advisory warnings are suppressed in user-facing errors.
+- Bridge package: `@dcat-toolkit/bridge@0.1.3` is published and live as `latest` (built from `packages/bridge`; the hosted wizard uses `@latest`).
+- Cloudflare KV binding variable is exactly `DCAT_SESSIONS` (production id `fd2bbc29b1b2427f87ccf9f8e34e6705`, preview id `0155c4acd0054d5bb60519428b14c5ee`).
+- No hosted OAuth exists. `/api/auth/*` paths remain intentional 404 negative tests.
+
+### Reliability fixes in this release
+
+- Connecting an org seeds the shared org cache and selects it in the same action. The duplicate `['orgs']` observer in the wizard stays disabled in hosted live mode until a bridge is paired, so a late `org.list` can no longer be enqueued between `org.connect` and the first `inventory.get`.
+- `SF_SKIP_NEW_VERSION_CHECK=1` suppresses the CLI update notice, and known beta/developer-preview notices are stripped from errors. Real Salesforce REST error JSON on stdout is preserved and shown first on a non-zero exit.
+- `FUNCTIONALITY_NOT_ENABLED` is classified as `unsupported` with a readable “Data 360 is not enabled for this user or org” message. Discovery Health shows a **Not enabled** state, omits it from retryable failures, and keeps actionable warnings separate. Duplicate warning keys are disambiguated.
+- Demo health, the inventory freshness strip, **Select an org** / **Use demo mode** recovery states, and the no-scrim ≤640px drawer invariants are unchanged.
 
 ## Product principles
 
@@ -90,7 +106,7 @@ See [docs/CLOUDFLARE_PAGES_SETUP.md](docs/CLOUDFLARE_PAGES_SETUP.md) for the ful
 
 The root `wrangler.jsonc` is the Workers Builds deploy config. The separate standalone Worker path is still available with `npm run worker:dry-run`, `npm run worker:dev`, and `npm run worker:deploy`; it requires a real namespace `id` in `apps/hosted-worker/wrangler.jsonc`. There are **no Worker secrets to set**; `apps/hosted-worker/.dev.vars.example` only documents optional `SESSION_TTL_SECONDS`. Never commit a local `.dev.vars`.
 
-> Demo mode works immediately after the Cloudflare deploy. Hosted live-org connection uses the published `@dcat-toolkit/bridge@0.1.2` npm package, so no npm publish step is needed during deployment. See the Cloudflare setup guide.
+> Demo mode works immediately after the Cloudflare deploy. Hosted live-org connection uses the published and verified `@dcat-toolkit/bridge@0.1.3` npm package (the wizard runs `@latest`), so no npm publish step is needed during deployment. See the Cloudflare setup guide.
 
 Worker KV writes are throttled because free-tier Workers KV has write limits; session, pairing, and relay state are kept small and expire. Pairing codes are one-time and short-lived; unpairing invalidates the agent token.
 
@@ -106,11 +122,11 @@ The **Connect an org** wizard has three steps:
 
    The installer installs Salesforce CLI if needed, pairs with this browser session, and starts the bridge immediately. After a restart, `npx -y @dcat-toolkit/bridge@latest start` resumes from saved config. The code only links that browser session.
 2. **Connect org.** Choose a local alias and, optionally, an HTTPS sandbox instance URL. The bridge runs the fixed command `sf org login web --alias <alias> --set-default [--instance-url <https Salesforce URL>]` locally; Salesforce CLI opens the browser for login. The user never supplies a username, password, token, or SFDX auth URL to DCAT.
-3. **View inventory.** Select the authenticated org in the site and read its Data 360 metadata through the relay.
+3. **View inventory.** The authenticated org is cached and selected in the same action, so the dashboard starts inventory immediately after Steps 1 and 2 — no blocking follow-up `org.list` request. Data 360 metadata is read through the relay with provenance, and a disabled Data 360 feature is shown as a **Not enabled** capability state rather than a failed retrieval.
 
 Demo mode remains available on the hosted site. It bypasses the relay and uses labelled Worker fixtures: all six capabilities available, warnings `[]`, and complete transform detail/lineage/run/schedule bundles. It never shows fixture data under a Live label.
 
-A plain Developer Edition org may not include Data Cloud / Data 360 metadata. The UI reports unsupported or forbidden families explicitly; live transform subresources still need validation against a permitted Data Cloud-enabled org.
+A plain Developer Edition org may not include Data Cloud / Data 360 metadata. The UI reports unsupported or forbidden families explicitly; a `FUNCTIONALITY_NOT_ENABLED` response (for example `This feature is not currently enabled for this user type or org: [CdpDataSpace]`) is classified as **unsupported** and shown in Discovery Health as **Not enabled**, never as a retryable failure or an empty dataset. Live transform subresources still need validation against a permitted Data Cloud-enabled org.
 
 ### Configuration
 
@@ -195,12 +211,13 @@ Object rows show only relationship badges grounded in the current snapshot ("Has
 
 ## Verified Salesforce CLI behaviour
 
-Checked against `@salesforce/cli/2.116.6` on Windows:
+Checked against `@salesforce/cli/2.158.7` on Windows (upgraded from `2.116.6`):
 
 - `sf org list --json` returns orgs under `other`, `nonScratchOrgs`, `sandboxes`, `devHubs`, and `scratchOrgs`. It **can include an access token**, which the adapter strips immediately and never forwards to the UI.
 - `sf api request rest` takes the endpoint as a **positional URL** and supports `--method GET --target-org <alias>`. The `--url` and `--json` flags in the original design document are not accepted by this CLI version.
 - On Windows, the adapter resolves the `sf.cmd` shim to its Node entry point so child processes still use `shell: false` with argument arrays.
 - `sf org list` can take tens of seconds while the CLI refreshes connection status. Timeouts are bounded at 90 seconds, with a 60-second in-memory cache and an explicit refresh action.
+- The adapter sets `SF_SKIP_NEW_VERSION_CHECK=1` and strips known beta/developer-preview advisory notices from user-facing errors. Real Salesforce REST error JSON written to stdout on a non-zero exit is preserved and preferred (for example `FUNCTIONALITY_NOT_ENABLED`), while stderr stays available as fallback. Beta/update warnings alone are never reported as a command failure.
 
 Data 360 endpoint paths are candidate families that the discovery layer probes per org; a family is only reported as available after a successful, validated response. The allowlist lives in `packages/data360-api`.
 
@@ -219,7 +236,23 @@ npm run build
 
 Unit and integration tests cover CLI JSON parsing across shapes, token redaction, allowlisted command construction, Windows shim resolution, connector security headers, session-token enforcement (including forced refreshes), session retry after connector restarts, demo inventory, error mapping, inventory search/health helpers, freshness labels, workspace context creation, context-scoped cache invalidation, explicit context badges, object-link derivation and sanitized Markdown summaries, global command-search indexing/filtering/detail summaries, resource-stage derivation and retry classification, transform ID validation/path builders/bundle normalization, local CSV/Markdown/ERD exports, spreadsheet-formula neutralisation, defensive response normalization, conservative relationship handling, per-family failure classification, bounded retries, pagination, theme preferences, and end-to-end live discovery through the connector. Hosted Worker tests cover session/CSRF enforcement, labelled demo fixtures, one-time pairing, the poll/respond relay flow, operation allowlisting, redaction, unpair invalidation, and 404 responses from removed OAuth paths. Run `npm test` for the latest result.
 
-The Playwright suite runs against a mocked connector (no Salesforce CLI or real org required) and covers the demo first impression and **Explore the inventory** CTA, org selection and details, the mode-switch toast and context label with a DOM check that demo metadata never reappears under live, the no-org **Select an org** / **Use demo mode** recovery state, live org-to-org cache isolation, context-only refresh with no header refresh control, header-height stability across a Demo → Live switch with freshness kept in the inventory strip, object detail tabs/breadcrumbs/copy actions and relationship badges, unobstructed drawers with a 640px width cap, no visible scrim, full-viewport geometry, and short-viewport scrolling, the Live export sharing notice and accessible export menu, the Data Transform Explorer with grounded detail/lineage/run states, `Ctrl+K` palette opening with DLO/DMO/transform drawer navigation and detail-only results for other types, the palette's no-inventory recovery state, theme switching with persistence, the fully healthy demo inventory with no gap warning, sidebar collapse/persistence and accessible rail labels with no width animation, keyboard focus in the detail drawer, reduced-motion behavior, no-horizontal-overflow checks at 1440px, 834px, and 390px, and an all-screens 390px overflow sweep. The hosted-mode Playwright suite additionally covers one-time pairing, the outbound poll/respond relay, the connect-org wizard, inventory after connection, and a gap-free labelled Demo fixture that makes no relay requests.
+The Playwright suite runs against a mocked connector (no Salesforce CLI or real org required) and covers the demo first impression and **Explore the inventory** CTA, org selection and details, the mode-switch toast and context label with a DOM check that demo metadata never reappears under live, the no-org **Select an org** / **Use demo mode** recovery state, live org-to-org cache isolation, context-only refresh with no header refresh control, header-height stability across a Demo → Live switch with freshness kept in the inventory strip, object detail tabs/breadcrumbs/copy actions and relationship badges, unobstructed drawers with a 640px width cap, no visible scrim, full-viewport geometry, and short-viewport scrolling, the Live export sharing notice and accessible export menu, the Data Transform Explorer with grounded detail/lineage/run states, `Ctrl+K` palette opening with DLO/DMO/transform drawer navigation and detail-only results for other types, the palette's no-inventory recovery state, theme switching with persistence, the fully healthy demo inventory with no gap warning, sidebar collapse/persistence and accessible rail labels with no width animation, keyboard focus in the detail drawer, reduced-motion behavior, no-horizontal-overflow checks at 1440px, 834px, and 390px, and an all-screens 390px overflow sweep. The hosted-mode Playwright suite additionally covers one-time pairing, the outbound poll/respond relay, the connect-org wizard, inventory after connection (asserting `org.connect` is immediately followed by `inventory.get` with no blocking `org.list`), and a gap-free labelled Demo fixture that makes no relay requests.
+
+### Final production verification
+
+The release was checked end-to-end before hand-off:
+
+```bash
+npm run typecheck
+npm test                       # 175 passed
+npm run test:e2e:local         # 24 passed (run suites sequentially, not in parallel)
+npm run test:e2e:hosted        # 2 passed
+npm run build:pages
+npm run build:bridge
+npx wrangler deploy --dry-run
+```
+
+Live-site checks passed for `/api/health`, `/api/relay/status`, built assets, and intentional `404` responses from removed `/api/auth/*` paths. A live CLI probe through the adapter returned the exact Data 360 capability message `FUNCTIONALITY_NOT_ENABLED: This feature is not currently enabled for this user type or org: [CdpDataSpace]`, confirming that a disabled feature is reported honestly rather than as a CLI/update failure. `@dcat-toolkit/bridge@0.1.3` is published as `latest`; its downloaded tarball was inspected and contains the reliability markers (`SF_SKIP_NEW_VERSION_CHECK`, beta-notice stripping, `FUNCTIONALITY_NOT_ENABLED`) and matches the local build checksum. The hosted connect-ordering test was repeated several times to confirm `org.connect` is consistently followed by `inventory.get` without a blocking `org.list`; the local suite was also re-run after the final UI change.
 
 ## Repository layout
 
