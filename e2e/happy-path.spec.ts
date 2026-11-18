@@ -132,6 +132,8 @@ test.beforeEach(async ({ page }) => {
 test('demo first impression shows the inventory and the CTA opens an explorer', async ({ page }) => {
   await openDemo(page);
 
+  await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute('href', '/favicon.ico');
+  await expect(page.locator('#desktop-sidebar img[src="/dcat-icon-192.png"]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
   await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toHaveAttribute(
     'title',
@@ -399,6 +401,10 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
   await page.getByRole('table', { name: 'DLO Explorer results' }).getByRole('button', { name: 'Details', exact: true }).first().click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
+  // The slide-in transform reports subpixel widths while it is still running.
+  await dialog.evaluate((element) =>
+    Promise.allSettled(element.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  );
 
   const width = (await page.getByTestId('drawer-panel').boundingBox())?.width ?? 0;
   expect(width).toBeGreaterThan(0);
@@ -638,6 +644,7 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await toggle.click();
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute('aria-expanded', 'false');
   await expect(sidebar).toHaveAttribute('data-collapsed', 'true');
+  await expect(sidebar.locator('img[src="/dcat-icon-192.png"]')).toBeVisible();
   const dloItem = sidebar.getByRole('button', { name: 'DLO Explorer' });
   await expect(dloItem).toBeVisible();
   await expect(sidebar.locator('.sidebar-label').first()).toBeHidden();

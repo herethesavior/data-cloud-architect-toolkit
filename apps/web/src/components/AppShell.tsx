@@ -11,6 +11,7 @@ import { workspaceBadge } from '../lib/workspace.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 import type { ThemeController } from '../lib/useTheme.ts';
 import { CommandPalette } from './CommandPalette.tsx';
+import { DcatMark } from './DcatMark.tsx';
 import { Icon } from './Icon.tsx';
 import type { IconName } from './Icon.tsx';
 import { MetadataResultDialog } from './MetadataResultDialog.tsx';
@@ -167,7 +168,7 @@ function MobileNav({ page, onNavigate, onClose }: MobileNavProps) {
       >
         <div className="flex items-center justify-between border-b border-line px-4 py-4">
           <div className="flex items-center gap-2">
-            <span className="grid size-8 place-items-center rounded-lg bg-brand text-xs font-bold text-on-brand">DC</span>
+            <DcatMark size={32} />
             <span className="font-semibold">DCAT</span>
           </div>
           <button
@@ -265,9 +266,7 @@ export function AppShell({
         className="sidebar hidden shrink-0 flex-col border-r border-line bg-surface lg:flex"
       >
         <div className="sidebar-header flex items-center gap-3 px-5 py-5">
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand text-on-brand">
-            <Icon name="sparkles" size={20} />
-          </span>
+          <DcatMark size={40} />
           <div className="sidebar-label min-w-0">
             <p className="font-semibold tracking-tight">DCAT</p>
             <p className="truncate text-xs text-ink-soft">Data Cloud Architect Toolkit</p>
