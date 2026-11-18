@@ -1,0 +1,669 @@
+import { expect, test } from '@playwright/test';
+import type { Page, Route } from '@playwright/test';
+import type { InventorySnapshot, OrgSummary } from '@dcat/core';
+import { demoInventory, demoOrgs, demoTransformBundles } from '@dcat/test-fixtures';
+
+declare global {
+  interface Window {
+    __demoAfterSwitch?: boolean;
+    __switchObserver?: MutationObserver;
+  }
+}
+
+const health = {
+  status: 'ok',
+  mode: 'demo',
+  version: '0.1.0',
+  time: '2026-11-18T00:00:00.000Z',
+  cli: { installed: true, version: '2.116.6', error: null },
+};
+
+interface ConnectorState {
+  mode: 'demo' | 'live';
+  /** Orgs returned when the connector is in live mode. */
+  orgs: OrgSummary[];
+  inventories: Record<string, InventorySnapshot>;
+}
+
+function createConnectorState(): ConnectorState {
+  const prodOrg: OrgSummary = {
+    ...demoOrgs[0]!,
+    alias: 'prod-org',
+    orgId: '00DXX0000001PROD',
+    environment: 'production',
+    source: 'salesforce-cli',
+  };
+  const sandboxOrg: OrgSummary = {
+    ...demoOrgs[0]!,
+    alias: 'sandbox-org',
+    orgId: '00DXX0000002SBX',
+    environment: 'sandbox',
+    source: 'salesforce-cli',
+  };
+
+  const liveInventory = (org: OrgSummary, label: string): InventorySnapshot => ({
+    ...structuredClone(demoInventory),
+    org,
+    mode: 'live',
+    dlos: demoInventory.dlos.map((object, index) => (index === 0 ? { ...object, label } : object)),
+  });
+
+  return {
+    mode: 'demo',
+    orgs: [prodOrg, sandboxOrg],
+    inventories: {
+      'demo-uat': liveInventory(demoOrgs[0]!, 'Live Account DLO'),
+      'prod-org': liveInventory(prodOrg, 'Production Account'),
+      'sandbox-org': liveInventory(sandboxOrg, 'Sandbox Account'),
+    },
+  };
+}
+
+/** Mock connector: no CLI, no real org, deterministic and mode-aware fixtures. */
+async function mockConnector(page: Page, state: ConnectorState) {
+  await page.route('**/api/session', (route: Route) =>
+    route.fulfill({ json: { token: 'e2e-token', mode: state.mode } }),
+  );
+  await page.route('**/api/mode', async (route: Route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON() as { mode?: string };
+      if (body.mode === 'demo' || body.mode === 'live') state.mode = body.mode;
+    }
+    await route.fulfill({ json: { mode: state.mode } });
+  });
+  await page.route('**/api/health', (route: Route) =>
+    route.fulfill({ json: { ...health, mode: state.mode } }),
+  );
+  await page.route('**/api/cli/refresh', (route: Route) =>
+    route.fulfill({ json: health.cli }),
+  );
+  await page.route('**/api/orgs**', (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    const segments = path.split('/').filter(Boolean);
+    if (segments.length === 2) {
+      return route.fulfill({ json: state.mode === 'demo' ? demoOrgs : state.orgs });
+    }
+    const alias = decodeURIComponent(segments[2] ?? '');
+    if (segments[3] === 'data-transforms' && segments[4]) {
+      const id = decodeURIComponent(segments[4]);
+      const bundle = demoTransformBundles[id];
+      return bundle
+        ? route.fulfill({ json: bundle })
+        : route.fulfill({ status: 404, json: { error: { code: 'TRANSFORM_NOT_FOUND', message: 'Unknown transform' } } });
+    }
+    if (segments[3] === 'inventory') {
+      const inventory = state.mode === 'demo' ? demoInventory : state.inventories[alias] ?? demoInventory;
+      return route.fulfill({ json: inventory });
+    }
+    const org = [...demoOrgs, ...state.orgs].find((entry) => entry.alias === alias);
+    return org
+      ? route.fulfill({ json: org })
+      : route.fulfill({ status: 404, json: { error: { code: 'ORG_NOT_FOUND', message: 'Unknown org' } } });
+  });
+}
+
+async function seedLiveMode(page: Page) {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('dcat.mode', 'live');
+    } catch {
+      // Storage may be unavailable; the mocked session still supplies live mode.
+    }
+  });
+}
+
+async function openDemo(page: Page) {
+  await mockConnector(page, createConnectorState());
+  await page.goto('/');
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('dcat.mode', 'demo');
+      // Seed once only: a reload must keep a theme the user chose during the test.
+      if (!localStorage.getItem('dcat.theme')) localStorage.setItem('dcat.theme', 'light');
+    } catch {
+      // Storage may be unavailable in a locked-down browser; defaults still apply.
+    }
+  });
+});
+
+test('demo first impression shows the inventory and the CTA opens an explorer', async ({ page }) => {
+  await openDemo(page);
+
+  await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
+  await expect(page.getByText('DEMO DATA.')).toBeVisible();
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect(page.getByText('Your Data 360 model, clearly mapped.')).toBeVisible();
+  await expect(page.getByText('Data Lake Objects')).toBeVisible();
+  await expect(page.getByText('Complete · 100%')).toBeVisible();
+  await expect(page.getByText('Inventory loaded with gaps')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Explore the inventory' }).click();
+  await expect(page.locator('h1')).toHaveText('DLO Explorer');
+  await expect(page.locator('input[placeholder="Search DLOs or fields"]')).toBeVisible();
+});
+
+test('org switcher and details page use the authenticated demo org', async ({ page }) => {
+  await openDemo(page);
+
+  const picker = page.getByLabel('Selected organization');
+  await expect(picker).toHaveValue('demo-uat');
+
+  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await expect(page.locator('h1')).toHaveText('Org Connections');
+  await expect(
+    page.getByRole('table', { name: 'Authenticated Salesforce orgs' }).getByText('demo-uat', { exact: true }),
+  ).toBeVisible();
+});
+
+test('switching to live mode announces the context and never flashes demo metadata', async ({ page }) => {
+  await openDemo(page);
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toBeVisible();
+
+  // The demo label is still legitimate while the switch is pending. Flag only
+  // a reappearance after it has gone away: that would be a stale-cache flash.
+  await page.evaluate(() => {
+    let demoRemoved = false;
+    window.__demoAfterSwitch = false;
+    const observer = new MutationObserver(() => {
+      const hasDemoLabel = document.body.innerText.includes('Sample inventory');
+      if (!hasDemoLabel) demoRemoved = true;
+      else if (demoRemoved) window.__demoAfterSwitch = true;
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    window.__switchObserver = observer;
+  });
+
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+
+  const notice = 'Now using live mode — reading metadata from your Salesforce CLI.';
+  await expect(page.locator('.sr-only[aria-live="polite"]')).toHaveText(notice);
+  await expect(page.locator('.mode-toast')).toContainText(notice);
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  const liveRows = page.getByRole('table', { name: 'DLO Explorer results' });
+  await expect(liveRows.getByText('Production Account')).toBeVisible();
+  await expect(liveRows.getByText('Account DLO', { exact: true })).toHaveCount(0);
+  await expect(liveRows.getByText('Live Account DLO')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__demoAfterSwitch)).toBe(false);
+  await page.evaluate(() => window.__switchObserver?.disconnect());
+});
+
+test('switching demo to live keeps the header height stable and freshness in the inventory strip', async ({ page }) => {
+  await openDemo(page);
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+
+  const header = page.locator('header');
+  const titleBlock = header.locator('h1').locator('..');
+  const titleHeight = () => titleBlock.evaluate((element) => element.getBoundingClientRect().height);
+  const demoTitleHeight = await titleHeight();
+  await expect(header.getByText(/^Updated /)).toHaveCount(0);
+  await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+  await expect(header.getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+
+  expect(await titleHeight()).toBe(demoTitleHeight);
+  await expect(header.getByText(/^Updated /)).toHaveCount(0);
+  await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
+});
+
+test('live mode without an org leads with Select an org and offers the demo fallback', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  state.orgs = [];
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/');
+
+  await expect(page.locator('header').getByText('LIVE · NOT CONNECTED', { exact: true })).toBeVisible();
+  await expect(page.locator('#main-content').getByText('No org selected')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select an org' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Use demo mode' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Use demo mode' }).click();
+  await expect(page.locator('.sr-only[aria-live="polite"]')).toHaveText(
+    'Now using demo mode — sample metadata only.',
+  );
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+});
+
+test('switching live orgs replaces cached metadata instead of showing the previous org', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/');
+
+  await expect(page.getByLabel('Selected organization')).toHaveValue('prod-org');
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  const rows = page.getByRole('table', { name: 'DLO Explorer results' });
+  await expect(rows.getByText('Production Account')).toBeVisible();
+  await expect(rows.getByText('Sandbox Account')).toHaveCount(0);
+
+  await page.getByLabel('Selected organization').selectOption('sandbox-org');
+
+  // Selecting an org returns to the Dashboard to establish the new context.
+  await expect(page.locator('h1')).toHaveText('Dashboard');
+  await expect(page.locator('header').getByText('LIVE · SANDBOX', { exact: true })).toBeVisible();
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await expect(rows.getByText('Sandbox Account')).toBeVisible();
+  await expect(rows.getByText('Production Account')).toHaveCount(0);
+});
+
+test('object details use tabs, breadcrumbs, and metadata copy actions', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+
+  const rows = page.getByRole('table', { name: 'DLO Explorer results' });
+  await expect(rows.getByText('Has mapping').first()).toBeVisible();
+  await expect(rows.getByText('No mapping found').first()).toBeVisible();
+
+  await rows.getByRole('button', { name: 'Details', exact: true }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('DLO Explorer / Account DLO')).toBeVisible();
+  await expect(dialog.getByRole('tab', { name: 'Overview' })).toBeVisible();
+
+  await dialog.getByRole('tab', { name: 'Fields (8)' }).click();
+  await expect(dialog.getByRole('table', { name: 'Object fields' })).toBeVisible();
+
+  await dialog.getByRole('tab', { name: 'Raw Metadata' }).click();
+  await expect(dialog.getByText(/"apiName": "Account_DLO__dll"/)).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Copy API name' }).click();
+  await expect(dialog.getByRole('button', { name: 'Copied' })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Account_DLO__dll');
+});
+
+test('inventory refresh is contextual and detail drawers stay unobstructed', async ({ page }) => {
+  await openDemo(page);
+
+  // Refresh is a content action, not a second header control beside mode switching.
+  await expect(page.locator('header').getByRole('button', { name: 'Refresh inventory' })).toHaveCount(0);
+  await expect(page.getByRole('main').getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
+
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'DLO Explorer' }).click();
+  await expect(page.getByRole('main').getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
+
+  await page.getByRole('table', { name: 'DLO Explorer results' }).getByRole('button', { name: 'Details', exact: true }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+
+  const width = (await page.getByTestId('drawer-panel').boundingBox())?.width ?? 0;
+  expect(width).toBeGreaterThan(0);
+  expect(width).toBeLessThanOrEqual(640);
+
+  const geometry = await page.evaluate(() => {
+    const overlay = document.querySelector<HTMLElement>('[data-testid="drawer-overlay"]')!;
+    const panel = document.querySelector<HTMLElement>('[data-testid="drawer-panel"]')!;
+    const content = panel.querySelector<HTMLElement>(':scope > div.flex-1')!;
+    return {
+      overlayTop: overlay.getBoundingClientRect().top,
+      overlayBottom: overlay.getBoundingClientRect().bottom,
+      panelTop: panel.getBoundingClientRect().top,
+      panelBottom: panel.getBoundingClientRect().bottom,
+      contentBottom: content.getBoundingClientRect().bottom,
+      viewportHeight: window.innerHeight,
+      contentMinHeight: getComputedStyle(content).minHeight,
+    };
+  });
+  expect(geometry.overlayTop).toBe(0);
+  expect(geometry.overlayBottom).toBe(geometry.viewportHeight);
+  expect(geometry.panelTop).toBe(0);
+  expect(geometry.panelBottom).toBe(geometry.viewportHeight);
+  expect(geometry.contentBottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+  expect(geometry.contentMinHeight).toBe('0px');
+
+  const catcherStyle = await page.getByTestId('drawer-click-catcher').evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, backdrop: style.backdropFilter };
+  });
+  expect(['transparent', 'rgba(0, 0, 0, 0)']).toContain(catcherStyle.background);
+  expect(catcherStyle.backdrop).toBe('none');
+});
+
+test('detail drawer content scrolls inside a short viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 520 });
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Transform Explorer' }).click();
+  await page.getByRole('table', { name: 'Data Transform Explorer results' })
+    .getByRole('button', { name: 'Details', exact: true })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+
+  const scroll = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('[data-testid="drawer-panel"]')!;
+    const content = panel.querySelector<HTMLElement>(':scope > div.flex-1')!;
+    content.scrollTop = content.scrollHeight;
+    const last = content.lastElementChild!.getBoundingClientRect();
+    return {
+      scrollHeight: content.scrollHeight,
+      clientHeight: content.clientHeight,
+      scrollTop: content.scrollTop,
+      lastBottom: last.bottom,
+      panelBottom: panel.getBoundingClientRect().bottom,
+    };
+  });
+  expect(scroll.scrollHeight).toBeGreaterThan(scroll.clientHeight);
+  expect(scroll.scrollTop).toBeGreaterThan(0);
+  expect(scroll.lastBottom).toBeLessThanOrEqual(scroll.panelBottom + 1);
+});
+
+test('live export surfaces the metadata sharing notice', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/');
+
+  const notice = "This export contains metadata about your Salesforce org. Store and share it according to your organization's security policies.";
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Dictionary' }).click();
+  await expect(page.getByText(notice)).toBeVisible();
+
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'ERD Explorer' }).click();
+  await expect(page.getByText(notice)).toBeVisible();
+});
+
+test('data transform explorer shows grounded detail, lineage, and run states', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Transform Explorer' }).click();
+  await expect(page.locator('h1')).toHaveText('Data Transform Explorer');
+
+  const rows = page.getByRole('table', { name: 'Data Transform Explorer results' });
+  await expect(rows.getByText('Normalize Contacts', { exact: true })).toBeVisible();
+  await expect(rows.getByText('Stream Click Events', { exact: true })).toBeVisible();
+  await expect(rows.getByText('Legacy Account Sync', { exact: true })).toBeVisible();
+  await expect(rows.getByText('Enrich Order Items', { exact: true })).toBeVisible();
+  await expect(rows.getByText('Route Support Cases', { exact: true })).toBeVisible();
+
+  await rows.getByRole('button', { name: 'Details', exact: true }).first().click();
+  const drawer = page.getByRole('dialog', { name: 'Normalize Contacts' });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText('Data Transform Explorer / Normalize Contacts')).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Flow & Lineage' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Definition' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Run History (2)' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Raw Metadata' })).toBeVisible();
+
+  // Transform status and last-run status must remain distinct fields.
+  await expect(drawer.getByText('Active', { exact: true }).first()).toBeVisible();
+  await expect(drawer.getByText('Success', { exact: true }).first()).toBeVisible();
+
+  await drawer.getByRole('tab', { name: 'Flow & Lineage' }).click();
+  await expect(drawer.getByText('Account_DLO__dll')).toBeVisible();
+  await expect(drawer.getByText('Known in inventory').first()).toBeVisible();
+
+  await drawer.getByRole('tab', { name: 'Run History (2)' }).click();
+  await expect(drawer.getByRole('table', { name: 'Transform run history' })).toBeVisible();
+  await expect(drawer.getByText('run-2026-11-17-001')).toBeVisible();
+
+  await drawer.getByRole('button', { name: 'Close details' }).last().click();
+  await rows.getByRole('button', { name: 'Details', exact: true }).nth(1).click();
+  const streaming = page.getByRole('dialog', { name: 'Stream Click Events' });
+  await expect(streaming.getByText('Streaming', { exact: true }).first()).toBeVisible();
+  await streaming.getByRole('tab', { name: 'Run History (1)' }).click();
+  await expect(streaming.getByRole('table', { name: 'Transform run history' })).toBeVisible();
+  await expect(streaming.getByText('run-stream-2026-11-17-001')).toBeVisible();
+  await streaming.getByRole('tab', { name: 'Overview' }).click();
+  await expect(streaming.getByText('Continuous', { exact: true }).first()).toBeVisible();
+  await expect(streaming.getByText(/not exposed|no schedule data returned/i)).toHaveCount(0);
+
+  await streaming.getByRole('button', { name: 'Close details' }).last().click();
+  await rows.getByRole('button', { name: 'Details', exact: true }).nth(2).click();
+  const legacy = page.getByRole('dialog', { name: 'Legacy Account Sync' });
+  await expect(legacy).toBeVisible();
+  await expect(legacy.getByText('Paused', { exact: true }).first()).toBeVisible();
+  await expect(legacy.getByRole('tab', { name: 'Run History (1)' })).toBeVisible();
+  await expect(legacy.getByText('Nightly at 03:00 UTC', { exact: true }).first()).toBeVisible();
+});
+
+test('ERD Explorer shows the richer demo model and filters grounded edges', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'ERD Explorer' }).click();
+
+  await expect(page.locator('h1')).toHaveText('ERD Explorer');
+  await expect(page.getByText('8 objects', { exact: true })).toBeVisible();
+  await expect(page.getByText('9 visible edges', { exact: true })).toBeVisible();
+  await expect(page.locator('svg[aria-labelledby="erd-title erd-description"]').getByText('Order Item DMO')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Confirmed', exact: true }).click();
+  await expect(page.getByText('3 visible edges', { exact: true })).toBeVisible();
+});
+
+test('export menu consolidates local export formats', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Dictionary' }).click();
+
+  const trigger = page.getByRole('button', { name: 'Export' });
+  await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+  await trigger.click();
+
+  const menu = page.getByRole('menu', { name: 'Export' });
+  await expect(menu).toBeVisible();
+  for (const format of ['CSV', 'JSON', 'Markdown']) {
+    await expect(menu.getByRole('menuitem', { name: new RegExp(format) })).toBeVisible();
+  }
+
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
+test('theme toggle switches to dark and persists across reloads', async ({ page }) => {
+  await openDemo(page);
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  const lightBackground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+
+  await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.getByRole('button', { name: 'Switch to light theme' })).toBeVisible();
+  const darkBackground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  expect(darkBackground).not.toBe(lightBackground);
+
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+});
+
+test('desktop sidebar collapses to an icon rail and persists the choice', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openDemo(page);
+
+  const sidebar = page.locator('#desktop-sidebar');
+  const toggle = page.getByRole('button', { name: 'Collapse sidebar' });
+  await expect(sidebar).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-controls', 'desktop-sidebar');
+  const expandedWidth = (await sidebar.boundingBox())?.width ?? 0;
+  expect(expandedWidth).toBeGreaterThan(200);
+  const sidebarMotion = await sidebar.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { property: style.transitionProperty, duration: style.transitionDuration };
+  });
+  expect(sidebarMotion.property).not.toContain('width');
+  expect(parseFloat(sidebarMotion.duration)).toBe(0);
+
+  await toggle.click();
+  await expect(page.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(sidebar).toHaveAttribute('data-collapsed', 'true');
+  await expect(sidebar.getByRole('button', { name: 'DLO Explorer' })).toBeVisible();
+  await expect(sidebar.locator('.sidebar-label').first()).toBeHidden();
+  const collapsedWidth = (await sidebar.boundingBox())?.width ?? 0;
+  expect(collapsedWidth).toBeLessThan(expandedWidth - 150);
+
+  await page.reload();
+  await expect(page.locator('#desktop-sidebar')).toHaveAttribute('data-collapsed', 'true');
+  await page.getByRole('button', { name: 'Expand sidebar' }).click();
+  await expect(page.locator('#desktop-sidebar')).toHaveAttribute('data-collapsed', 'false');
+  await expect(page.locator('#desktop-sidebar .sidebar-label').first()).toBeVisible();
+});
+
+test('detail drawer contains keyboard focus and closes on Escape', async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Explore the inventory' }).click();
+  await page.getByRole('main').getByRole('button', { name: 'Details', exact: true }).first().click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  for (let press = 0; press < 12; press += 1) await page.keyboard.press('Tab');
+  expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+});
+
+test('reduced motion disables transitions and entrance animations', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openDemo(page);
+
+  const durations = await page.evaluate(() => {
+    const sidebar = document.querySelector<HTMLElement>('#desktop-sidebar');
+    const pageContent = document.querySelector<HTMLElement>('.page-enter');
+    return {
+      sidebar: sidebar ? getComputedStyle(sidebar).transitionDuration : 'missing',
+      page: pageContent ? getComputedStyle(pageContent).animationDuration : 'missing',
+    };
+  });
+  expect(parseFloat(durations.sidebar)).toBeLessThan(0.001);
+  expect(parseFloat(durations.page)).toBeLessThan(0.001);
+});
+
+test('layout has no horizontal overflow at laptop, tablet, and phone widths', async ({ page }) => {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 834, height: 1000 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await openDemo(page);
+    await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, `horizontal overflow at ${viewport.width}px`).toBeLessThanOrEqual(1);
+  }
+});
+
+test('every screen fits a phone viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDemo(page);
+  await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
+
+  for (const name of [
+    'Dashboard',
+    'Org Connections',
+    'Data Spaces',
+    'DLO Explorer',
+    'DMO Explorer',
+    'Mapping Explorer',
+    'Data Transform Explorer',
+    'ERD Explorer',
+    'Data Dictionary',
+    'Settings & Diagnostics',
+  ]) {
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('button', { name }).click();
+    await expect(page.locator('h1')).toHaveText(name);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, `horizontal overflow on ${name}`).toBeLessThanOrEqual(1);
+  }
+});
+
+test('command palette opens with Ctrl+K and opens a DLO detail drawer', async ({ page }) => {
+  await openDemo(page);
+  await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
+  await page.keyboard.press('Control+k');
+
+  const palette = page.getByRole('dialog', { name: 'Search metadata' });
+  await expect(palette).toBeVisible();
+  const input = palette.getByRole('combobox', { name: 'Search inventory metadata' });
+  await expect(input).toBeFocused();
+
+  await input.fill('Account DLO');
+  const option = palette.getByRole('option').filter({ hasText: 'Account DLO' }).first();
+  await expect(option).toContainText('DLO');
+  await expect(option).toContainText('Account_DLO__dll');
+  await expect(option).toContainText('default');
+  await option.click();
+
+  await expect(page.locator('h1')).toHaveText('DLO Explorer');
+  const drawer = page.getByRole('dialog', { name: 'Account DLO' });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText('DLO Explorer / Account DLO')).toBeVisible();
+});
+
+test('command palette Enter selects a DMO and navigates to its explorer', async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Search metadata' }).click();
+
+  const palette = page.getByRole('dialog', { name: 'Search metadata' });
+  const input = palette.getByRole('combobox', { name: 'Search inventory metadata' });
+  await input.fill('Click Event DMO');
+  await expect(palette.getByRole('option').filter({ hasText: 'Click Event DMO' })).toHaveCount(1);
+  await input.press('Enter');
+
+  await expect(page.locator('h1')).toHaveText('DMO Explorer');
+  const drawer = page.getByRole('dialog', { name: 'Click Event DMO' });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText('DMO Explorer / Click Event DMO')).toBeVisible();
+});
+
+test('command palette opens a read-only detail dialog for types without an explorer', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Search metadata' }).click();
+
+  const palette = page.getByRole('dialog', { name: 'Search metadata' });
+  await palette.getByRole('combobox', { name: 'Search inventory metadata' }).fill('Accounts Stream');
+  await page.keyboard.press('Enter');
+
+  const drawer = page.getByRole('dialog', { name: 'Accounts Stream' });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText('Search / Data Stream')).toBeVisible();
+  await expect(drawer.getByText('Salesforce CRM', { exact: true })).toBeVisible();
+  await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();
+
+  await drawer.getByRole('button', { name: 'Copy metadata JSON' }).click();
+  await expect(drawer.getByRole('button', { name: 'Copied' })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('"apiName": "Accounts_Stream"');
+});
+
+test('command palette opens transform results in the Data Transform Explorer', async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Search metadata' }).click();
+
+  const palette = page.getByRole('dialog', { name: 'Search metadata' });
+  const input = palette.getByRole('combobox', { name: 'Search inventory metadata' });
+  await input.fill('Normalize Contacts');
+  await expect(palette.getByRole('option').filter({ hasText: 'Normalize Contacts' })).toHaveCount(1);
+  await input.press('Enter');
+
+  await expect(page.locator('h1')).toHaveText('Data Transform Explorer');
+  const drawer = page.getByRole('dialog', { name: 'Normalize Contacts' });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText('Data Transform Explorer / Normalize Contacts')).toBeVisible();
+});
+
+test('command palette no-inventory state leads with org selection and demo fallback', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  state.orgs = [];
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Search metadata' }).click();
+  const palette = page.getByRole('dialog', { name: 'Search metadata' });
+  await expect(palette.getByText('No inventory available')).toBeVisible();
+  await expect(palette.getByRole('button', { name: 'Select an org' })).toBeVisible();
+  await expect(palette.getByRole('button', { name: 'Use demo mode' })).toBeVisible();
+});

@@ -1,0 +1,195 @@
+import type { CliStatus, OrgSummary, RelayOperation, RelayRequestState, RelayResponse, RelayTask } from '@dcat/core';
+import { relayOperationSchema } from '@dcat/core';
+import { fetchTransformBundle, validateTransformId } from '@dcat/data360-api';
+import { CliError, safeErrorMessage, validateAlias } from '@dcat/salesforce-cli';
+import { refreshCliStatus } from './state.ts';
+import type { AppState } from './state.ts';
+import { resolveInventory, resolveOrgs } from './routes/orgs.ts';
+
+export interface RelayHttp {
+  post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T>;
+}
+
+export class FetchRelayHttp implements RelayHttp {
+  constructor(
+    private readonly baseUrl: string,
+    private readonly fetchFn: typeof fetch = fetch,
+  ) {}
+
+  async post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    const response = await this.fetchFn(`${this.baseUrl.replace(/\/$/, '')}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | T
+      | { error?: { code?: string; message?: string } }
+      | null;
+    if (!response.ok) {
+      const error = payload as { error?: { code?: string; message?: string } } | null;
+      throw new CliError(error?.error?.code === 'INVALID_AGENT_TOKEN' ? 'INVALID_ARGUMENT' : 'COMMAND_FAILED',
+        error?.error?.message ?? `Relay request failed with status ${response.status}.`);
+    }
+    return payload as T;
+  }
+}
+
+interface PairResult {
+  agentToken: string;
+}
+
+interface PollResult {
+  tasks: RelayTask[];
+  status: 'ok' | 'unpaired';
+}
+
+export interface BridgeOptions {
+  relayUrl: string;
+  state: AppState;
+  code?: string;
+  token?: string;
+  pollIntervalMs?: number;
+  http?: RelayHttp;
+  signal?: AbortSignal;
+  logger?: (message: string) => void;
+  onPaired?: (token: string) => void | Promise<void>;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new CliError('COMMAND_FAILED', 'Bridge stopped.'));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new CliError('COMMAND_FAILED', 'Bridge stopped.'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function errorResponse(id: string, error: unknown): RelayResponse {
+  const code = error instanceof CliError ? error.code : 'REQUEST_FAILED';
+  return { id, ok: false, error: { code, message: safeErrorMessage(error) } };
+}
+
+async function findOrg(state: AppState, alias: string): Promise<OrgSummary> {
+  const safeAlias = validateAlias(alias);
+  const orgs = await resolveOrgs(state);
+  const org = orgs.find((entry) => entry.alias === safeAlias);
+  if (!org) throw new CliError('INVALID_ARGUMENT', 'Select an authenticated org first.');
+  return org;
+}
+
+/** Execute one allowlisted operation. The operation shape is always re-validated. */
+export async function executeRelayOperation(state: AppState, operation: unknown): Promise<unknown> {
+  const parsed = relayOperationSchema.safeParse(operation);
+  if (!parsed.success) throw new CliError('INVALID_ARGUMENT', 'Unsupported bridge operation.');
+  const task = parsed.data;
+
+  switch (task.operation) {
+    case 'cli.status':
+      await refreshCliStatus(state);
+      return state.cliStatus satisfies CliStatus;
+    case 'org.list':
+      return resolveOrgs(state, true);
+    case 'org.connect': {
+      const alias = validateAlias(task.alias);
+      await state.cli.loginOrg(alias, task.instanceUrl, task.browser);
+      state.orgsCache = null;
+      const orgs = await resolveOrgs(state, true);
+      return orgs.find((entry) => entry.alias === alias) ?? {
+        alias,
+        username: null,
+        orgId: null,
+        environment: 'unknown',
+        connectedStatus: 'Connected',
+        isDefault: true,
+        isDevHub: false,
+        source: 'salesforce-cli',
+      } satisfies OrgSummary;
+    }
+    case 'inventory.get': {
+      const org = await findOrg(state, task.alias);
+      return resolveInventory(state, org, task.refresh === true);
+    }
+    case 'transform.get': {
+      const alias = validateAlias(task.alias);
+      const id = validateTransformId(task.id);
+      const org = await findOrg(state, alias);
+      const inventory = await resolveInventory(state, org);
+      const seed = inventory.dataTransforms.find((transform) => transform.apiName === id || transform.id === id) ?? null;
+      if (!inventory.apiVersion) {
+        throw new CliError('UNEXPECTED_RESPONSE', 'No API version is available for this org.');
+      }
+      return fetchTransformBundle({ client: state.cli, alias, apiVersion: inventory.apiVersion, id, seed });
+    }
+    case 'mode.set':
+      state.mode = task.mode;
+      state.orgsCache = null;
+      state.inventoryCache = null;
+      return { mode: state.mode };
+  }
+}
+
+/** Long-lived outbound agent. It never opens a listener or accepts inbound connections. */
+export async function runBridge(options: BridgeOptions): Promise<void> {
+  const logger = options.logger ?? (() => {});
+  const http = options.http ?? new FetchRelayHttp(options.relayUrl);
+  const state = options.state;
+  await refreshCliStatus(state);
+
+  let token = options.token;
+  if (!token) {
+    if (!options.code) throw new CliError('INVALID_ARGUMENT', 'A pairing code is required to set up the bridge.');
+    const paired = await http.post<PairResult>('/api/relay/pair', {
+      code: options.code,
+      version: state.config.version,
+      cli: state.cliStatus,
+    });
+    token = paired.agentToken;
+    await options.onPaired?.(token);
+    logger('DCAT bridge paired with the site.');
+  }
+
+  const interval = options.pollIntervalMs ?? 2000;
+  logger('DCAT bridge is running. Press Ctrl+C to stop.');
+
+  while (!options.signal?.aborted) {
+    try {
+      const poll = await http.post<PollResult>('/api/relay/poll', {
+        agentToken: token,
+        cli: state.cliStatus,
+      }, options.signal);
+      if (poll.status === 'unpaired') {
+        throw new CliError('INVALID_ARGUMENT', 'The site reset this bridge pairing. Run setup again.');
+      }
+
+      for (const task of poll.tasks) {
+        let response: RelayResponse;
+        try {
+          const result = await executeRelayOperation(state, task.operation);
+          response = { id: task.id, ok: true, result };
+        } catch (error) {
+          response = errorResponse(task.id, error);
+        }
+        await http.post('/api/relay/respond', { agentToken: token, response }, options.signal);
+      }
+    } catch (error) {
+      if (options.signal?.aborted) break;
+      logger(`Bridge request failed: ${safeErrorMessage(error)}. Retrying.`);
+    }
+
+    try {
+      await sleep(interval, options.signal);
+    } catch {
+      break;
+    }
+  }
+}
+
+export type { RelayRequestState };

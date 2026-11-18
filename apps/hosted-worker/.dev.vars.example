@@ -1,0 +1,2 @@
+# Optional. Session lifetime in seconds; defaults to 30 days.
+# SESSION_TTL_SECONDS=2592000

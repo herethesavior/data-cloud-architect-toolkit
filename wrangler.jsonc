@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "data-cloud-architect-toolkit",
+  "main": "apps/hosted-worker/src/pages.ts",
+  "compatibility_date": "2026-11-18",
+  "assets": {
+    "directory": "apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  // Workers Builds runs `npx wrangler deploy` from the repository root. Wrangler
+  // bundles this source directly, so deploy does not depend on build-generated
+  // _worker.js. It runs before assets for every route and applies the security
+  // headers consistently.
+  "kv_namespaces": [
+    {
+      "binding": "DCAT_SESSIONS",
+      "id": "fd2bbc29b1b2427f87ccf9f8e34e6705",
+      "preview_id": "0155c4acd0054d5bb60519428b14c5ee"
+    }
+  ]
+}

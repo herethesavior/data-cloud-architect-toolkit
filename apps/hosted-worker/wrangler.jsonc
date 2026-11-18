@@ -1,0 +1,17 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "dcat-hosted",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-18",
+  "assets": {
+    "directory": "../web/dist/",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // `id` is required for a standalone `worker:deploy`. Cloudflare Pages uses its
+  // own DCAT_SESSIONS binding and does not read this file at deploy time.
+  "kv_namespaces": [
+    { "binding": "DCAT_SESSIONS" }
+  ]
+}

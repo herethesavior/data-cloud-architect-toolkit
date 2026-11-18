@@ -1,0 +1,12 @@
+{
+  "name": "@dcat/hosted-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker hosting the DCAT workbench with session, demo fixtures, and a local bridge relay",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run"
+  }
+}
