@@ -57,9 +57,8 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
       <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-soft">
         <Icon name="clock" size={14} className="text-ink-faint" />
         <span>
-          Updated <span title={absolute}>{formatUpdatedAt(inventory.generatedAt)}</span>
+          Updated <span title={`Updated ${absolute}`}>{formatUpdatedAt(inventory.generatedAt)}</span>
         </span>
-        <span className="hidden text-ink-faint sm:inline">{absolute}</span>
         {stale ? (
           <span className="rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-warning">Cached</span>
         ) : null}

@@ -133,7 +133,11 @@ test('demo first impression shows the inventory and the CTA opens an explorer', 
   await openDemo(page);
 
   await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
-  await expect(page.getByText('DEMO DATA.')).toBeVisible();
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toHaveAttribute(
+    'title',
+    'Sample metadata only — no Salesforce org is connected.',
+  );
+  await expect(page.getByText('Sample metadata only — no Salesforce org is connected.')).toHaveCount(0);
   await expect(page.getByText('Sample inventory')).toBeVisible();
   await expect(page.getByText('Your Data 360 model, clearly mapped.')).toBeVisible();
   await expect(page.getByText('Data Lake Objects')).toBeVisible();
@@ -203,7 +207,9 @@ test('switching demo to live keeps the header height stable and freshness in the
   const titleHeight = () => titleBlock.evaluate((element) => element.getBoundingClientRect().height);
   const demoTitleHeight = await titleHeight();
   await expect(header.getByText(/^Updated /)).toHaveCount(0);
-  await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
+  const freshness = page.locator('#main-content').getByText(/^Updated /);
+  await expect(freshness).toBeVisible();
+  await expect(freshness.locator('[title^="Updated "]')).toHaveAttribute('title', /Updated .*\d{4}/);
 
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
   await expect(header.getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
@@ -620,6 +626,8 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await expect(toggle).toHaveAttribute('aria-controls', 'desktop-sidebar');
   const expandedWidth = (await sidebar.boundingBox())?.width ?? 0;
   expect(expandedWidth).toBeGreaterThan(200);
+  await expect(sidebar.locator('.nav-item svg').first()).toHaveAttribute('width', '18');
+  await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(0);
   const sidebarMotion = await sidebar.evaluate((element) => {
     const style = getComputedStyle(element);
     return { property: style.transitionProperty, duration: style.transitionDuration };
@@ -630,8 +638,12 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await toggle.click();
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute('aria-expanded', 'false');
   await expect(sidebar).toHaveAttribute('data-collapsed', 'true');
-  await expect(sidebar.getByRole('button', { name: 'DLO Explorer' })).toBeVisible();
+  const dloItem = sidebar.getByRole('button', { name: 'DLO Explorer' });
+  await expect(dloItem).toBeVisible();
   await expect(sidebar.locator('.sidebar-label').first()).toBeHidden();
+  await expect(sidebar.locator('.nav-item svg').first()).toHaveAttribute('width', '20');
+  expect((await dloItem.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(2);
   const collapsedWidth = (await sidebar.boundingBox())?.width ?? 0;
   expect(collapsedWidth).toBeLessThan(expandedWidth - 150);
 
@@ -640,6 +652,8 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await page.getByRole('button', { name: 'Expand sidebar' }).click();
   await expect(page.locator('#desktop-sidebar')).toHaveAttribute('data-collapsed', 'false');
   await expect(page.locator('#desktop-sidebar .sidebar-label').first()).toBeVisible();
+  await expect(page.locator('#desktop-sidebar .nav-item svg').first()).toHaveAttribute('width', '18');
+  await expect(page.locator('#desktop-sidebar nav > div > div[aria-hidden="true"]')).toHaveCount(0);
 });
 
 test('detail drawer contains keyboard focus and closes on Escape', async ({ page }) => {

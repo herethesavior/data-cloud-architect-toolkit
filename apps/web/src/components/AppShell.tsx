@@ -64,11 +64,14 @@ interface NavigationListProps {
 
 function NavigationList({ page, onNavigate, label, collapsed = false }: NavigationListProps) {
   return (
-    <nav aria-label={label} className="space-y-6">
-      {NAV_GROUPS.map((group) => (
+    <nav aria-label={label} className={collapsed ? 'space-y-0' : 'space-y-6'}>
+      {NAV_GROUPS.map((group, groupIndex) => (
         <div key={group.label}>
           <p className="label-xs sidebar-group-label mb-2 px-3">{group.label}</p>
-          <div className="space-y-0.5">
+          {collapsed && groupIndex > 0 ? (
+            <div aria-hidden="true" className="mx-auto my-2 h-px w-8 bg-line" />
+          ) : null}
+          <div className="space-y-1">
             {group.items.map((item) => {
               const active = item.id === page;
               return (
@@ -81,7 +84,7 @@ function NavigationList({ page, onNavigate, label, collapsed = false }: Navigati
                   title={collapsed ? item.label : undefined}
                   className={`nav-item ${active ? 'nav-item-active' : ''}`}
                 >
-                  <Icon name={pageIcons[item.id]} size={18} />
+                  <Icon name={pageIcons[item.id]} size={collapsed ? 20 : 18} />
                   <span className="sidebar-label">{item.label}</span>
                   {active ? (
                     <span aria-hidden="true" className="sidebar-active-dot ml-auto size-1.5 rounded-full bg-brand" />
@@ -350,7 +353,11 @@ export function AppShell({
                   <Icon name="plug" size={17} />
                   <span className="hidden xl:inline">Details</span>
                 </Button>
-                <Badge tone={badge.tone} dot>
+                <Badge
+                  tone={badge.tone}
+                  dot
+                  title={activeMode === 'demo' ? 'Sample metadata only — no Salesforce org is connected.' : undefined}
+                >
                   {badge.label}
                 </Badge>
                 <Button
@@ -400,21 +407,6 @@ export function AppShell({
                 className="ml-auto font-semibold underline underline-offset-2 disabled:opacity-50"
               >
                 Try again
-              </button>
-            </div>
-          ) : null}
-          {activeMode === 'demo' ? (
-            <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-warning/20 bg-warning-soft px-4 py-2.5 text-sm text-warning" role="note">
-              <Icon name="warning" size={16} />
-              <span className="font-semibold">{badge.label}.</span>
-              <span>Sample metadata only — no Salesforce org is connected.</span>
-              <button
-                type="button"
-                onClick={onToggleMode}
-                disabled={isTogglingMode}
-                className="ml-auto font-semibold underline underline-offset-2 disabled:opacity-50"
-              >
-                {isTogglingMode ? 'Switching…' : 'Use live mode'}
               </button>
             </div>
           ) : null}
