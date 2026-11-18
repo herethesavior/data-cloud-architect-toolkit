@@ -5,7 +5,7 @@ import {
   exportInventoryJson,
   exportInventoryMarkdown,
 } from '@dcat/exporters';
-import { countInDataSpace, filterByQuery } from '../lib/inventory.ts';
+import { countInDataSpace, countStreamsInDataSpace, filterByQuery } from '../lib/inventory.ts';
 import { ExportMenu } from '../components/ExportMenu.tsx';
 import type { ExportMenuItem } from '../components/ExportMenu.tsx';
 import { ExportNotice } from '../components/ExportNotice.tsx';
@@ -35,10 +35,7 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
         const countsFor = (spaceApiName: string) => ({
           dlo: countInDataSpace(inventory.dlos, spaceApiName),
           dmo: countInDataSpace(inventory.dmos, spaceApiName),
-          stream: inventory.dataStreams.filter((stream) => {
-            const dlo = inventory.dlos.find((object) => object.apiName === stream.targetDlo);
-            return dlo?.dataSpace === spaceApiName;
-          }).length,
+          stream: countStreamsInDataSpace(inventory, spaceApiName),
         });
 
         const download = (format: keyof typeof formatLabels, contents: string, extension: string, mimeType: string) => {

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { DiscoveryProgress as DiscoveryProgressData, InventorySnapshot } from '@dcat/core';
 import { formatUpdatedAt, isInventoryStale } from '../lib/inventory.ts';
-import { discoveryStages, humanizeResource } from '../lib/resourceStatus.ts';
+import { discoveryStages, humanizeResource, resumableProgressFamilies } from '../lib/resourceStatus.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 import { Button } from './ui/index.ts';
@@ -16,7 +16,7 @@ function countLabel(loaded: number, total: number | null): string {
 }
 
 function stalledFamilies(inventory: InventorySnapshot): boolean {
-  return inventory.progress?.families.some((family) => family.status === 'failed' || Boolean(family.error)) ?? false;
+  return resumableProgressFamilies(inventory) > 0;
 }
 
 /** Visible, exact counters for partial snapshots; never hides loaded rows. */

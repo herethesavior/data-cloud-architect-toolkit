@@ -222,6 +222,48 @@ describe('local connector API', () => {
     await app.close();
   });
 
+  it('clears live discovery sessions when the mode changes directly', async () => {
+    const config = { ...loadConfig({}, []), mode: 'live' as const, sessionToken: 'phase1-test-token' };
+    const app = await buildApp({ config, runner: liveCliRunner() });
+    const headers = { ...localHeaders, 'x-dcat-token': 'phase1-test-token' };
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/orgs/demo-uat/inventory/session',
+      payload: {},
+      headers,
+    });
+    expect(started.statusCode).toBe(200);
+    const sessionId = started.json().sessionId as string;
+    expect(sessionId).toBeTruthy();
+
+    const switched = await app.inject({
+      method: 'POST',
+      url: '/api/mode',
+      payload: { mode: 'demo' },
+      headers,
+    });
+    expect(switched.json()).toMatchObject({ mode: 'demo' });
+
+    const switchedBack = await app.inject({
+      method: 'POST',
+      url: '/api/mode',
+      payload: { mode: 'live' },
+      headers,
+    });
+    expect(switchedBack.json()).toMatchObject({ mode: 'live' });
+
+    const status = await app.inject({
+      method: 'POST',
+      url: `/api/orgs/demo-uat/inventory/session/${encodeURIComponent(sessionId)}`,
+      payload: {},
+      headers,
+    });
+    expect(status.statusCode).toBe(502);
+    expect(status.json().error.code).toBe('SESSION_EXPIRED');
+    await app.close();
+  });
+
   it('serves a labelled demo transform bundle on a plain GET', async () => {
     const app = await demoApp();
     const response = await app.inject({

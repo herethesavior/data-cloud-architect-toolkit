@@ -13,6 +13,7 @@ import {
   deriveInferredRelationships,
   extractCollection,
   normalizeDataSpaces,
+  normalizeDataStreams,
   normalizeDlos,
   normalizeDmos,
   normalizeMappings,
@@ -65,6 +66,63 @@ describe('Data 360 response normalization', () => {
       sourceEndpoint: context.endpoint,
       apiVersion: '65.0',
       confidence: 'source',
+    });
+  });
+
+  it('normalizes real Salesforce v68 payload shapes used for Data Space counts', () => {
+    const spaces = normalizeDataSpaces({
+      currentPageUrl: '/services/data/v68.0/ssot/data-spaces?batchSize=50&offset=0',
+      dataSpaces: [{
+        dataSpaceDefinitionId: '0wSg7000000GF4jEAG',
+        dataSpaceType: 'Default',
+        name: 'default',
+        status: 'Active',
+      }],
+      totalSize: 1,
+    }, context);
+    expect(spaces.items[0]).toMatchObject({ apiName: 'default', isDefault: true });
+
+    const dlos = normalizeDlos({
+      currentPageUrl: '/services/data/v68.0/ssot/data-lake-objects?limit=20&offset=0',
+      nextPageUrl: '/services/data/v68.0/ssot/data-lake-objects?limit=20&offset=20',
+      totalSize: 23,
+      dataLakeObjects: [{
+        name: 'Account_Home__dll',
+        label: 'Account_Home',
+        dataSpaceInfo: [{ label: 'default', name: 'default' }],
+        fields: [],
+      }],
+    }, context);
+    expect(dlos.items[0]).toMatchObject({
+      apiName: 'Account_Home__dll',
+      dataSpace: 'default',
+    });
+
+    const dmos = normalizeDmos({
+      dataModelObject: [{ name: 'Account_DMO__dlm', dataSpaceName: 'default', fields: [] }],
+    }, context);
+    expect(dmos.items[0]).toMatchObject({ apiName: 'Account_DMO__dlm', dataSpace: 'default' });
+
+    const streams = normalizeDataStreams({
+      currentPageUrl: '/services/data/v68.0/ssot/data-streams?limit=10&offset=1',
+      nextPageUrl: '/services/data/v68.0/ssot/data-streams?limit=10&offset=11',
+      totalSize: 22,
+      dataStreams: [{
+        name: 'Account_Home',
+        label: 'Account_Home',
+        connectorInfo: { connectorDetails: { name: 'Salesforce_Home', type: 'SalesforceDotCom' } },
+        dataLakeObjectInfo: {
+          name: 'Account_Home__dll',
+          dataSpaceInfo: [{ label: 'default', name: 'default' }],
+        },
+        status: 'ACTIVE',
+      }],
+    }, context);
+    expect(streams.items[0]).toMatchObject({
+      apiName: 'Account_Home',
+      targetDlo: 'Account_Home__dll',
+      dataSpace: 'default',
+      sourceConnector: 'SalesforceDotCom',
     });
   });
 

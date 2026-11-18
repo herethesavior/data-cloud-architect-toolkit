@@ -74,6 +74,8 @@ export interface RunOptions {
   maxOutputBytes?: number;
   /** Keep hidden by default; login uses false so the CLI can open a browser on Windows. */
   windowsHide?: boolean;
+  /** Cancels an in-flight CLI process when a discovery session is stopped. */
+  signal?: AbortSignal;
 }
 
 export interface ProcessRunner {
@@ -123,6 +125,7 @@ export class NodeProcessRunner implements ProcessRunner {
       let stderr = '';
       let totalBytes = 0;
       let timedOut = false;
+      let aborted = false;
       let limitExceeded = false;
       let settled = false;
 
@@ -131,10 +134,18 @@ export class NodeProcessRunner implements ProcessRunner {
         child.kill();
       }, timeoutMs);
 
+      const onAbort = () => {
+        aborted = true;
+        child.kill();
+      };
+      if (options.signal?.aborted) onAbort();
+      else options.signal?.addEventListener('abort', onAbort, { once: true });
+
       const finish = (complete: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        options.signal?.removeEventListener('abort', onAbort);
         complete();
       };
 
@@ -168,7 +179,9 @@ export class NodeProcessRunner implements ProcessRunner {
 
       child.on('close', (exitCode) => {
         finish(() => {
-          if (timedOut) {
+          if (aborted) {
+            reject(new CliError('TIMEOUT', 'Salesforce CLI command was cancelled.'));
+          } else if (timedOut) {
             reject(new CliError('TIMEOUT', `Salesforce CLI command timed out after ${timeoutMs} ms.`));
           } else if (limitExceeded) {
             reject(new CliError('OUTPUT_LIMIT', 'Salesforce CLI output exceeded the safe size limit.'));

@@ -423,6 +423,14 @@ export const api = {
     try {
       return await progressiveInventory(alias, options, hostedLive);
     } catch (error) {
+      // An expired session is normal after a long-lived tab. Start a fresh one
+      // instead of silently dropping to an all-at-once legacy discovery.
+      if (error instanceof ApiError && error.code === 'SESSION_EXPIRED' && options.sessionId) {
+        return progressiveInventory(alias, { ...options, sessionId: undefined }, hostedLive);
+      }
+      if (error instanceof ApiError && error.code === 'SESSION_EXPIRED' && !options.sessionId) {
+        return progressiveInventory(alias, { ...options, sessionId: undefined, force: true }, hostedLive);
+      }
       // An older local bridge or connector may not expose the progressive
       // operations yet. Preserve the previous all-at-once behavior in that case.
       const unsupported = error instanceof ApiError

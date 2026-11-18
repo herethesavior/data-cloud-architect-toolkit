@@ -211,7 +211,7 @@ export class SalesforceCliAdapter {
     const safePath = validateRestPath(path);
     const result = await this.run(
       ['api', 'request', 'rest', safePath, '--method', 'GET', '--target-org', safeAlias],
-      options ?? { timeoutMs: REST_TIMEOUT_MS },
+      { timeoutMs: REST_TIMEOUT_MS, ...options },
     );
     return result.stdout;
   }

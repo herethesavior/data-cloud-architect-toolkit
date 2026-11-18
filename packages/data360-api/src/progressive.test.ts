@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   dataSpacesJson,
   dataStreamsJson,
@@ -36,6 +36,7 @@ const retry = {
 interface FakeCli extends RestClient {
   calls: string[];
   failures: Record<string, number>;
+  errors: Record<string, string>;
 }
 
 function pagedDlos(total = 200, perPage = 10): Record<string, string> {
@@ -56,7 +57,11 @@ function pagedDlos(total = 200, perPage = 10): Record<string, string> {
   return pages;
 }
 
-function fakeCli(overrides: Record<string, string> = {}, failures: Record<string, number> = {}): FakeCli {
+function fakeCli(
+  overrides: Record<string, string> = {},
+  failures: Record<string, number> = {},
+  errors: Record<string, string> = {},
+): FakeCli {
   const calls: string[] = [];
   const attempts = new Map<string, number>();
   const paths: Record<string, string> = {
@@ -73,10 +78,14 @@ function fakeCli(overrides: Record<string, string> = {}, failures: Record<string
   return {
     calls,
     failures,
+    errors,
     restGet: async (_alias, path) => {
       calls.push(path);
       const count = (attempts.get(path) ?? 0) + 1;
       attempts.set(path, count);
+      if (errors[path]) {
+        throw new CliError('COMMAND_FAILED', errors[path]!);
+      }
       if ((failures[path] ?? 0) >= count) {
         throw new CliError('COMMAND_FAILED', 'ERROR: 500 Server Error');
       }
@@ -161,6 +170,63 @@ describe('progressive discovery', () => {
     expect(progressiveSnapshot(state).warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ family: 'dlos', code: 'CONTINUATION_LOOP' }),
     ]));
+    expect(progressiveSnapshot(state).capabilities.find((capability) => capability.family === 'dlos'))
+      .toMatchObject({ status: 'partial', itemCount: 1 });
+    expect(progressiveSnapshot(state).progress?.state).toBe('complete');
+  });
+
+  it('terminates a progressive session when API-version discovery is unsupported', async () => {
+    const cli: RestClient = {
+      restGet: async () => {
+        throw new CliError('COMMAND_FAILED', 'ERROR running api request rest: (404) Not Found');
+      },
+    };
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const snapshot = progressiveSnapshot(state);
+
+    expect(snapshot.apiVersion).toBeNull();
+    expect(snapshot.capabilities.find((capability) => capability.family === 'api-versions'))
+      .toMatchObject({ status: 'unsupported' });
+    expect(snapshot.capabilities.filter((capability) => capability.family !== 'api-versions')
+      .every((capability) => capability.status === 'unsupported')).toBe(true);
+    expect(snapshot.progress?.state).toBe('failed');
+    expect(isProgressiveDiscoveryActive(state)).toBe(false);
+  });
+
+  it('does not let resume clear a forbidden family', async () => {
+    const cli = fakeCli({}, {}, { [dloPath]: 'ERROR running api request rest: 403 Forbidden' });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const before = progressiveSnapshot(state);
+
+    expect(before.capabilities.find((capability) => capability.family === 'dlos')?.status).toBe('forbidden');
+    expect(before.progress?.families.find((family) => family.family === 'dlos'))
+      .toMatchObject({ status: 'failed', errorStatus: 'forbidden' });
+
+    resumeProgressiveDiscovery(state, 'dlos');
+    const after = progressiveSnapshot(state);
+    expect(after.capabilities.find((capability) => capability.family === 'dlos')?.status).toBe('forbidden');
+    expect(after.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: 'dlos', code: 'FORBIDDEN' }),
+    ]));
+  });
+
+  it('stamps later pages and the snapshot with page retrieval time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-18T00:00:00.000Z'));
+    try {
+      const state = await createProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+      const firstPageTime = progressiveSnapshot(state).dlos[0]?.provenance.retrievedAt;
+
+      vi.setSystemTime(new Date('2026-11-18T00:05:00.000Z'));
+      await advanceProgressiveDiscovery(state);
+
+      const lastItem = progressiveSnapshot(state).dlos.at(-1);
+      expect(firstPageTime).toBe('2026-11-18T00:00:00.000Z');
+      expect(lastItem?.provenance.retrievedAt).toBe('2026-11-18T00:05:00.000Z');
+      expect(state.generatedAt).toBe('2026-11-18T00:05:00.000Z');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('completes when no DMOs exist and mapping lookup is intentionally skipped', async () => {
@@ -174,7 +240,7 @@ describe('progressive discovery', () => {
     expect(snapshot.dmos).toHaveLength(0);
     expect(snapshot.progress?.state).toBe('complete');
     expect(snapshot.progress?.families.find((family) => family.family === 'mappings'))
-      .toMatchObject({ status: 'complete', loaded: 0, hasMore: false });
+      .toMatchObject({ status: 'not-started', loaded: 0, hasMore: false });
     expect(snapshot.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ family: 'mappings', code: 'MAPPINGS_SKIPPED' }),
     ]));

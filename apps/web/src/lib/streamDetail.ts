@@ -14,16 +14,21 @@ export function streamDateText(value: string | null | undefined): string {
 }
 
 /**
- * Data streams do not carry a data space. Derive one only when the named target
- * DLO is present in the same snapshot, matching the Data Spaces page.
+ * Prefer a data space returned with the stream itself. Older payloads omit it,
+ * so fall back to the named target DLO only when it is in the same snapshot.
  */
 export function streamDataSpace(inventory: InventorySnapshot, stream: DataStream): string | null {
+  const direct = stream.dataSpace?.trim();
+  if (direct) return direct;
   if (!stream.targetDlo) return null;
-  return inventory.dlos.find((dlo) => dlo.apiName === stream.targetDlo)?.dataSpace ?? null;
+  return inventory.dlos.find((dlo) => dlo.apiName.toLowerCase() === stream.targetDlo?.toLowerCase())
+    ?.dataSpace ?? null;
 }
 
 export function streamTargetKnown(inventory: InventorySnapshot, stream: DataStream): boolean {
-  return Boolean(stream.targetDlo && inventory.dlos.some((dlo) => dlo.apiName === stream.targetDlo));
+  return Boolean(stream.targetDlo && inventory.dlos.some(
+    (dlo) => dlo.apiName.toLowerCase() === stream.targetDlo?.toLowerCase(),
+  ));
 }
 
 export function streamStatusTone(status: string | null | undefined): StreamStatusTone {

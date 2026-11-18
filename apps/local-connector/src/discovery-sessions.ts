@@ -74,11 +74,18 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function isCurrent(state: AppState, record: DiscoverySessionRecord): boolean {
+  return state.discoverySessions.get(record.id) === record && !record.controller.signal.aborted;
+}
+
 async function runSession(state: AppState, record: DiscoverySessionRecord): Promise<void> {
   record.running = true;
   try {
-    while (!record.controller.signal.aborted && isProgressiveDiscoveryActive(record.state)) {
+    while (isCurrent(state, record) && isProgressiveDiscoveryActive(record.state)) {
       await advanceProgressiveDiscovery(record.state);
+      // A refresh, mode switch, or TTL prune may have replaced this session while
+      // the CLI call was in flight. Never let an old worker overwrite new cache.
+      if (!isCurrent(state, record)) break;
       record.latest = progressiveSnapshot(record.state);
       record.updatedAt = Date.now();
       state.inventoryCache = { at: Date.now(), alias: record.alias, inventory: record.latest };
@@ -86,6 +93,7 @@ async function runSession(state: AppState, record: DiscoverySessionRecord): Prom
       await sleep(BATCH_DELAY_MS, record.controller.signal);
     }
   } catch (error) {
+    if (!isCurrent(state, record)) return;
     // A malformed snapshot must not silently become an empty inventory. Keep the
     // last valid snapshot and surface the failure on the next status poll.
     record.state.warnings.push({
@@ -132,12 +140,14 @@ export async function startDiscoverySession(
 
   const sessionId = options.sessionId ?? newId();
   const generation = `${Date.now().toString(36)}-${newId().slice(0, 8)}`;
+  const controller = new AbortController();
   const progressive = await createProgressiveDiscovery({
     cli: state.cli,
     alias: org.alias,
     org,
     sessionId,
     generation,
+    signal: controller.signal,
   });
   const record: DiscoverySessionRecord = {
     id: sessionId,
@@ -147,7 +157,7 @@ export async function startDiscoverySession(
     updatedAt: Date.now(),
     state: progressive,
     latest: progressiveSnapshot(progressive),
-    controller: new AbortController(),
+    controller,
     firstBatch: Promise.resolve(),
     running: false,
   };
@@ -169,7 +179,7 @@ export async function getDiscoverySession(
   pruneSessions(state);
   const record = state.discoverySessions.get(options.sessionId);
   if (!record || record.alias !== org.alias) {
-    throw new CliError('INVALID_ARGUMENT', 'This discovery session expired. Refresh the inventory to start again.');
+    throw new CliError('SESSION_EXPIRED', 'This discovery session expired. Starting a fresh inventory load.');
   }
 
   if (options.resume) {
