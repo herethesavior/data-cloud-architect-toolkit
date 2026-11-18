@@ -27,6 +27,7 @@ import { Settings } from './pages/Settings.tsx';
 import { DataSpaces } from './pages/DataSpaces.tsx';
 import { DloExplorer, DmoExplorer } from './components/ObjectExplorer.tsx';
 import { MappingExplorer } from './pages/MappingExplorer.tsx';
+import { DataStreamExplorer } from './pages/DataStreamExplorer.tsx';
 import { DataTransformExplorer } from './pages/DataTransformExplorer.tsx';
 import { ErdExplorer } from './pages/ErdExplorer.tsx';
 import { DataDictionary } from './pages/DataDictionary.tsx';
@@ -229,6 +230,11 @@ export function App() {
   };
 
   const selectSearchResult = (result: CommandResult) => {
+    if (result.kind === 'stream') {
+      setFocusObject({ kind: 'stream', apiName: result.apiName });
+      setPage('data-streams');
+      return;
+    }
     if (result.kind === 'transform') {
       setFocusObject({ kind: 'transform', apiName: result.apiName });
       setPage('data-transforms');
@@ -263,6 +269,14 @@ export function App() {
         return <DmoExplorer context={context} focusObject={focusObject} onFocusHandled={() => setFocusObject(null)} />;
       case 'mappings':
         return <MappingExplorer context={context} />;
+      case 'data-streams':
+        return (
+          <DataStreamExplorer
+            context={context}
+            focusObject={focusObject}
+            onFocusHandled={() => setFocusObject(null)}
+          />
+        );
       case 'data-transforms':
         return (
           <DataTransformExplorer

@@ -12,7 +12,7 @@ import type { IconName } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, Panel, SectionHeading } from '../components/ui/index.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
-import { discoverySummary } from '../lib/inventory.ts';
+import { discoverySummary, safeDateText } from '../lib/inventory.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
 import {
   actionableWarnings,
@@ -119,6 +119,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
           { label: 'DLOs', value: inventory.dlos.length, page: 'dlos', icon: 'database' },
           { label: 'DMOs', value: inventory.dmos.length, page: 'dmos', icon: 'cube' },
           { label: 'Mappings', value: inventory.mappings.length, page: 'mappings', icon: 'route' },
+          { label: 'Streams', value: inventory.dataStreams.length, page: 'data-streams', icon: 'stream' },
           { label: 'Transforms', value: inventory.dataTransforms.length, page: 'data-transforms', icon: 'sparkles' },
         ];
         const flowSteps: { label: string; value: number; icon: IconName }[] = [
@@ -133,6 +134,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
           { label: 'DLO Explorer', description: 'Raw ingested objects', page: 'dlos', icon: 'database' },
           { label: 'DMO Explorer', description: 'Unified model objects', page: 'dmos', icon: 'cube' },
           { label: 'Mapping Explorer', description: 'Source-to-target lineage', page: 'mappings', icon: 'route' },
+          { label: 'Data Stream Explorer', description: 'Ingestion streams and cadence', page: 'data-streams', icon: 'stream' },
           { label: 'Data Transform Explorer', description: 'Batch and streaming transforms', page: 'data-transforms', icon: 'sparkles' },
           { label: 'ERD Explorer', description: 'Relationships and certainty', page: 'erd', icon: 'graph' },
           { label: 'Data Dictionary', description: 'Fields and exports', page: 'dictionary', icon: 'book' },
@@ -196,7 +198,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                     ))}
                   </div>
                   <p className="mt-4 text-xs text-ink-soft">
-                    Generated {new Date(inventory.generatedAt).toLocaleString()} · API v{inventory.apiVersion ?? '—'}
+                    Generated {safeDateText(inventory.generatedAt, 'time unavailable')} · API v{inventory.apiVersion ?? '—'}
                   </p>
                 </div>
               </div>
@@ -208,7 +210,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                 title="Inventory at a glance"
                 description="Select a metric to open the matching explorer."
               />
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 {metrics.map((metric) => (
                   <button
                     key={metric.label}

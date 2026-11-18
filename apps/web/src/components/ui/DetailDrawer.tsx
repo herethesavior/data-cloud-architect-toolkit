@@ -49,24 +49,32 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const { rendered, closing } = useDrawerPresence(open);
 
   useEffect(() => {
     if (!open || !rendered) return;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!previousFocusRef.current && document.activeElement instanceof HTMLElement) {
+      previousFocusRef.current = document.activeElement;
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onCloseRef.current();
       trapDialogFocus(event, dialogRef.current);
     };
     document.addEventListener('keydown', handleKeyDown);
     closeRef.current?.focus();
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      previousFocus?.focus();
-    };
+    return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, rendered]);
+
+  // Restore focus only after the exit animation removes the portal; restoring
+  // while it is still visible would let Tab escape the modal early.
+  useEffect(() => {
+    if (rendered) return;
+    previousFocusRef.current?.focus();
+    previousFocusRef.current = null;
+  }, [rendered]);
 
   if (!rendered) return null;
 

@@ -132,8 +132,14 @@ test.beforeEach(async ({ page }) => {
 test('demo first impression shows the inventory and the CTA opens an explorer', async ({ page }) => {
   await openDemo(page);
 
+  await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute('href', '/favicon.ico');
+  await expect(page.locator('#desktop-sidebar img[src="/dcat-icon-192.png"]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
-  await expect(page.getByText('DEMO DATA.')).toBeVisible();
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toHaveAttribute(
+    'title',
+    'Sample metadata only — no Salesforce org is connected.',
+  );
+  await expect(page.getByText('Sample metadata only — no Salesforce org is connected.')).toHaveCount(0);
   await expect(page.getByText('Sample inventory')).toBeVisible();
   await expect(page.getByText('Your Data 360 model, clearly mapped.')).toBeVisible();
   await expect(page.getByText('Data Lake Objects')).toBeVisible();
@@ -203,7 +209,9 @@ test('switching demo to live keeps the header height stable and freshness in the
   const titleHeight = () => titleBlock.evaluate((element) => element.getBoundingClientRect().height);
   const demoTitleHeight = await titleHeight();
   await expect(header.getByText(/^Updated /)).toHaveCount(0);
-  await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
+  const freshness = page.locator('#main-content').getByText(/^Updated /);
+  await expect(freshness).toBeVisible();
+  await expect(freshness.locator('[title^="Updated "]')).toHaveAttribute('title', /Updated .*\d{4}/);
 
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
   await expect(header.getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
@@ -393,6 +401,10 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
   await page.getByRole('table', { name: 'DLO Explorer results' }).getByRole('button', { name: 'Details', exact: true }).first().click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
+  // The slide-in transform reports subpixel widths while it is still running.
+  await dialog.evaluate((element) =>
+    Promise.allSettled(element.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  );
 
   const width = (await page.getByTestId('drawer-panel').boundingBox())?.width ?? 0;
   expect(width).toBeGreaterThan(0);
@@ -468,6 +480,45 @@ test('live export surfaces the metadata sharing notice', async ({ page }) => {
 
   await page.locator('#desktop-sidebar').getByRole('button', { name: 'ERD Explorer' }).click();
   await expect(page.getByText(notice)).toBeVisible();
+});
+
+test('data stream explorer shows grounded source-to-target detail and visible exports', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('button', { name: 'Data Stream Explorer' }).click();
+  await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
+
+  const rows = page.getByRole('table', { name: 'Data Stream Explorer results' });
+  await expect(rows.getByText('Accounts Stream', { exact: true })).toBeVisible();
+  await expect(rows.getByText('Web Events Stream', { exact: true })).toBeVisible();
+  await expect(rows.getByText('Paused', { exact: true })).toBeVisible();
+
+  await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('Paused');
+  await expect(page.getByText('1 of 6 streams')).toBeVisible();
+  await expect(rows.getByText('Web Events Stream', { exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('all');
+
+  await rows.getByRole('button', { name: 'Details', exact: true }).first().click();
+  const drawer = page.getByRole('dialog', { name: 'Accounts Stream' });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByText('Data Stream Explorer / Accounts Stream')).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Target DLO' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Raw Metadata' })).toBeVisible();
+
+  await drawer.getByRole('tab', { name: 'Target DLO' }).click();
+  await expect(drawer.getByText('Known in inventory')).toBeVisible();
+  await expect(drawer.getByText(/No stream lineage is inferred/)).toBeVisible();
+  await expect(drawer.getByText(/does not invent the target object/)).toHaveCount(0);
+
+  await drawer.getByRole('tab', { name: 'Raw Metadata' }).click();
+  await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();
+  await drawer.getByRole('button', { name: 'Close details' }).last().click();
+
+  await page.getByRole('button', { name: 'Export' }).click();
+  const menu = page.getByRole('menu', { name: 'Export' });
+  await expect(menu.getByRole('menuitem', { name: /CSV/ })).toContainText('Visible streams');
+  await expect(menu.getByRole('menuitem', { name: /JSON/ })).toContainText('Complete machine-readable inventory');
+  await page.keyboard.press('Escape');
 });
 
 test('data transform explorer shows grounded detail, lineage, and run states', async ({ page }) => {
@@ -581,6 +632,8 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await expect(toggle).toHaveAttribute('aria-controls', 'desktop-sidebar');
   const expandedWidth = (await sidebar.boundingBox())?.width ?? 0;
   expect(expandedWidth).toBeGreaterThan(200);
+  await expect(sidebar.locator('.nav-item svg').first()).toHaveAttribute('width', '18');
+  await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(0);
   const sidebarMotion = await sidebar.evaluate((element) => {
     const style = getComputedStyle(element);
     return { property: style.transitionProperty, duration: style.transitionDuration };
@@ -591,8 +644,13 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await toggle.click();
   await expect(page.getByRole('button', { name: 'Expand sidebar' })).toHaveAttribute('aria-expanded', 'false');
   await expect(sidebar).toHaveAttribute('data-collapsed', 'true');
-  await expect(sidebar.getByRole('button', { name: 'DLO Explorer' })).toBeVisible();
+  await expect(sidebar.locator('img[src="/dcat-icon-192.png"]')).toBeVisible();
+  const dloItem = sidebar.getByRole('button', { name: 'DLO Explorer' });
+  await expect(dloItem).toBeVisible();
   await expect(sidebar.locator('.sidebar-label').first()).toBeHidden();
+  await expect(sidebar.locator('.nav-item svg').first()).toHaveAttribute('width', '20');
+  expect((await dloItem.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(2);
   const collapsedWidth = (await sidebar.boundingBox())?.width ?? 0;
   expect(collapsedWidth).toBeLessThan(expandedWidth - 150);
 
@@ -601,6 +659,8 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await page.getByRole('button', { name: 'Expand sidebar' }).click();
   await expect(page.locator('#desktop-sidebar')).toHaveAttribute('data-collapsed', 'false');
   await expect(page.locator('#desktop-sidebar .sidebar-label').first()).toBeVisible();
+  await expect(page.locator('#desktop-sidebar .nav-item svg').first()).toHaveAttribute('width', '18');
+  await expect(page.locator('#desktop-sidebar nav > div > div[aria-hidden="true"]')).toHaveCount(0);
 });
 
 test('detail drawer contains keyboard focus and closes on Escape', async ({ page }) => {
@@ -661,6 +721,7 @@ test('every screen fits a phone viewport', async ({ page }) => {
     'DLO Explorer',
     'DMO Explorer',
     'Mapping Explorer',
+    'Data Stream Explorer',
     'Data Transform Explorer',
     'ERD Explorer',
     'Data Dictionary',
@@ -715,7 +776,7 @@ test('command palette Enter selects a DMO and navigates to its explorer', async 
   await expect(drawer.getByText('DMO Explorer / Click Event DMO')).toBeVisible();
 });
 
-test('command palette opens a read-only detail dialog for types without an explorer', async ({ page }) => {
+test('command palette opens stream results in the Data Stream Explorer', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await openDemo(page);
   await page.getByRole('button', { name: 'Search metadata' }).click();
@@ -724,12 +785,16 @@ test('command palette opens a read-only detail dialog for types without an explo
   await palette.getByRole('combobox', { name: 'Search inventory metadata' }).fill('Accounts Stream');
   await page.keyboard.press('Enter');
 
+  await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
   const drawer = page.getByRole('dialog', { name: 'Accounts Stream' });
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByText('Search / Data Stream')).toBeVisible();
+  await expect(drawer.getByText('Data Stream Explorer / Accounts Stream')).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Target DLO' })).toBeVisible();
   await expect(drawer.getByText('Salesforce CRM', { exact: true })).toBeVisible();
-  await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();
 
+  await drawer.getByRole('tab', { name: 'Raw Metadata' }).click();
+  await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();
   await drawer.getByRole('button', { name: 'Copy metadata JSON' }).click();
   await expect(drawer.getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('"apiName": "Accounts_Stream"');

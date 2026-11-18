@@ -65,6 +65,22 @@ describe('ExportMenu', () => {
     expect(trigger).toHaveFocus();
   });
 
+  it('closes on Tab and lets focus continue to the next control', async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <ExportMenu items={makeItems()} />
+        <button type="button">After menu</button>
+      </>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Export' }));
+
+    await user.tab();
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'After menu' })).toHaveFocus();
+  });
+
   it('closes when clicking outside', async () => {
     const user = userEvent.setup();
     render(<ExportMenu items={makeItems()} />);

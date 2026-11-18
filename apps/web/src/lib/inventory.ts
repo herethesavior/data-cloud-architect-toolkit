@@ -33,6 +33,13 @@ const statusWeights: Record<string, number> = {
 
 const STALE_AFTER_MS = 60_000;
 
+/** Source timestamps are untrusted; malformed values are shown verbatim. */
+export function safeDateText(value: string | null | undefined, fallback = 'Not provided'): string {
+  if (!value || !value.trim()) return fallback;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : value;
+}
+
 /** Short relative label with an absolute value available in the title/tooltip. */
 export function formatUpdatedAt(value: string, now = Date.now()): string {
   const time = Date.parse(value);

@@ -1,0 +1,21 @@
+{
+  "name": "Data Cloud Architect Toolkit",
+  "short_name": "DCAT",
+  "description": "Local-first, read-only Salesforce Data 360 metadata explorer.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#010e3a",
+  "theme_color": "#010e3a",
+  "icons": [
+    {
+      "src": "/dcat-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/dcat-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

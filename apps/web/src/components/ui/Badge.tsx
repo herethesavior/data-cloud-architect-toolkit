@@ -23,11 +23,12 @@ interface BadgeProps {
   dot?: boolean;
   children: ReactNode;
   className?: string;
+  title?: string;
 }
 
-export function Badge({ tone = 'neutral', dot = false, children, className = '' }: BadgeProps) {
+export function Badge({ tone = 'neutral', dot = false, children, className = '', title }: BadgeProps) {
   return (
-    <span className={`badge ${tones[tone]} ${className}`}>
+    <span title={title} className={`badge ${tones[tone]} ${className}`}>
       {dot ? <span aria-hidden="true" className={`size-1.5 rounded-full ${dots[tone]}`} /> : null}
       {children}
     </span>

@@ -568,7 +568,11 @@ test('hosted demo stays fixture-backed, labelled, and gap-free', async ({ page }
   await mockHostedWorker(page, state);
   await page.goto('/');
 
-  await expect(page.getByText('DEMO DATA.')).toBeVisible();
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toHaveAttribute(
+    'title',
+    'Sample metadata only — no Salesforce org is connected.',
+  );
+  await expect(page.getByText('Sample metadata only — no Salesforce org is connected.')).toHaveCount(0);
   await expect(page.getByText('Sample inventory')).toBeVisible();
   await expect(page.getByText('Inventory loaded with gaps')).toHaveCount(0);
   await expect(page.locator('header').getByText(/^Updated /)).toHaveCount(0);

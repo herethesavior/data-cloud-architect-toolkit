@@ -144,6 +144,19 @@ html[data-theme='dark'] {
   gap: 0;
 }
 
+/* An icon-only rail needs a stronger active cue than the hidden label dot. */
+.sidebar[data-collapsed='true'] .nav-item-active {
+  box-shadow: inset 3px 0 0 var(--color-brand);
+}
+
+.sidebar[data-collapsed='true'] .sidebar-header {
+  padding-block: 0.75rem;
+}
+
+.sidebar[data-collapsed='true'] .sidebar-footer {
+  padding-block: 0.75rem;
+}
+
 .overlay-backdrop {
   animation: dcat-fade-in var(--duration-fast) var(--ease-standard) both;
 }
@@ -310,7 +323,7 @@ html[data-theme='dark'] {
   }
 
   .nav-item {
-    @apply flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink;
+    @apply flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink;
   }
 
   .nav-item-active {

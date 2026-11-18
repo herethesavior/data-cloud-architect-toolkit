@@ -12,36 +12,43 @@ interface CopyButtonProps {
 
 /** Copies metadata only; the app never has credentials or session material to copy. */
 export function CopyButton({ value, label, icon = 'copy', className = '' }: CopyButtonProps) {
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<'idle' | 'copied' | 'error'>('idle');
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => () => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
   }, []);
 
+  const showStatus = (next: 'copied' | 'error') => {
+    setState(next);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      setState('idle');
+      timerRef.current = null;
+    }, 1600);
+  };
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(value);
-      setCopied(true);
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => {
-        setCopied(false);
-        timerRef.current = null;
-      }, 1600);
+      showStatus('copied');
     } catch {
-      setCopied(false);
+      showStatus('error');
     }
   };
+
+  const currentLabel = state === 'copied' ? 'Copied' : state === 'error' ? 'Copy failed' : label;
+  const currentIcon = state === 'copied' ? 'check' : state === 'error' ? 'warning' : icon;
 
   return (
     <Button
       variant="quiet"
       onClick={() => void copy()}
-      aria-label={copied ? 'Copied' : label}
+      aria-label={currentLabel}
       className={`px-2 py-1 text-xs ${className}`}
     >
-      <Icon name={copied ? 'check' : icon} size={14} />
-      <span>{copied ? 'Copied' : label}</span>
+      <Icon name={currentIcon} size={14} />
+      <span>{currentLabel}</span>
     </Button>
   );
 }

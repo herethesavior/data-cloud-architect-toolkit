@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DataField } from '@dcat/core';
 import {
   downloadTextFile,
@@ -6,9 +6,10 @@ import {
   exportInventoryJson,
   exportInventoryMarkdown,
 } from '@dcat/exporters';
-import { filterByQuery } from '../lib/inventory.ts';
+import { filterByQuery, safeDateText } from '../lib/inventory.ts';
 import { objectLinks, objectMarkdown } from '../lib/objectDetail.ts';
 import type { ExplorerObject, FocusObject } from '../lib/objectDetail.ts';
+import { findCapability, resourceStatusMessage } from '../lib/resourceStatus.ts';
 import { useInventory } from '../lib/useInventory.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 import { EmptyState } from './DataStates.tsx';
@@ -74,6 +75,8 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
   const [space, setSpace] = useState('all');
   const [selected, setSelected] = useState<ExplorerObject | null>(null);
   const [message, setMessage] = useState('');
+  const focusHandledRef = useRef(onFocusHandled);
+  focusHandledRef.current = onFocusHandled;
 
   // Global search can ask this explorer to open a drawer after navigation. Wait
   // for the scoped inventory so the object is matched only in the active context.
@@ -86,8 +89,8 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
       setSearch('');
       setSpace('all');
     }
-    onFocusHandled?.();
-  }, [focusObject, kind, query.isSuccess, query.data, onFocusHandled]);
+    focusHandledRef.current?.();
+  }, [focusObject, kind, query.isSuccess, query.data]);
 
   const isDlo = kind === 'dlo';
   const title = isDlo ? 'DLO Explorer' : 'DMO Explorer';
@@ -99,6 +102,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
     <InventoryBoundary query={query} context={context}>
       {(inventory) => {
         const objects: ExplorerObject[] = isDlo ? inventory.dlos : inventory.dmos;
+        const capability = findCapability(inventory, isDlo ? 'dlos' : 'dmos');
         const linksFor = (object: ExplorerObject) => objectLinks(inventory, object);
         const spaces = [...new Set(objects.map((object) => object.dataSpace).filter((value): value is string => Boolean(value)))].sort();
         const activeSpace = spaces.includes(space) ? space : 'all';
@@ -198,7 +202,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
                       <dl className="mt-2 grid gap-1.5 text-xs text-ink-soft">
                         <div className="flex justify-between gap-3"><dt>Endpoint</dt><dd className="mono truncate">{selected.provenance.sourceEndpoint}</dd></div>
                         <div className="flex justify-between gap-3"><dt>Confidence</dt><dd>{selected.provenance.confidence}</dd></div>
-                        <div className="flex justify-between gap-3"><dt>Retrieved</dt><dd>{new Date(selected.provenance.retrievedAt).toLocaleString()}</dd></div>
+                        <div className="flex justify-between gap-3"><dt>Retrieved</dt><dd>{safeDateText(selected.provenance.retrievedAt)}</dd></div>
                       </dl>
                     </div>
                   </div>
@@ -369,10 +373,27 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
             />
             {message ? <p className="mb-4 text-xs text-ink-soft" role="status">{message}</p> : null}
 
+            {capability && capability.status !== 'available' && capability.status !== 'not-started' ? (
+              <div className="mb-4 flex items-start gap-2 rounded-lg border border-warning/25 bg-warning-soft px-4 py-3 text-sm text-ink-soft" role="note">
+                <Icon name="warning" size={17} className="mt-0.5 shrink-0 text-warning" />
+                <span className="min-w-0 break-words">
+                  {resourceStatusMessage(capability)} Any objects below come from the inventory snapshot and are not invented by DCAT.
+                </span>
+              </div>
+            ) : null}
+
             {filtered.length === 0 ? (
               <EmptyState
-                title="No objects found"
-                description="Try a different search term or clear the data space filter."
+                title={
+                  capability?.status === 'forbidden' ? `Access denied to ${isDlo ? 'DLOs' : 'DMOs'}`
+                    : capability?.status === 'unsupported' ? `${isDlo ? 'DLOs' : 'DMOs'} are unavailable`
+                      : capability?.status === 'error' ? `Could not load ${isDlo ? 'DLOs' : 'DMOs'}`
+                        : capability?.status === 'partial' ? `Some ${isDlo ? 'DLOs' : 'DMOs'} may be missing`
+                          : 'No objects found'
+                }
+                description={capability && capability.status !== 'available' && capability.status !== 'not-started'
+                  ? resourceStatusMessage(capability)
+                  : 'Try a different search term or clear the data space filter.'}
               />
             ) : (
               <>
@@ -428,7 +449,9 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
               ) : undefined}
               onClose={() => setSelected(null)}
             >
-              {selected && detailTabs.length > 0 ? <Tabs items={detailTabs} label={`${title} detail sections`} /> : null}
+              {selected && detailTabs.length > 0 ? (
+                <Tabs key={selected.apiName} items={detailTabs} label={`${title} detail sections`} />
+              ) : null}
             </DetailDrawer>
           </>
         );
