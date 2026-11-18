@@ -55,6 +55,8 @@ export interface BridgeOptions {
   signal?: AbortSignal;
   logger?: (message: string) => void;
   onPaired?: (token: string) => void | Promise<void>;
+  /** Supplied by the bridge CLI: installs the latest npm package and restarts the agent. */
+  onUpdate?: () => Promise<unknown>;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -86,7 +88,11 @@ async function findOrg(state: AppState, alias: string): Promise<OrgSummary> {
 }
 
 /** Execute one allowlisted operation. The operation shape is always re-validated. */
-export async function executeRelayOperation(state: AppState, operation: unknown): Promise<unknown> {
+export async function executeRelayOperation(
+  state: AppState,
+  operation: unknown,
+  onUpdate?: () => Promise<unknown>,
+): Promise<unknown> {
   const parsed = relayOperationSchema.safeParse(operation);
   if (!parsed.success) throw new CliError('INVALID_ARGUMENT', 'Unsupported bridge operation.');
   const task = parsed.data;
@@ -138,7 +144,14 @@ export async function executeRelayOperation(state: AppState, operation: unknown)
       state.orgsCache = null;
       state.inventoryCache = null;
       return { mode: state.mode };
+    case 'bridge.update':
+      if (!onUpdate) throw new CliError('INVALID_ARGUMENT', 'Bridge updates require the installed bridge CLI.');
+      return onUpdate();
   }
+}
+
+function isRestarting(result: unknown): boolean {
+  return typeof result === 'object' && result !== null && 'restarting' in result && result.restarting === true;
 }
 
 /** Long-lived outbound agent. It never opens a listener or accepts inbound connections. */
@@ -168,6 +181,7 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
     try {
       const poll = await http.post<PollResult>('/api/relay/poll', {
         agentToken: token,
+        version: state.config.version,
         cli: state.cliStatus,
       }, options.signal);
       if (poll.status === 'unpaired') {
@@ -177,12 +191,16 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
       for (const task of poll.tasks) {
         let response: RelayResponse;
         try {
-          const result = await executeRelayOperation(state, task.operation);
+          const result = await executeRelayOperation(state, task.operation, options.onUpdate);
           response = { id: task.id, ok: true, result };
         } catch (error) {
           response = errorResponse(task.id, error);
         }
         await http.post('/api/relay/respond', { agentToken: token, response }, options.signal);
+        if (response.ok && isRestarting(response.result)) {
+          logger('Bridge updated. Restarting with the latest version…');
+          return;
+        }
       }
     } catch (error) {
       if (options.signal?.aborted) break;

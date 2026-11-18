@@ -134,6 +134,18 @@ describe('executeRelayOperation', () => {
     expect(state.mode).toBe('demo');
   });
 
+  it('runs a bridge update only through the injected CLI hook', async () => {
+    const state = createState();
+    const onUpdate = vi.fn(async () => ({ updated: true, restarting: true, message: 'Bridge updated and restarting.' }));
+
+    await expect(executeRelayOperation(state, { operation: 'bridge.update' }))
+      .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(executeRelayOperation(state, { operation: 'bridge.update' }, onUpdate)).resolves.toMatchObject({
+      restarting: true,
+    });
+    expect(onUpdate).toHaveBeenCalledOnce();
+  });
+
   it('rejects unsupported operations, aliases, and login endpoints before spawning a command', async () => {
     const runner = createRunner();
     const state = createState(runner);
@@ -182,6 +194,31 @@ describe('runBridge', () => {
       response: { id: 'task-1', ok: true, result: { installed: true, version: '2.116.6' } },
     });
     expect(JSON.stringify(http.calls)).not.toMatch(/password|accessToken|refreshToken|sfdxAuthUrl/i);
+    expect(http.calls.find((call) => call.path === '/api/relay/poll')?.body).toMatchObject({ version: state.config.version });
+  });
+
+  it('responds to a bridge update and stops the old agent after the restart handoff', async () => {
+    const controller = new AbortController();
+    const http = new FakeRelayHttp([task({ operation: 'bridge.update' })], controller);
+    const state = createState();
+    const logger = vi.fn();
+    const onUpdate = vi.fn(async () => ({ updated: true, restarting: true, message: 'Bridge updated and restarting.' }));
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state,
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+      onUpdate,
+    });
+
+    expect(onUpdate).toHaveBeenCalledOnce();
+    expect(respondBody(http).response).toMatchObject({ ok: true, result: { restarting: true } });
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge updated'));
+    expect(http.calls.filter((call) => call.path === '/api/relay/respond')).toHaveLength(1);
   });
 
   it('posts a redacted failure when an allowlisted command fails with credential-shaped output', async () => {

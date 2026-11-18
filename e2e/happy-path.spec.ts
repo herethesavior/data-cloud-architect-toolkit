@@ -214,6 +214,61 @@ test('switching demo to live keeps the header height stable and freshness in the
   await expect(page.locator('#main-content').getByText(/^Updated /)).toBeVisible();
 });
 
+test('live Discovery Health and Needs attention stay inside the viewport', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  const longToken = 'GovernanceConfigurationIdentifierThatCannotWrapAtAnyReasonableViewportWidthAndMustNotPushThePanelOffScreen';
+  const inventory = state.inventories['prod-org']!;
+  state.inventories['prod-org'] = {
+    ...inventory,
+    capabilities: inventory.capabilities.map((capability, index) => index === 0
+      ? { ...capability, status: 'partial' as const, itemCount: 42, message: longToken }
+      : capability),
+    warnings: [
+      ...inventory.warnings,
+      {
+        family: 'data-streams',
+        code: 'PARTIAL_RESULT',
+        message: `${longToken} ${longToken}`,
+        severity: 'warning' as const,
+      },
+    ],
+  };
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/');
+
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Needs attention' })).toBeVisible();
+  const warningMessage = page.getByText(`${longToken} ${longToken}`);
+  await expect(warningMessage).toBeVisible();
+
+  for (const width of [1440, 834, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const metrics = await page.evaluate(() => {
+      const panel = [...document.querySelectorAll('section.panel')].find((section) =>
+        section.querySelector('h2')?.textContent?.trim() === 'Needs attention',
+      );
+      const rect = panel?.getBoundingClientRect();
+      return {
+        innerWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        panelLeft: rect?.left ?? 0,
+        panelRight: rect?.right ?? 0,
+      };
+    });
+
+    expect(metrics.documentWidth, `document at ${width}px`).toBeLessThanOrEqual(metrics.innerWidth + 1);
+    expect(metrics.panelRight, `panel right at ${width}px`).toBeLessThanOrEqual(metrics.innerWidth + 1);
+    expect(metrics.panelLeft, `panel left at ${width}px`).toBeGreaterThanOrEqual(-1);
+
+    const warningBox = await warningMessage.boundingBox();
+    expect(warningBox, `warning at ${width}px`).not.toBeNull();
+    expect(warningBox!.x, `warning left at ${width}px`).toBeGreaterThanOrEqual(-1);
+    expect(warningBox!.x + warningBox!.width, `warning right at ${width}px`).toBeLessThanOrEqual(width + 1);
+  }
+});
+
 test('live mode without an org leads with Select an org and offers the demo fallback', async ({ page }) => {
   const state = createConnectorState();
   state.mode = 'live';

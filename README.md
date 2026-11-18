@@ -9,7 +9,7 @@ A local-first, read-only workbench for discovering Salesforce Data Cloud / Data 
 - Repository: `https://github.com/herethesavior/data-cloud-architect-toolkit.git` (clean history under the `herethesavior` identity).
 - Hosted site: `https://data-cloud-architect-toolkit.pages.dev/`.
 - Salesforce CLI verified on Windows at `@salesforce/cli/2.158.7`; beta commands are accepted and their advisory warnings are suppressed in user-facing errors.
-- Bridge package: `@dcat-toolkit/bridge@0.1.3` is published and live as `latest` (built from `packages/bridge`; the hosted wizard uses `@latest`).
+- Bridge package: `@dcat-toolkit/bridge@0.1.4` (built from `packages/bridge`; the hosted wizard uses `@latest`). Connected 0.1.4+ bridges can self-update from **Step 1**; older bridges get a fixed copyable upgrade command.
 - Cloudflare KV binding variable is exactly `DCAT_SESSIONS` (production id `fd2bbc29b1b2427f87ccf9f8e34e6705`, preview id `0155c4acd0054d5bb60519428b14c5ee`).
 - No hosted OAuth exists. `/api/auth/*` paths remain intentional 404 negative tests.
 
@@ -19,6 +19,8 @@ A local-first, read-only workbench for discovering Salesforce Data Cloud / Data 
 - `SF_SKIP_NEW_VERSION_CHECK=1` suppresses the CLI update notice, and known beta/developer-preview notices are stripped from errors. Real Salesforce REST error JSON on stdout is preserved and shown first on a non-zero exit.
 - `FUNCTIONALITY_NOT_ENABLED` is classified as `unsupported` with a readable “Data 360 is not enabled for this user or org” message. Discovery Health shows a **Not enabled** state, omits it from retryable failures, and keeps actionable warnings separate. Duplicate warning keys are disambiguated.
 - Demo health, the inventory freshness strip, **Select an org** / **Use demo mode** recovery states, and the no-scrim ≤640px drawer invariants are unchanged.
+- Discovery Health and **Needs attention** stay inside the viewport at 1440px, 834px, and 390px, including long unbreakable warning text.
+- The Worker checks npm for the latest bridge release. A connected 0.1.4+ bridge can self-update through the allowlisted `bridge.update` operation; older agents receive a fixed, copyable install command because they cannot decode that operation.
 
 ## Product principles
 
@@ -106,7 +108,7 @@ See [docs/CLOUDFLARE_PAGES_SETUP.md](docs/CLOUDFLARE_PAGES_SETUP.md) for the ful
 
 The root `wrangler.jsonc` is the Workers Builds deploy config. The separate standalone Worker path is still available with `npm run worker:dry-run`, `npm run worker:dev`, and `npm run worker:deploy`; it requires a real namespace `id` in `apps/hosted-worker/wrangler.jsonc`. There are **no Worker secrets to set**; `apps/hosted-worker/.dev.vars.example` only documents optional `SESSION_TTL_SECONDS`. Never commit a local `.dev.vars`.
 
-> Demo mode works immediately after the Cloudflare deploy. Hosted live-org connection uses the published and verified `@dcat-toolkit/bridge@0.1.3` npm package (the wizard runs `@latest`), so no npm publish step is needed during deployment. See the Cloudflare setup guide.
+> Demo mode works immediately after the Cloudflare deploy. Hosted live-org connection uses the published `@dcat-toolkit/bridge` package (the wizard runs `@latest`), so no npm credentials are needed during the site deployment. See the Cloudflare setup guide.
 
 Worker KV writes are throttled because free-tier Workers KV has write limits; session, pairing, and relay state are kept small and expire. Pairing codes are one-time and short-lived; unpairing invalidates the agent token.
 
@@ -244,15 +246,15 @@ The release was checked end-to-end before hand-off:
 
 ```bash
 npm run typecheck
-npm test                       # 175 passed
-npm run test:e2e:local         # 24 passed (run suites sequentially, not in parallel)
-npm run test:e2e:hosted        # 2 passed
+npm test                       # 189 passed
+npm run test:e2e:local         # 25 passed (run suites sequentially, not in parallel)
+npm run test:e2e:hosted        # 3 passed
 npm run build:pages
 npm run build:bridge
 npx wrangler deploy --dry-run
 ```
 
-Live-site checks passed for `/api/health`, `/api/relay/status`, built assets, and intentional `404` responses from removed `/api/auth/*` paths. A live CLI probe through the adapter returned the exact Data 360 capability message `FUNCTIONALITY_NOT_ENABLED: This feature is not currently enabled for this user type or org: [CdpDataSpace]`, confirming that a disabled feature is reported honestly rather than as a CLI/update failure. `@dcat-toolkit/bridge@0.1.3` is published as `latest`; its downloaded tarball was inspected and contains the reliability markers (`SF_SKIP_NEW_VERSION_CHECK`, beta-notice stripping, `FUNCTIONALITY_NOT_ENABLED`) and matches the local build checksum. The hosted connect-ordering test was repeated several times to confirm `org.connect` is consistently followed by `inventory.get` without a blocking `org.list`; the local suite was also re-run after the final UI change.
+Live-site checks passed for `/api/health`, `/api/relay/status`, built assets, and intentional `404` responses from removed `/api/auth/*` paths. A live CLI probe through the adapter returned the exact Data 360 capability message `FUNCTIONALITY_NOT_ENABLED: This feature is not currently enabled for this user type or org: [CdpDataSpace]`, confirming that a disabled feature is reported honestly rather than as a CLI/update failure. The `@dcat-toolkit/bridge@0.1.4` tarball was inspected and contains the reliability and update markers (`SF_SKIP_NEW_VERSION_CHECK`, beta-notice stripping, `FUNCTIONALITY_NOT_ENABLED`, allowlisted `bridge.update`) and matches the local build checksum. The hosted connect-ordering test was repeated several times to confirm `org.connect` is consistently followed by `inventory.get` without a blocking `org.list`; the local suite was also re-run after the final UI change.
 
 ## Repository layout
 

@@ -23,6 +23,10 @@ const bridge: BridgeStatus = {
   lastSeenAt: '2026-01-01T00:00:00.000Z',
   relay: 'connected',
   pairing: null,
+  agentVersion: '0.1.4',
+  latestVersion: '0.1.4',
+  updateAvailable: false,
+  selfUpdateSupported: true,
 };
 
 const theme: ThemeController = {

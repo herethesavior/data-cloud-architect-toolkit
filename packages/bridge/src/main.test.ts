@@ -21,6 +21,7 @@ vi.mock('./install.ts', () => ({
 import { runBridge } from '../../../apps/local-connector/src/bridge.ts';
 import { main } from './main.ts';
 import { ensureSalesforceCli } from './install.ts';
+import { BRIDGE_VERSION } from './version.ts';
 
 describe('@dcat-toolkit/bridge CLI', () => {
   beforeEach(() => {
@@ -38,7 +39,7 @@ describe('@dcat-toolkit/bridge CLI', () => {
     }));
     expect(fs.writeFile).toHaveBeenCalledWith(
       expect.stringContaining('bridge.json'),
-      JSON.stringify({ relayUrl: 'https://dcat.example', token: 'agent-token-1234567890', version: '0.1.0' }, null, 2),
+      JSON.stringify({ relayUrl: 'https://dcat.example', token: 'agent-token-1234567890', version: BRIDGE_VERSION }, null, 2),
       { mode: 0o600 },
     );
     expect(fs.chmod).toHaveBeenCalledWith(expect.stringContaining('bridge.json'), 0o600);

@@ -13,7 +13,7 @@ The supported live path is one Cloudflare Pages project or one Workers Builds pr
 
 The root `wrangler.jsonc` is the Workers Builds deploy config and contains the `DCAT_SESSIONS` namespace id. The separate standalone Worker path uses `npm run worker:dry-run`, `npm run worker:dev`, and `npm run worker:deploy`; it needs the namespace `id` in `apps/hosted-worker/wrangler.jsonc`. There are no other stores or secrets. KV writes are throttled to stay within free-tier limits. `SESSION_TTL_SECONDS` is optional (default 30 days); for local Worker development, copy `apps/hosted-worker/.dev.vars.example` to `.dev.vars` and never commit it.
 
-> Demo mode is live as soon as Cloudflare deploys. The hosted **Connect org** wizard uses the published `@dcat-toolkit/bridge@0.1.3` package, so no npm credentials or publish step are needed for deployment.
+> Demo mode is live as soon as Cloudflare deploys. The hosted **Connect org** wizard uses the published `@dcat-toolkit/bridge` package at `@latest`, so no npm credentials or publish step are needed for deployment.
 
 No Salesforce app registration, callback URL, consumer key/secret, `SF_CLIENT_ID`, `SF_CLIENT_SECRET`, `OAUTH_CALLBACK_URL`, `TOKEN_ENCRYPTION_KEY`, or `SF_LOGIN_URL` is part of this deployment.
 
@@ -28,10 +28,10 @@ No Salesforce app registration, callback URL, consumer key/secret, `SF_CLIENT_ID
      npx -y @dcat-toolkit/bridge@latest setup --relay <site-url> --code <code>
      ```
 
-     The installer installs Salesforce CLI if needed, pairs this browser session, and starts the bridge immediately. Later restarts use `npx -y @dcat-toolkit/bridge@latest start` with saved config. Bridge storage holds only the relay URL, token, and version (mode `600`), never credentials.
+     The installer installs Salesforce CLI if needed, pairs this browser session, and starts the bridge immediately. Later restarts use `npx -y @dcat-toolkit/bridge@latest start` with saved config. Bridge storage holds only the relay URL, token, and version (mode `600`), never credentials. If a newer npm release exists, Step 1 shows **Update bridge** for 0.1.4+ agents; older agents show a fixed copyable install command.
    - **Step 2 — Connect org.** Enter a local alias and an optional HTTPS sandbox instance URL. The bridge runs the fixed `sf org login web --alias <alias> --set-default [--instance-url <https Salesforce URL>]` command locally; Salesforce CLI opens the browser for login.
    - **Step 3 — View inventory.** Select the authenticated org in the site; the browser sends typed requests through the Worker relay and the agent returns redacted results.
-4. The agent polls `/api/relay/poll` with an agent token and answers via `/api/relay/respond`. Only `cli.status`, `org.list`, `org.connect`, `inventory.get`, `transform.get`, and `mode.set` are allowed. No arbitrary URL, command, shell, SOQL, or record data crosses the relay.
+4. The agent polls `/api/relay/poll` with an agent token and answers via `/api/relay/respond`. Only `cli.status`, `org.list`, `org.connect`, `inventory.get`, `transform.get`, `mode.set`, and `bridge.update` are allowed. No arbitrary URL, command, shell, SOQL, or record data crosses the relay.
 5. Unpairing (or creating a new pairing code) invalidates the previous agent token. DCAT never receives a username, password, security token, or SFDX auth URL.
 
 ## Troubleshooting

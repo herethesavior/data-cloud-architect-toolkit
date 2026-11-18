@@ -246,20 +246,20 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                       <p className="text-sm font-medium text-ink">{stage.label}</p>
                       <Badge tone={stageTone(stage.state)}>{statusLabel(stage.state)}</Badge>
                     </div>
-                    <p className="mt-1 text-xs text-ink-soft">{stage.detail}</p>
+                    <p className="mt-1 break-words text-xs text-ink-soft">{stage.detail}</p>
                   </li>
                 ))}
               </ol>
             </Panel>
 
-            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.35fr_0.65fr]">
-              <Panel>
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]">
+              <Panel className="min-w-0">
                 <SectionHeading
                   title="Discovery health"
                   description={`${summary.available} of ${summary.total} families available · ${summary.partial} partial${
                     summary.unsupported > 0 ? ` · ${summary.unsupported} not enabled` : ''
                   }`}
-                  action={<Badge tone={summary.issues > 0 ? 'warning' : data360Unavailable ? 'neutral' : 'success'} dot>
+                  action={<Badge tone={summary.issues > 0 ? 'warning' : data360Unavailable ? 'neutral' : 'success'} dot className="shrink-0">
                     {summary.label} · {summary.score}%
                   </Badge>}
                 />
@@ -290,7 +290,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                 </div>
               </Panel>
 
-              <Panel>
+              <Panel className="min-w-0">
                 <SectionHeading
                   title="Needs attention"
                   description={attentionWarnings.length === 0
@@ -320,7 +320,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                           </Badge>
                           <span className="text-xs text-ink-faint">{warning.code}</span>
                         </div>
-                        <p className="mt-1.5 text-sm text-ink-soft">{warning.message}</p>
+                        <p className="mt-1.5 break-words text-sm text-ink-soft">{warning.message}</p>
                       </li>
                     ))}
                   </ul>

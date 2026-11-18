@@ -27,6 +27,7 @@ export interface RelaySessionRecord {
   agentToken: string | null;
   pairedAt: number | null;
   lastSeenAt: number | null;
+  agentVersion: string | null;
   cli: CliStatus;
   pairingCode: string | null;
   pairingExpiresAt: number | null;

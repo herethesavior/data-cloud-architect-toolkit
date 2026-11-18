@@ -19,6 +19,62 @@ import type { Env, RelayRequestRecord, SessionRecord } from './types.ts';
 
 export const RELAY_VERSION = '0.1.0';
 
+/** Older published bridges cannot decode `bridge.update`, so they get a manual upgrade command. */
+const SELF_UPDATE_MIN_VERSION = '0.1.4';
+const NPM_LATEST_URL = 'https://registry.npmjs.org/@dcat-toolkit/bridge/latest';
+const NPM_VERSION_TTL_MS = 60 * 60 * 1000;
+let cachedNpmVersion: { version: string; checkedAt: number } | null = null;
+
+type NpmFetch = (input: RequestInfo | URL, init?: RequestInit & { cf?: { cacheTtl: number } }) => Promise<Response>;
+
+/** The Worker checks the npm registry itself so the browser never calls an external URL. */
+async function latestBridgeVersion(fetchFn: NpmFetch = fetch): Promise<string | null> {
+  if (cachedNpmVersion && Date.now() - cachedNpmVersion.checkedAt < NPM_VERSION_TTL_MS) {
+    return cachedNpmVersion.version;
+  }
+  try {
+    const response = await fetchFn(NPM_LATEST_URL, { cf: { cacheTtl: 3600 } });
+    if (!response.ok) return cachedNpmVersion?.version ?? null;
+    const payload = (await response.json()) as { version?: unknown };
+    if (typeof payload.version !== 'string' || !/^\d+\.\d+\.\d+/.test(payload.version)) {
+      return cachedNpmVersion?.version ?? null;
+    }
+    cachedNpmVersion = { version: payload.version, checkedAt: Date.now() };
+    return cachedNpmVersion.version;
+  } catch {
+    return cachedNpmVersion?.version ?? null;
+  }
+}
+
+/** Reset only for tests; production relies on the one-hour cache. */
+export function resetNpmVersionCache(): void {
+  cachedNpmVersion = null;
+}
+
+function parseVersion(value: string | null | undefined): number[] | null {
+  const match = value?.match(/^(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function compareVersions(left: string | null | undefined, right: string | null | undefined): number {
+  const leftParts = parseVersion(left);
+  const rightParts = parseVersion(right);
+  if (!leftParts || !rightParts) return Number.NaN;
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index]! > rightParts[index]!) return 1;
+    if (leftParts[index]! < rightParts[index]!) return -1;
+  }
+  return 0;
+}
+
+function isNewerVersion(latest: string, current: string | null): boolean {
+  return compareVersions(latest, current) > 0;
+}
+
+function supportsSelfUpdate(current: string | null): boolean {
+  return compareVersions(current, SELF_UPDATE_MIN_VERSION) >= 0;
+}
+
 const PAIRING_TTL_SECONDS = 10 * 60;
 const STALE_AFTER_MS = 2 * 60_000;
 const SEEN_THROTTLE_MS = 60_000;
@@ -31,6 +87,7 @@ const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
   'inventory.get': 120_000,
   'transform.get': 120_000,
   'mode.set': 30_000,
+  'bridge.update': 5 * 60_000,
 };
 
 function emptyCli(): CliStatus {
@@ -61,7 +118,7 @@ function pairingFor(session: SessionRecord, origin: string): RelayPairing | null
 }
 
 export function getBridgeStatus(session: SessionRecord, origin: string): BridgeStatus {
-  const { agentToken, lastSeenAt } = session.relay;
+  const { agentToken, lastSeenAt, agentVersion } = session.relay;
   const stale = lastSeenAt !== null && Date.now() - lastSeenAt > STALE_AFTER_MS;
   const relay = !agentToken || lastSeenAt === null ? 'waiting' : stale ? 'stale' : 'connected';
   return {
@@ -72,6 +129,23 @@ export function getBridgeStatus(session: SessionRecord, origin: string): BridgeS
     lastSeenAt: lastSeenAt === null ? null : new Date(lastSeenAt).toISOString(),
     relay,
     pairing: pairingFor(session, origin),
+    agentVersion: agentVersion ?? null,
+    latestVersion: null,
+    updateAvailable: false,
+    selfUpdateSupported: false,
+  };
+}
+
+/** Status for the setup card: compare the paired agent version with npm's latest. */
+export async function getBridgeUpdateStatus(session: SessionRecord, origin: string): Promise<BridgeStatus> {
+  const status = getBridgeStatus(session, origin);
+  if (!status.paired || !status.agentVersion) return status;
+  const latestVersion = await latestBridgeVersion();
+  return {
+    ...status,
+    latestVersion,
+    updateAvailable: latestVersion !== null && isNewerVersion(latestVersion, status.agentVersion),
+    selfUpdateSupported: supportsSelfUpdate(status.agentVersion),
   };
 }
 
@@ -103,7 +177,7 @@ export function relayRoutes() {
   app.get('/api/relay/status', async (context) => {
     try {
       const session = await resolveSession(context, context.env);
-      return context.json(getBridgeStatus(session, originOf(context.req.url)));
+      return context.json(await getBridgeUpdateStatus(session, originOf(context.req.url)));
     } catch (error) {
       return sendRouteError(context, error);
     }
@@ -160,6 +234,7 @@ export function relayRoutes() {
         agentToken,
         pairedAt: Date.now(),
         lastSeenAt: null,
+        agentVersion: parsed.data.version ?? null,
         cli: parseCli(parsed.data.cli) ?? emptyCli(),
         pairingCode: null,
         pairingExpiresAt: null,
@@ -193,6 +268,11 @@ export function relayRoutes() {
       const cli = parseCli(parsed.data.cli);
       if (cli && JSON.stringify(cli) !== JSON.stringify(session.relay.cli)) {
         session.relay.cli = cli;
+        changed = true;
+      }
+      const agentVersion = parsed.data.version?.slice(0, 64) ?? null;
+      if (agentVersion && agentVersion !== session.relay.agentVersion) {
+        session.relay.agentVersion = agentVersion;
         changed = true;
       }
       if (session.relay.lastSeenAt === null || now - session.relay.lastSeenAt >= SEEN_THROTTLE_MS) {
@@ -328,6 +408,7 @@ export function relayRoutes() {
         agentToken: null,
         pairedAt: null,
         lastSeenAt: null,
+        agentVersion: null,
         cli: emptyCli(),
         pairingCode: null,
         pairingExpiresAt: null,

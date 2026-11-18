@@ -16,6 +16,10 @@ function status(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
     lastSeenAt: '2026-11-18T00:00:00.000Z',
     relay: 'connected',
     pairing: null,
+    agentVersion: '0.1.4',
+    latestVersion: '0.1.4',
+    updateAvailable: false,
+    selfUpdateSupported: true,
     ...overrides,
   };
 }
@@ -82,6 +86,62 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.getByText(/npx -y @dcat-toolkit\/bridge@latest setup/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect org' })).toBeDisabled();
     expect(screen.getByText('Complete step 1 first')).toBeInTheDocument();
+  });
+
+  it('hides the bridge update control when the paired agent is current', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({
+      agentVersion: '0.1.4',
+      latestVersion: '0.1.4',
+      updateAvailable: false,
+      selfUpdateSupported: true,
+    }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('Bridge connected')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update bridge' })).not.toBeInTheDocument();
+  });
+
+  it('offers a self-update for a paired hosted bridge with a newer npm release', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({
+      agentVersion: '0.1.4',
+      latestVersion: '0.1.5',
+      updateAvailable: true,
+      selfUpdateSupported: true,
+    }));
+    const update = vi.spyOn(api, 'updateBridge').mockResolvedValue({
+      updated: true,
+      restarting: true,
+      message: 'Bridge updated and restarting.',
+    });
+    renderOrgConnections();
+
+    expect(await screen.findByText(/Bridge update available/)).toBeInTheDocument();
+    expect(screen.getByText(/Running 0\.1\.4/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Update bridge' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(await screen.findByText('Bridge updated and restarting.')).toBeInTheDocument();
+  });
+
+  it('offers a fixed copyable command for older bridges that cannot self-update', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({
+      agentVersion: '0.1.3',
+      latestVersion: '0.1.5',
+      updateAvailable: true,
+      selfUpdateSupported: false,
+    }));
+    const update = vi.spyOn(api, 'updateBridge');
+    renderOrgConnections();
+
+    expect(await screen.findByText(/bridge predates in-app updates/)).toBeInTheDocument();
+    expect(screen.getByText('npm install -g @dcat-toolkit/bridge@latest')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update bridge' })).not.toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('seeds the connected org into the shared cache before selection so inventory starts immediately', async () => {

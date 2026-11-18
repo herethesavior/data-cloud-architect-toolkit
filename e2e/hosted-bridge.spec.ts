@@ -33,6 +33,8 @@ interface HostedState {
   pairingCode: string | null;
   pairingUsed: boolean;
   cli: CliStatus;
+  agentVersion: string | null;
+  latestVersion: string;
   lastSeenAt: number | null;
   request: RequestRecord | null;
   orgs: OrgSummary[];
@@ -76,6 +78,8 @@ function createState(mode: Mode): HostedState {
     pairingCode: null,
     pairingUsed: false,
     cli: { installed: false, version: null, error: null },
+    agentVersion: null,
+    latestVersion: '0.1.3',
     lastSeenAt: null,
     request: null,
     orgs: [],
@@ -126,6 +130,27 @@ function requestState(record: RequestRecord): RelayRequestState {
   };
 }
 
+function compareVersions(left: string | null, right: string | null): number {
+  const leftMatch = left?.match(/^(\d+)\.(\d+)\.(\d+)/);
+  const rightMatch = right?.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!leftMatch || !rightMatch) return Number.NaN;
+  for (let index = 1; index <= 3; index += 1) {
+    const first = Number(leftMatch[index]);
+    const second = Number(rightMatch[index]);
+    if (first > second) return 1;
+    if (first < second) return -1;
+  }
+  return 0;
+}
+
+function isNewerVersion(latest: string, current: string | null): boolean {
+  return compareVersions(latest, current) > 0;
+}
+
+function supportsSelfUpdate(current: string | null): boolean {
+  return compareVersions(current, '0.1.4') >= 0;
+}
+
 function bridgeStatus(state: HostedState, origin: string) {
   const stale = state.lastSeenAt !== null && Date.now() - state.lastSeenAt > 2 * 60_000;
   return {
@@ -135,6 +160,10 @@ function bridgeStatus(state: HostedState, origin: string) {
     cli: state.cli,
     lastSeenAt: state.lastSeenAt === null ? null : new Date(state.lastSeenAt).toISOString(),
     relay: !state.paired || state.lastSeenAt === null ? 'waiting' : stale ? 'stale' : 'connected',
+    agentVersion: state.agentVersion,
+    latestVersion: state.latestVersion,
+    updateAvailable: isNewerVersion(state.latestVersion, state.agentVersion),
+    selfUpdateSupported: supportsSelfUpdate(state.agentVersion),
     pairing: state.pairingCode
       ? {
           code: state.pairingCode,
@@ -176,6 +205,8 @@ function resultFor(state: HostedState, operation: RelayOperation): unknown {
     case 'mode.set':
       state.mode = operation.mode;
       return { mode: operation.mode };
+    case 'bridge.update':
+      return { updated: true, restarting: true, message: 'Bridge updated and restarting.' };
   }
 }
 
@@ -243,6 +274,7 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
       state.pairingCode = null;
       state.lastSeenAt = null;
       if (body.cli && typeof body.cli === 'object') state.cli = body.cli as CliStatus;
+      if (typeof body.version === 'string') state.agentVersion = body.version;
       return json(route, { agentToken });
     }
 
@@ -254,6 +286,7 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
       state.pollCalls += 1;
       state.lastSeenAt = Date.now();
       if (body.cli && typeof body.cli === 'object') state.cli = body.cli as CliStatus;
+      if (typeof body.version === 'string') state.agentVersion = body.version;
       const tasks = state.request?.status === 'pending'
         ? [{
             id: state.request.id,
@@ -336,6 +369,7 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
       state.pairingCode = null;
       state.lastSeenAt = null;
       state.cli = { installed: false, version: null, error: null };
+      state.agentVersion = null;
       state.request = null;
       return json(route, { paired: false });
     }
@@ -368,7 +402,7 @@ async function startFakeBridge(page: Page, pairingCode: string): Promise<void> {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         code,
-        version: '0.1.0',
+        version: '0.1.4',
         cli: { installed: true, version: '2.116.6', error: null },
       }),
     });
@@ -384,18 +418,22 @@ async function startFakeBridge(page: Page, pairingCode: string): Promise<void> {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             agentToken: token,
+            version: '0.1.4',
             cli: { installed: true, version: '2.116.6', error: null },
           }),
         });
         if (!poll.ok) return;
-        const payload = (await poll.json()) as { tasks?: Array<{ id: string }> };
+        const payload = (await poll.json()) as { tasks?: Array<{ id: string; operation?: RelayOperation }> };
         for (const task of payload.tasks ?? []) {
+          const result = task.operation?.operation === 'bridge.update'
+            ? { updated: true, restarting: true, message: 'Bridge updated and restarting.' }
+            : {};
           await fetch('/api/relay/respond', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               agentToken: token,
-              response: { id: task.id, ok: true, result: {} },
+              response: { id: task.id, ok: true, result },
             }),
           });
         }
@@ -454,6 +492,33 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   expect(state.csrf['/api/relay/requests']).toBeGreaterThan(0);
   expect(state.csrf['/api/relay/requests/:id']).toBeGreaterThan(0);
   expect(state.authCalls).toEqual([]);
+
+  await page.evaluate(() => {
+    (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;
+  });
+});
+
+test('hosted bridge update button queues the allowlisted self-update operation', async ({ page }) => {
+  const state = createState('live');
+  state.latestVersion = '0.1.5';
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.getByRole('button', { name: 'Create pairing code' }).click();
+  await startFakeBridge(page, 'PAIR12345678');
+  await page.getByRole('button', { name: 'Re-check CLI' }).click();
+
+  const updateButton = page.getByRole('button', { name: 'Update bridge' });
+  await expect(updateButton).toBeVisible();
+  await expect(page.getByText(/Running 0\.1\.4/)).toBeVisible();
+  await updateButton.click();
+
+  await expect(page.getByText('Bridge updated and restarting.')).toBeVisible();
+  expect(state.operationBodies).toContainEqual({ operation: 'bridge.update' });
+  expect(state.authCalls).toEqual([]);
+  expect(state.operations.some((operation) => operation.operation === 'shell.exec')).toBe(false);
 
   await page.evaluate(() => {
     (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;

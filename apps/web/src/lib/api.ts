@@ -117,6 +117,7 @@ const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
   'inventory.get': 120_000,
   'transform.get': 120_000,
   'mode.set': 30_000,
+  'bridge.update': 5 * 60_000,
 };
 
 // The Worker relay accepts one operation at a time. React Query can fire an
@@ -175,6 +176,10 @@ async function bridgeStatus(): Promise<BridgeStatus> {
     lastSeenAt: health.time,
     relay: 'connected',
     pairing: null,
+    agentVersion: null,
+    latestVersion: null,
+    updateAvailable: false,
+    selfUpdateSupported: false,
   };
 }
 
@@ -263,6 +268,8 @@ export const api = {
     });
   },
   bridgeStatus,
+  updateBridge: (): Promise<{ updated: true; restarting: true; message: string }> =>
+    relayCall({ operation: 'bridge.update' }),
   relayPairing: (): Promise<RelayPairing> => requestWithToken<RelayPairing>('/api/relay/pairing', { method: 'POST' }),
   unpairBridge: (): Promise<{ paired: false }> => postJson<{ paired: false }>('/api/relay/unpair', {}),
 };

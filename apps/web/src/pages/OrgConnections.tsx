@@ -11,6 +11,7 @@ import { Badge, Button, CopyButton, DataTable, Panel } from '../components/ui/in
 import type { DataTableColumn } from '../components/ui/index.ts';
 
 const aliasPattern = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
+const manualUpdateCommand = 'npm install -g @dcat-toolkit/bridge@latest';
 
 function validateInstanceUrl(value: string): string | null {
   if (!value.trim()) return null;
@@ -80,6 +81,7 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
   const [instanceUrl, setInstanceUrl] = useState('');
   const [loginBrowser, setLoginBrowser] = useState<'' | 'chrome' | 'edge' | 'firefox'>('');
   const [setupError, setSetupError] = useState('');
+  const [updateNotice, setUpdateNotice] = useState('');
   const [connectError, setConnectError] = useState('');
   const [connectedAlias, setConnectedAlias] = useState<string | null>(null);
   const connectStarted = useRef(false);
@@ -117,6 +119,16 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
     onSuccess: () => {
       setSetupError('');
       invalidateSetup();
+    },
+    onError: (error: Error) => setSetupError(error.message),
+  });
+
+  const updateBridge = useMutation({
+    mutationFn: api.updateBridge,
+    onSuccess: (result) => {
+      setSetupError('');
+      setUpdateNotice(result.message);
+      void queryClient.invalidateQueries({ queryKey: ['bridge-status'] });
     },
     onError: (error: Error) => setSetupError(error.message),
   });
@@ -257,6 +269,45 @@ export function OrgConnections({ selectedAlias, onSelect }: OrgConnectionsProps)
           {bridgeStatusQuery.isPending ? <LoadingState label="Checking the local bridge…" /> : null}
           {bridgeStatusQuery.isError ? (
             <ErrorState message={bridgeStatusQuery.error.message} onRetry={() => void bridgeStatusQuery.refetch()} />
+          ) : null}
+
+          {status && hosted && status.paired && status.updateAvailable && status.selfUpdateSupported ? (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink">
+                  Bridge update available{status.latestVersion ? ` · ${status.latestVersion}` : ''}
+                </p>
+                <p className="text-xs text-ink-soft">
+                  Running {status.agentVersion ?? 'an older version'}. Updating installs the latest npm release and restarts the bridge automatically.
+                </p>
+                {updateNotice ? <p className="mt-1 text-xs text-ink-soft" role="status">{updateNotice}</p> : null}
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => updateBridge.mutate()}
+                disabled={updateBridge.isPending}
+                icon={<Icon name="refresh" size={15} />}
+              >
+                {updateBridge.isPending ? 'Updating…' : 'Update bridge'}
+              </Button>
+            </div>
+          ) : null}
+
+          {status && hosted && status.paired && status.updateAvailable && !status.selfUpdateSupported ? (
+            <div className="mb-3 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2.5">
+              <p className="text-sm font-medium text-ink">
+                Bridge update available{status.latestVersion ? ` · ${status.latestVersion}` : ''}
+              </p>
+              <p className="mt-1 text-xs text-ink-soft">
+                This bridge predates in-app updates. Run the command below on this computer, then restart DCAT Bridge.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <code className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink">
+                  {manualUpdateCommand}
+                </code>
+                <CopyButton value={manualUpdateCommand} label="Copy command" />
+              </div>
+            </div>
           ) : null}
 
           {status && hosted && !status.paired && status.pairing ? (

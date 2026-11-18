@@ -8,6 +8,7 @@ export const RELAY_OPERATIONS = [
   'inventory.get',
   'transform.get',
   'mode.set',
+  'bridge.update',
 ] as const;
 
 const aliasSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/);
@@ -53,6 +54,7 @@ export const relayOperationSchema = z.discriminatedUnion('operation', [
     operation: z.literal('mode.set'),
     mode: z.enum(['live', 'demo']),
   }),
+  z.object({ operation: z.literal('bridge.update') }),
 ]);
 
 export type RelayOperation = z.infer<typeof relayOperationSchema>;
@@ -74,6 +76,10 @@ export const bridgeStatusSchema = z.object({
   lastSeenAt: z.string().nullish(),
   relay: z.enum(['waiting', 'connected', 'stale']),
   pairing: relayPairingSchema.nullable(),
+  agentVersion: z.string().nullish(),
+  latestVersion: z.string().nullish(),
+  updateAvailable: z.boolean(),
+  selfUpdateSupported: z.boolean(),
 });
 
 export type BridgeStatus = z.infer<typeof bridgeStatusSchema>;
@@ -114,6 +120,7 @@ export const relayPairRequestSchema = z.object({
 
 export const relayPollRequestSchema = z.object({
   agentToken: z.string().min(16),
+  version: z.string().max(64).optional(),
   cli: cliStatusSchema.optional(),
 });
 

@@ -7,6 +7,8 @@ import { loadConfig } from '../../../apps/local-connector/src/config.ts';
 import { createAppState } from '../../../apps/local-connector/src/state.ts';
 import { normalizeRelayUrl, parseStoredBridge, validatePairingCode, type StoredBridge } from './config.ts';
 import { ensureSalesforceCli } from './install.ts';
+import { updateBridge } from './update.ts';
+import { BRIDGE_VERSION } from './version.ts';
 
 const HELP = `DCAT Bridge
 
@@ -14,7 +16,8 @@ const HELP = `DCAT Bridge
   npx -y @dcat-toolkit/bridge@latest start
 
 setup installs Salesforce CLI when needed, pairs this browser session, and starts the bridge.
-start reconnects with the saved pairing. DCAT never asks for Salesforce credentials.`;
+start reconnects with the saved pairing. DCAT never asks for Salesforce credentials.
+An update requested by the paired site installs the latest release and restarts the bridge automatically.`;
 
 const configPath = join(homedir(), '.dcat', 'bridge.json');
 
@@ -53,7 +56,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
     return;
   }
 
-  const config = { ...loadConfig({}, []), mode: 'live' as const };
+  const config = { ...loadConfig({}, []), mode: 'live' as const, version: BRIDGE_VERSION };
+  const onUpdate = () => updateBridge({ logger, env: process.env });
   const state = createAppState(config);
 
   if (command === 'setup') {
@@ -73,6 +77,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
       signal,
       logger,
       onPaired: (token) => saveStored({ relayUrl, token, version: config.version }),
+      onUpdate,
     });
     return;
   }
@@ -90,5 +95,6 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
     state,
     signal,
     logger,
+    onUpdate,
   });
 }

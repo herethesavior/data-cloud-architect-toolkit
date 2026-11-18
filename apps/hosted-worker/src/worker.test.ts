@@ -1,5 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import app from './index.ts';
+import { getBridgeUpdateStatus, resetNpmVersionCache } from './relay.ts';
+import { createSession } from './session.ts';
 import type { Env, KVNamespaceLike } from './types.ts';
 
 class FakeKV implements KVNamespaceLike {
@@ -45,8 +47,35 @@ async function postJson<T>(path: string, body: unknown, headers: Record<string, 
 }
 
 const cli = { installed: true, version: '2.116.6', error: null };
+const npmLatestUrl = 'https://registry.npmjs.org/@dcat-toolkit/bridge/latest';
+
+function stubNpmVersion(version: string, status = 200) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    expect(String(input)).toBe(npmLatestUrl);
+    return new Response(JSON.stringify({ version }), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function pairedSession(version: string) {
+  const session = createSession('live');
+  session.relay.agentToken = 'agent-token-1234567890';
+  session.relay.agentVersion = version;
+  session.relay.lastSeenAt = Date.now();
+  return session;
+}
+
+beforeEach(() => {
+  resetNpmVersionCache();
+  stubNpmVersion('0.1.3');
+});
 
 afterEach(() => {
+  resetNpmVersionCache();
   vi.unstubAllGlobals();
 });
 
@@ -198,5 +227,103 @@ describe('hosted bridge relay', () => {
 
     const status = await app.request('/api/relay/status', { headers: session.headers }, env);
     expect((await status.json() as { paired: boolean }).paired).toBe(true);
+  });
+
+  it('surfaces npm update availability on relay status', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson('/api/relay/pair', {
+      code: pairing.code,
+      version: '0.1.4',
+      cli,
+    }, {}, env);
+    stubNpmVersion('0.2.0');
+
+    const response = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect(await response.json()).toMatchObject({
+      paired: true,
+      agentVersion: '0.1.4',
+      latestVersion: '0.2.0',
+      updateAvailable: true,
+      selfUpdateSupported: true,
+    });
+  });
+});
+
+describe('bridge npm update status', () => {
+  it('reports no update when the paired agent matches npm latest', async () => {
+    const fetchMock = stubNpmVersion('0.1.4');
+
+    const status = await getBridgeUpdateStatus(pairedSession('0.1.4'), 'https://dcat.example');
+
+    expect(status).toMatchObject({
+      paired: true,
+      agentVersion: '0.1.4',
+      latestVersion: '0.1.4',
+      updateAvailable: false,
+      selfUpdateSupported: true,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]![0]).toBe(npmLatestUrl);
+  });
+
+  it('reports a newer npm release and reuses the one-hour cache', async () => {
+    const fetchMock = stubNpmVersion('0.2.0');
+    const session = pairedSession('0.1.4');
+
+    const first = await getBridgeUpdateStatus(session, 'https://dcat.example');
+    const second = await getBridgeUpdateStatus(session, 'https://dcat.example');
+
+    expect(first).toMatchObject({
+      latestVersion: '0.2.0',
+      updateAvailable: true,
+      selfUpdateSupported: true,
+    });
+    expect(second.updateAvailable).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('compares numeric version components instead of strings', async () => {
+    stubNpmVersion('0.1.10');
+
+    await expect(getBridgeUpdateStatus(pairedSession('0.1.4'), 'https://dcat.example'))
+      .resolves.toMatchObject({ updateAvailable: true });
+  });
+
+  it('marks published bridges below the self-update minimum as manual-only', async () => {
+    stubNpmVersion('0.2.0');
+
+    await expect(getBridgeUpdateStatus(pairedSession('0.1.3'), 'https://dcat.example'))
+      .resolves.toMatchObject({
+        agentVersion: '0.1.3',
+        updateAvailable: true,
+        selfUpdateSupported: false,
+      });
+  });
+
+  it('does not check npm until a bridge reports its version', async () => {
+    const fetchMock = stubNpmVersion('0.2.0');
+
+    await expect(getBridgeUpdateStatus(createSession('live'), 'https://dcat.example'))
+      .resolves.toMatchObject({
+        paired: false,
+        agentVersion: null,
+        latestVersion: null,
+        updateAvailable: false,
+        selfUpdateSupported: false,
+      });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the update unavailable when the registry check fails', async () => {
+    stubNpmVersion('0.2.0', 503);
+
+    await expect(getBridgeUpdateStatus(pairedSession('0.1.4'), 'https://dcat.example'))
+      .resolves.toMatchObject({
+        latestVersion: null,
+        updateAvailable: false,
+        selfUpdateSupported: true,
+      });
   });
 });
