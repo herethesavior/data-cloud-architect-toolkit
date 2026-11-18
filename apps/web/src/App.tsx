@@ -6,7 +6,14 @@ import { buildCommandResults } from './lib/commandSearch.ts';
 import { isHosted } from './lib/hosted.ts';
 import type { CommandResult } from './lib/commandSearch.ts';
 import { InventoryActionsProvider } from './lib/inventoryActions.tsx';
-import { getModePreference, getSelectedOrg, setModePreference, setSelectedOrg } from './lib/preferences.ts';
+import {
+  getHiddenOrgs,
+  getModePreference,
+  getSelectedOrg,
+  setHiddenOrgs,
+  setModePreference,
+  setSelectedOrg,
+} from './lib/preferences.ts';
 import { useTheme } from './lib/useTheme.ts';
 import { useInventory } from './lib/useInventory.ts';
 import type { FocusObject } from './lib/objectDetail.ts';
@@ -68,6 +75,7 @@ export function App() {
 
   const [page, setPage] = useState<Page>('dashboard');
   const [selectedAlias, setSelectedAlias] = useState<string | null>(() => getSelectedOrg());
+  const [hiddenAliases, setHiddenAliases] = useState<string[]>(() => getHiddenOrgs());
   const [modeNotice, setModeNotice] = useState('');
   const [modeError, setModeError] = useState('');
   const [focusObject, setFocusObject] = useState<FocusObject | null>(null);
@@ -76,24 +84,33 @@ export function App() {
   const theme = useTheme();
 
   const mode: WorkspaceMode = sessionQuery.data?.mode ?? 'demo';
-  const selectedOrg = orgsQuery.data?.find((org) => org.alias === selectedAlias) ?? null;
+  const visibleOrgs = useMemo(
+    () => (orgsQuery.data ?? []).filter((org) =>
+      (mode !== 'live' || org.source !== 'demo-fixture') && !hiddenAliases.includes(org.alias)),
+    [orgsQuery.data, mode, hiddenAliases],
+  );
+  const selectedOrg = visibleOrgs.find((org) => org.alias === selectedAlias) ?? null;
   const context = createWorkspaceContext(mode, selectedOrg);
   const inventoryQuery = useInventory(context);
   const searchResults = useMemo(() => buildCommandResults(inventoryQuery.data ?? null), [inventoryQuery.data]);
 
   const { mutate: mutateMode, isPending: isTogglingMode } = useMutation({
     mutationFn: api.setMode,
-    onSuccess: (result, requestedMode) => {
-      // Drop the old context before the new mode renders, so sample data can
-      // never appear under a Live label (or vice versa).
-      clearWorkspaceCaches(queryClient, null);
-      setFocusObject(null);
+    onSuccess: async (result, requestedMode) => {
+      // Update the cached session first so the mode-aware org query cannot read
+      // the previous mode's fixtures when it is re-enabled.
       const session = sessionQuery.data;
       if (session) {
         const nextSession: SessionInfo = { ...session, mode: result.mode };
         setCachedSession(nextSession);
         queryClient.setQueryData<SessionInfo>(['session'], nextSession);
       }
+      // Cancel an in-flight demo org fetch before replacing the cache. Without
+      // this, a late response could repopulate demo orgs under a Live label.
+      await queryClient.cancelQueries({ queryKey: ['orgs'] });
+      clearWorkspaceCaches(queryClient, null);
+      queryClient.setQueryData<OrgSummary[]>(['orgs'], []);
+      setFocusObject(null);
       setModePreference(requestedMode);
       setSelectedAlias(null);
       setSelectedOrg(null);
@@ -150,14 +167,12 @@ export function App() {
   }, [sessionQuery.data, mutateMode]);
 
   useEffect(() => {
-    const orgs = orgsQuery.data;
-    if (!orgs) return;
-    if (selectedAlias && orgs.some((org) => org.alias === selectedAlias)) return;
-    const first = orgs[0] ?? null;
+    if (selectedAlias && visibleOrgs.some((org) => org.alias === selectedAlias)) return;
+    const first = visibleOrgs[0] ?? null;
     clearWorkspaceCaches(queryClient, createWorkspaceContext(mode, first)?.contextId ?? null);
     setSelectedAlias(first?.alias ?? null);
     setSelectedOrg(first?.alias ?? null);
-  }, [orgsQuery.data, selectedAlias, mode, queryClient]);
+  }, [visibleOrgs, selectedAlias, mode, queryClient]);
 
   if (sessionQuery.isPending) return <BootScreen hosted={hosted} />;
   if (sessionQuery.isError) {
@@ -182,6 +197,24 @@ export function App() {
     setSelectedAlias(alias);
     setSelectedOrg(alias);
     setPage('dashboard');
+  };
+
+  const hideOrg = (alias: string) => {
+    const next = hiddenAliases.includes(alias) ? hiddenAliases : [...hiddenAliases, alias];
+    setHiddenOrgs(next);
+    setHiddenAliases(next);
+    if (selectedAlias === alias) {
+      clearWorkspaceCaches(queryClient, null);
+      setFocusObject(null);
+      setSelectedAlias(null);
+      setSelectedOrg(null);
+    }
+  };
+
+  const restoreOrg = (alias: string) => {
+    const next = hiddenAliases.filter((entry) => entry !== alias);
+    setHiddenOrgs(next);
+    setHiddenAliases(next);
   };
 
   const toggleMode = () => {
@@ -211,7 +244,15 @@ export function App() {
       case 'dashboard':
         return <Dashboard context={context} mode={mode} onNavigate={setPage} />;
       case 'orgs':
-        return <OrgConnections selectedAlias={selectedAlias} onSelect={selectOrg} />;
+        return (
+          <OrgConnections
+            selectedAlias={selectedAlias}
+            onSelect={selectOrg}
+            hiddenAliases={hiddenAliases}
+            onRemoveOrg={hideOrg}
+            onRestoreOrg={restoreOrg}
+          />
+        );
       case 'settings':
         return <Settings theme={theme} />;
       case 'data-spaces':
@@ -259,7 +300,7 @@ export function App() {
         modeNotice={modeNotice}
         modeError={modeError}
         onRetryMode={retryMode}
-        orgs={orgsQuery.data ?? []}
+        orgs={visibleOrgs}
         selectedAlias={selectedAlias}
         onSelectOrg={selectOrg}
         onGoToOrgs={() => setPage('orgs')}
@@ -269,8 +310,9 @@ export function App() {
         searchResults={searchResults}
         onSelectSearchResult={selectSearchResult}
       >
-        {/* Remounting on context change resets local filters, selection, and search. */}
-        <div key={`${page}-${context?.contextId ?? 'none'}`} className="page-enter">{content}</div>
+        {/* Explorers remount on context change to reset local filters and search.
+            Org Connections keeps its two-step action state while selection moves. */}
+        <div key={page === 'orgs' ? page : `${page}-${context?.contextId ?? 'none'}`} className="page-enter">{content}</div>
       </AppShell>
     </InventoryActionsProvider>
   );

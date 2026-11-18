@@ -50,6 +50,46 @@ export const orgSummarySchema = z.object({
 
 export type OrgSummary = z.infer<typeof orgSummarySchema>;
 
+export interface OrgEnvironmentInput {
+  environment?: OrgSummary['environment'] | null;
+  instanceUrl?: string | null;
+  loginUrl?: string | null;
+  isDevHub?: boolean | null;
+  isSandbox?: boolean | null;
+  isScratch?: boolean | null;
+}
+
+function hostnameOf(value: string | null | undefined): string {
+  if (!value) return '';
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Salesforce CLI output varies by org type. Prefer explicit auth metadata, then
+ * well-known hostnames, without treating every hyphenated My Domain as a sandbox.
+ */
+export function inferOrgEnvironment(input: OrgEnvironmentInput): OrgSummary['environment'] {
+  if (input.environment && input.environment !== 'unknown') return input.environment;
+
+  const hosts = [hostnameOf(input.instanceUrl), hostnameOf(input.loginUrl)].filter(Boolean);
+  const isScratch = input.isScratch === true
+    || hosts.some((host) => host.includes('.scratch.') || host.includes('.trailblaze.'));
+  const isSandbox = input.isSandbox === true
+    || hosts.some((host) => host === 'test.salesforce.com' || host.includes('.sandbox.'));
+  const isProduction = input.isSandbox === false
+    || hosts.some((host) => host === 'login.salesforce.com' || host.endsWith('.my.salesforce.com'));
+
+  if (isScratch) return 'scratch';
+  if (input.isDevHub === true) return 'dev-hub';
+  if (isSandbox) return 'sandbox';
+  if (isProduction) return 'production';
+  return 'unknown';
+}
+
 export const apiCapabilitySchema = z.object({
   family: z.enum([...RESOURCE_FAMILIES, 'api-versions']),
   status: z.enum(RETRIEVAL_STATUSES),

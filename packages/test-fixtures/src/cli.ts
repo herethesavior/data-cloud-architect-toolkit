@@ -9,6 +9,8 @@ const demoOrgEntry = {
   loginUrl: 'https://test.salesforce.com/',
   clientId: 'PlatformCLI',
   isDevHub: false,
+  isSandbox: true,
+  isScratch: false,
   alias: 'demo-uat',
   isDefaultUsername: true,
   isDefaultDevHubUsername: false,
@@ -37,11 +39,68 @@ export const orgListAlternateJson = JSON.stringify({
         ...demoOrgEntry,
         alias: 'demo-alt',
         isDefaultUsername: false,
+        isSandbox: false,
+        isScratch: false,
         loginUrl: 'https://login.salesforce.com/',
         instanceUrl: 'https://demo.my.salesforce.com',
       },
     ],
     scratchOrgInfos: [],
+  },
+});
+
+/** Real CLI metadata shapes for environment detection across org types. */
+export const orgListEnvironmentJson = JSON.stringify({
+  status: 0,
+  result: {
+    nonScratchOrgs: [
+      {
+        alias: 'dev-ed',
+        username: 'dev@example.invalid',
+        orgId: '00D0000000000DEV',
+        instanceUrl: 'https://orgfarm-8e714281c7-dev-ed.develop.my.salesforce.com',
+        loginUrl: 'https://orgfarm-8e714281c7-dev-ed.develop.my.salesforce.com/',
+        isDevHub: false,
+        isSandbox: false,
+        isScratch: false,
+        connectedStatus: 'Connected',
+      },
+      {
+        alias: 'uat',
+        username: 'uat@example.invalid',
+        orgId: '00D0000000000UAT',
+        instanceUrl: 'https://acme--uat.sandbox.my.salesforce.com',
+        loginUrl: 'https://test.salesforce.com/',
+        isDevHub: false,
+        isSandbox: true,
+        isScratch: false,
+        connectedStatus: 'Connected',
+      },
+      {
+        alias: 'hub',
+        username: 'hub@example.invalid',
+        orgId: '00D0000000000HUB',
+        instanceUrl: 'https://acme.my.salesforce.com',
+        loginUrl: 'https://login.salesforce.com/',
+        isDevHub: true,
+        isSandbox: false,
+        isScratch: false,
+        connectedStatus: 'Connected',
+      },
+    ],
+    scratchOrgs: [
+      {
+        alias: 'scratch',
+        username: 'scratch@example.invalid',
+        orgId: '00D0000000000SCR',
+        instanceUrl: 'https://acme--scratch.scratch.my.salesforce.com',
+        loginUrl: 'https://acme--scratch.scratch.my.salesforce.com/',
+        isDevHub: false,
+        isSandbox: false,
+        isScratch: true,
+        connectedStatus: 'Connected',
+      },
+    ],
   },
 });
 

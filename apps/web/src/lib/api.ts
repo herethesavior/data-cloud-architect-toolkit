@@ -1,3 +1,4 @@
+import { inferOrgEnvironment } from '@dcat/core';
 import type {
   BridgeStatus,
   CliStatus,
@@ -31,6 +32,16 @@ interface RequestOptions {
   token?: string;
   body?: unknown;
   signal?: AbortSignal;
+}
+
+/** Older bridges return `unknown`; upgrade them from the same safe URL metadata. */
+function normalizeOrg(org: OrgSummary): OrgSummary {
+  const environment = inferOrgEnvironment(org);
+  return environment === org.environment ? org : { ...org, environment };
+}
+
+function normalizeOrgs(orgs: OrgSummary[]): OrgSummary[] {
+  return orgs.map(normalizeOrg);
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -198,27 +209,30 @@ export const api = {
     return request<ConnectorHealth>('/api/health');
   },
   orgs: async (): Promise<OrgSummary[]> => {
-    if (isHosted() && !await hostedUsesFixtures()) return relayCall({ operation: 'org.list' });
-    return request<OrgSummary[]>('/api/orgs');
+    if (isHosted() && !await hostedUsesFixtures()) return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }));
+    return normalizeOrgs(await request<OrgSummary[]>('/api/orgs'));
   },
   org: async (alias: string): Promise<OrgSummary> => {
     if (isHosted() && !await hostedUsesFixtures()) {
-      const orgs = await relayCall<OrgSummary[]>({ operation: 'org.list' });
+      const orgs = normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }));
       const found = orgs.find((entry) => entry.alias === alias);
       if (!found) throw new ApiError('ORG_NOT_FOUND', 'Org alias is not authenticated.');
       return found;
     }
-    return request<OrgSummary>(`/api/orgs/${encodeURIComponent(alias)}`);
+    return normalizeOrg(await request<OrgSummary>(`/api/orgs/${encodeURIComponent(alias)}`));
   },
   inventory: async (alias: string, options: { force?: boolean; signal?: AbortSignal } = {}): Promise<InventorySnapshot> => {
+    let snapshot: InventorySnapshot;
     if (isHosted() && !await hostedUsesFixtures()) {
-      return relayCall<InventorySnapshot>({ operation: 'inventory.get', alias, refresh: options.force }, options.signal);
+      snapshot = await relayCall<InventorySnapshot>({ operation: 'inventory.get', alias, refresh: options.force }, options.signal);
+    } else {
+      const path = `/api/orgs/${encodeURIComponent(alias)}/inventory`;
+      // A forced refresh bypasses the server cache and is token-protected.
+      snapshot = options.force
+        ? await requestWithToken<InventorySnapshot>(`${path}?refresh=1`, { signal: options.signal })
+        : await request<InventorySnapshot>(path, { signal: options.signal });
     }
-    const path = `/api/orgs/${encodeURIComponent(alias)}/inventory`;
-    // A forced refresh bypasses the server cache and is token-protected.
-    return options.force
-      ? requestWithToken<InventorySnapshot>(`${path}?refresh=1`, { signal: options.signal })
-      : request<InventorySnapshot>(path, { signal: options.signal });
+    return { ...snapshot, org: normalizeOrg(snapshot.org) };
   },
   transformBundle: async (alias: string, id: string, options: { signal?: AbortSignal } = {}): Promise<TransformBundle> => {
     if (isHosted() && !await hostedUsesFixtures()) {
@@ -230,8 +244,8 @@ export const api = {
     );
   },
   refreshOrgs: async (): Promise<OrgSummary[]> => {
-    if (isHosted() && !await hostedUsesFixtures()) return relayCall({ operation: 'org.list' });
-    return postJson<OrgSummary[]>('/api/orgs/refresh', {});
+    if (isHosted() && !await hostedUsesFixtures()) return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }));
+    return normalizeOrgs(await postJson<OrgSummary[]>('/api/orgs/refresh', {}));
   },
   refreshCli: async (): Promise<CliStatus> => {
     if (isHosted()) {
@@ -254,18 +268,20 @@ export const api = {
       throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode before connecting an org.');
     }
     if (isHosted()) {
-      return relayCall<OrgSummary>({
+      const connected = await relayCall<OrgSummary>({
         operation: 'org.connect',
         alias,
         ...(instanceUrl ? { instanceUrl } : {}),
         ...(browser ? { browser } : {}),
       });
+      return normalizeOrg({ ...connected, instanceUrl: connected.instanceUrl ?? instanceUrl ?? null });
     }
-    return postJson<OrgSummary>('/api/orgs/connect', {
+    const connected = await postJson<OrgSummary>('/api/orgs/connect', {
       alias,
       ...(instanceUrl ? { instanceUrl } : {}),
       ...(browser ? { browser } : {}),
     });
+    return normalizeOrg({ ...connected, instanceUrl: connected.instanceUrl ?? instanceUrl ?? null });
   },
   bridgeStatus,
   updateBridge: (): Promise<{ updated: true; restarting: true; message: string }> =>

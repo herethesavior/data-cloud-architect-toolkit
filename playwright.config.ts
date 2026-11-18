@@ -5,7 +5,8 @@ const baseURL = 'http://127.0.0.1:5173';
 export default defineConfig({
   testDir: './e2e',
   testIgnore: 'hosted-bridge.spec.ts',
-  fullyParallel: true,
+  fullyParallel: !process.env.CI,
+  workers: process.env.CI ? 1 : undefined,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: 'list',

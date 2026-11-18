@@ -35,14 +35,26 @@ const connectedOrg: OrgSummary = {
   source: 'salesforce-cli',
 };
 
-function renderOrgConnections(onSelect = vi.fn()) {
+interface RenderOptions {
+  hiddenAliases?: readonly string[];
+}
+
+function renderOrgConnections(onSelect = vi.fn(), options: RenderOptions = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const onRemoveOrg = vi.fn();
+  const onRestoreOrg = vi.fn();
   render(
     <QueryClientProvider client={queryClient}>
-      <OrgConnections selectedAlias={null} onSelect={onSelect} />
+      <OrgConnections
+        selectedAlias={null}
+        onSelect={onSelect}
+        hiddenAliases={options.hiddenAliases ?? []}
+        onRemoveOrg={onRemoveOrg}
+        onRestoreOrg={onRestoreOrg}
+      />
     </QueryClientProvider>,
   );
-  return { onSelect, queryClient };
+  return { onSelect, onRemoveOrg, onRestoreOrg, queryClient };
 }
 
 describe('OrgConnections connect wizard', () => {
@@ -148,13 +160,14 @@ describe('OrgConnections connect wizard', () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     vi.mocked(api.orgs).mockResolvedValue([]);
     const connect = vi.spyOn(api, 'connectOrg').mockResolvedValue(connectedOrg);
-    const { onSelect, queryClient } = renderOrgConnections();
+    const { onSelect, onRestoreOrg, queryClient } = renderOrgConnections();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Connect org' }));
 
     await waitFor(() => expect(connect).toHaveBeenCalledWith('my-data360-org', '', undefined));
     await waitFor(() => expect(queryClient.getQueryData<OrgSummary[]>(['orgs'])).toEqual([connectedOrg]));
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('prod-org'));
+    expect(onRestoreOrg).toHaveBeenCalledWith('prod-org');
     expect(await screen.findByText(/prod-org is connected/)).toBeInTheDocument();
     expect(vi.mocked(api.orgs).mock.calls).toHaveLength(1);
   });
@@ -222,5 +235,55 @@ describe('OrgConnections connect wizard', () => {
 
     expect(await screen.findByText('No authenticated orgs yet')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh org list' })).toBeEnabled();
+  });
+
+  it('hides an org from DCAT only after an explicit per-row confirmation', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.orgs).mockResolvedValue([connectedOrg]);
+    const { onRemoveOrg } = renderOrgConnections();
+
+    expect(await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Remove prod-org' }));
+
+    expect(screen.getByText('Hide from DCAT?')).toBeInTheDocument();
+    expect(onRemoveOrg).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm remove prod-org' }));
+
+    expect(onRemoveOrg).toHaveBeenCalledWith('prod-org');
+    expect(await screen.findByText(/hidden from DCAT only/)).toBeInTheDocument();
+  });
+
+  it('shows and restores removed orgs without touching Salesforce CLI auth', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.orgs).mockResolvedValue([connectedOrg]);
+    const { onRestoreOrg } = renderOrgConnections(vi.fn(), { hiddenAliases: ['prod-org'] });
+
+    const showRemoved = await screen.findByRole('button', { name: 'Show removed orgs (1)' });
+    expect(screen.queryByRole('table', { name: 'Authenticated Salesforce orgs' })).not.toBeInTheDocument();
+
+    await userEvent.click(showRemoved);
+
+    expect(await screen.findByRole('table', { name: 'Orgs hidden from DCAT' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Restore prod-org' }));
+
+    expect(onRestoreOrg).toHaveBeenCalledWith('prod-org');
+    expect(await screen.findByText(/visible in DCAT again/)).toBeInTheDocument();
+  });
+
+  it('never shows demo-fixture orgs in a live inventory table', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const demoOrg: OrgSummary = {
+      ...connectedOrg,
+      alias: 'demo-uat',
+      environment: 'sandbox',
+      source: 'demo-fixture',
+    };
+    vi.mocked(api.orgs).mockResolvedValue([demoOrg, connectedOrg]);
+    renderOrgConnections();
+
+    expect(await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
+    expect(screen.queryByText('demo-uat')).not.toBeInTheDocument();
+    expect(screen.getByText('prod-org')).toBeInTheDocument();
   });
 });

@@ -24,14 +24,11 @@ const SELF_UPDATE_MIN_VERSION = '0.1.4';
 const NPM_LATEST_URL = 'https://registry.npmjs.org/@dcat-toolkit/bridge/latest';
 const NPM_VERSION_TTL_MS = 60 * 60 * 1000;
 let cachedNpmVersion: { version: string; checkedAt: number } | null = null;
+let npmVersionCheck: Promise<string | null> | null = null;
 
 type NpmFetch = (input: RequestInfo | URL, init?: RequestInit & { cf?: { cacheTtl: number } }) => Promise<Response>;
 
-/** The Worker checks the npm registry itself so the browser never calls an external URL. */
-async function latestBridgeVersion(fetchFn: NpmFetch = fetch): Promise<string | null> {
-  if (cachedNpmVersion && Date.now() - cachedNpmVersion.checkedAt < NPM_VERSION_TTL_MS) {
-    return cachedNpmVersion.version;
-  }
+async function fetchLatestBridgeVersion(fetchFn: NpmFetch): Promise<string | null> {
   try {
     const response = await fetchFn(NPM_LATEST_URL, { cf: { cacheTtl: 3600 } });
     if (!response.ok) return cachedNpmVersion?.version ?? null;
@@ -46,9 +43,24 @@ async function latestBridgeVersion(fetchFn: NpmFetch = fetch): Promise<string | 
   }
 }
 
+/**
+ * The Worker checks the npm registry itself so the browser never calls an
+ * external URL. Concurrent status requests share one registry call.
+ */
+async function latestBridgeVersion(fetchFn: NpmFetch = fetch): Promise<string | null> {
+  if (cachedNpmVersion && Date.now() - cachedNpmVersion.checkedAt < NPM_VERSION_TTL_MS) {
+    return cachedNpmVersion.version;
+  }
+  npmVersionCheck ??= fetchLatestBridgeVersion(fetchFn).finally(() => {
+    npmVersionCheck = null;
+  });
+  return npmVersionCheck;
+}
+
 /** Reset only for tests; production relies on the one-hour cache. */
 export function resetNpmVersionCache(): void {
   cachedNpmVersion = null;
+  npmVersionCheck = null;
 }
 
 function parseVersion(value: string | null | undefined): number[] | null {

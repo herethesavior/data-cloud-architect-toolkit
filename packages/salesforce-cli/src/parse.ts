@@ -1,3 +1,4 @@
+import { inferOrgEnvironment } from '@dcat/core';
 import type { OrgSummary } from '@dcat/core';
 import { z } from 'zod';
 import { CliError } from './errors.ts';
@@ -14,7 +15,9 @@ const cliOrgEntrySchema = z
     isDefaultUsername: z.boolean().nullish(),
     isDefaultDevHubUsername: z.boolean().nullish(),
     isDevHub: z.boolean().nullish(),
+    isScratch: z.boolean().nullish(),
     isScratchOrg: z.boolean().nullish(),
+    isSandbox: z.boolean().nullish(),
   })
   .passthrough();
 
@@ -56,13 +59,13 @@ function decode(raw: string, label: string): unknown {
 }
 
 function detectEnvironment(entry: CliOrgEntry): OrgSummary['environment'] {
-  if (entry.isScratchOrg) return 'scratch';
-  if (entry.isDevHub) return 'dev-hub';
-  const loginUrl = (entry.loginUrl ?? '').toLowerCase();
-  const instanceUrl = (entry.instanceUrl ?? '').toLowerCase();
-  if (loginUrl.includes('test.salesforce.com') || instanceUrl.includes('--')) return 'sandbox';
-  if (loginUrl.includes('login.salesforce.com')) return 'production';
-  return 'unknown';
+  return inferOrgEnvironment({
+    instanceUrl: entry.instanceUrl,
+    loginUrl: entry.loginUrl,
+    isDevHub: entry.isDevHub,
+    isSandbox: entry.isSandbox,
+    isScratch: entry.isScratch ?? entry.isScratchOrg,
+  });
 }
 
 function toOrgSummary(entry: CliOrgEntry, defaultUsername?: string): OrgSummary {

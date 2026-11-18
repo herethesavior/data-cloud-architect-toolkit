@@ -289,6 +289,49 @@ test('live mode without an org leads with Select an org and offers the demo fall
   await expect(page.getByText('Sample inventory')).toBeVisible();
 });
 
+test('switching demo to live clears demo orgs from the live inventory list', async ({ page }) => {
+  const state = createConnectorState();
+  state.orgs = [];
+  await mockConnector(page, state);
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await expect(
+    page.getByRole('table', { name: 'Authenticated Salesforce orgs' }).getByText('demo-uat', { exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+
+  await expect(page.getByText('No authenticated orgs yet')).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Authenticated Salesforce orgs' })).toHaveCount(0);
+  await expect(page.getByText('demo-uat', { exact: true })).toHaveCount(0);
+});
+
+test('live orgs can be hidden from DCAT and restored without logging out', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  const table = page.getByRole('table', { name: 'Authenticated Salesforce orgs' });
+  await expect(table.getByText('prod-org', { exact: true })).toBeVisible();
+
+  await table.getByRole('button', { name: 'Remove prod-org' }).click();
+  await table.getByRole('button', { name: 'Confirm remove prod-org' }).click();
+
+  await expect(table.getByText('prod-org', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/hidden from DCAT only/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Show removed orgs (1)' }).click();
+  const hiddenTable = page.getByRole('table', { name: 'Orgs hidden from DCAT' });
+  await expect(hiddenTable.getByText('prod-org', { exact: true })).toBeVisible();
+  await hiddenTable.getByRole('button', { name: 'Restore prod-org' }).click();
+
+  await expect(table.getByText('prod-org', { exact: true })).toBeVisible();
+});
+
 test('switching live orgs replaces cached metadata instead of showing the previous org', async ({ page }) => {
   const state = createConnectorState();
   state.mode = 'live';
