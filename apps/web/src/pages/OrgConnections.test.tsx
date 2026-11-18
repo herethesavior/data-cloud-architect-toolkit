@@ -37,10 +37,12 @@ const connectedOrg: OrgSummary = {
 
 interface RenderOptions {
   hiddenAliases?: readonly string[];
+  seedOrgs?: OrgSummary[];
 }
 
 function renderOrgConnections(onSelect = vi.fn(), options: RenderOptions = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (options.seedOrgs) queryClient.setQueryData<OrgSummary[]>(['orgs'], options.seedOrgs);
   const onRemoveOrg = vi.fn();
   const onRestoreOrg = vi.fn();
   render(
@@ -215,6 +217,34 @@ describe('OrgConnections connect wizard', () => {
     expect(await screen.findByText('Connect an org to view live inventory')).toBeInTheDocument();
     expect(screen.getByText('Complete steps 1 and 2 first')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh org list' })).toBeDisabled();
+  });
+
+  it('shows a checking skeleton while a seeded org list is refetching in locked live mode', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let finish!: (orgs: OrgSummary[]) => void;
+    const pending = new Promise<OrgSummary[]>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(api.orgs).mockReturnValue(pending);
+    renderOrgConnections(vi.fn(), { seedOrgs: [] });
+
+    expect(await screen.findByText('Checking for Salesforce orgs…')).toBeInTheDocument();
+    expect(screen.queryByText('Connect an org to view live inventory')).not.toBeInTheDocument();
+
+    finish([]);
+    await pending;
+    expect(await screen.findByText('Connect an org to view live inventory')).toBeInTheDocument();
+    expect(screen.queryByText('Checking for Salesforce orgs…')).not.toBeInTheDocument();
+  });
+
+  it('surfaces an org-list failure instead of hiding it behind the locked empty state', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.orgs).mockRejectedValue(new Error('Org check failed.'));
+    renderOrgConnections(vi.fn(), { seedOrgs: [] });
+
+    expect(await screen.findByText('Org check failed.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry org check' })).toBeInTheDocument();
+    expect(screen.queryByText('Connect an org to view live inventory')).not.toBeInTheDocument();
   });
 
   it('unlocks live inventory once an authenticated org exists', async () => {

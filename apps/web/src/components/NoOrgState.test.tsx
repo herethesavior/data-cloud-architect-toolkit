@@ -14,6 +14,7 @@ function actions(overrides: Partial<InventoryActions> = {}): InventoryActions {
   return {
     context: null,
     mode: 'live',
+    orgList: { status: 'idle' },
     onGoToOrgs: vi.fn(),
     onToggleMode: vi.fn(),
     isTogglingMode: false,
@@ -58,5 +59,27 @@ describe('NoOrgState', () => {
     expect(screen.getByRole('button', { name: 'Select an org' })).toBeInTheDocument();
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Use demo mode' })).not.toBeInTheDocument();
+  });
+
+  it('shows a checking skeleton with recovery actions while org discovery is running', () => {
+    renderState(actions({ orgList: { status: 'checking' } }));
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Checking for Salesforce orgs…');
+    expect(status).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('No org selected')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select an org' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use demo mode' })).toBeInTheDocument();
+  });
+
+  it('shows an org-check error with a retry while recovery actions stay available', () => {
+    const retry = vi.fn();
+    renderState(actions({ orgList: { status: 'error', message: 'Org list timed out.', retry } }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Org list timed out.');
+    expect(screen.getByRole('button', { name: 'Retry org check' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Select an org' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use demo mode' })).toBeInTheDocument();
+    expect(screen.queryByText('No org selected')).not.toBeInTheDocument();
   });
 });

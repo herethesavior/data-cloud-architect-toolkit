@@ -46,6 +46,7 @@ interface AppShellProps {
   modeError: string;
   onRetryMode: () => void;
   orgs: OrgSummary[];
+  orgsLoading: boolean;
   selectedAlias: string | null;
   onSelectOrg: (alias: string) => void;
   onGoToOrgs: () => void;
@@ -112,11 +113,12 @@ function NavigationList({ page, onNavigate, label, collapsed = false }: Navigati
 
 interface OrgPickerProps {
   orgs: OrgSummary[];
+  loading: boolean;
   selectedAlias: string | null;
   onSelectOrg: (alias: string) => void;
 }
 
-function OrgPicker({ orgs, selectedAlias, onSelectOrg }: OrgPickerProps) {
+function OrgPicker({ orgs, loading, selectedAlias, onSelectOrg }: OrgPickerProps) {
   return (
     <label className="relative block">
       <span className="sr-only">Selected organization</span>
@@ -126,8 +128,9 @@ function OrgPicker({ orgs, selectedAlias, onSelectOrg }: OrgPickerProps) {
         onChange={(event) => onSelectOrg(event.target.value)}
         className="input h-9 appearance-none py-1.5 pr-8 pl-9"
         disabled={orgs.length === 0}
+        aria-busy={loading}
       >
-        {orgs.length === 0 ? <option value="">No orgs available</option> : null}
+        {orgs.length === 0 ? <option value="">{loading ? 'Checking for orgs…' : 'No orgs available'}</option> : null}
         {orgs.map((org) => (
           <option key={org.alias} value={org.alias}>
             {org.alias}
@@ -209,6 +212,7 @@ export function AppShell({
   modeError,
   onRetryMode,
   orgs,
+  orgsLoading,
   selectedAlias,
   onSelectOrg,
   onGoToOrgs,
@@ -354,7 +358,7 @@ export function AppShell({
               </div>
               <div className="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
                 <div className="w-full sm:w-52">
-                  <OrgPicker orgs={orgs} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
+                  <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
                 </div>
                 <Button
                   variant="quiet"
