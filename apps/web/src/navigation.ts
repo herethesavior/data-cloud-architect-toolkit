@@ -8,6 +8,7 @@ export type Page =
   | 'data-streams'
   | 'data-transforms'
   | 'erd'
+  | 'lineage'
   | 'dictionary'
   | 'settings'
   | 'help';
@@ -40,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'data-streams', label: 'Data Stream Explorer' },
       { id: 'data-transforms', label: 'Data Transform Explorer' },
       { id: 'erd', label: 'ERD Explorer' },
+      { id: 'lineage', label: 'Data Lineage Explorer' },
     ],
   },
   {
@@ -65,6 +67,7 @@ export const PAGE_TITLES: Record<Page, string> = {
   'data-streams': 'Data Stream Explorer',
   'data-transforms': 'Data Transform Explorer',
   erd: 'ERD Explorer',
+  lineage: 'Data Lineage Explorer',
   dictionary: 'Data Dictionary',
   settings: 'Settings & Diagnostics',
   help: 'Help',
