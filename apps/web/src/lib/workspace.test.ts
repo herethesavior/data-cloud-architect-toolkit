@@ -8,6 +8,7 @@ import {
   invalidateBridgeState,
   invalidateWorkspaceState,
   isContextScopedQuery,
+  orgsQueryKey,
   shouldDiscardQuery,
   workspaceBadge,
 } from './workspace.ts';
@@ -82,7 +83,7 @@ describe('workspace contexts', () => {
     client.setQueryData(['inventory', demoId], { marker: 'demo' });
     client.setQueryData(['transforms', demoId], { marker: 'demo-transforms' });
     client.setQueryData(['inventory', liveId], { marker: 'live' });
-    client.setQueryData(['orgs'], [{ marker: 'org-list' }]);
+    client.setQueryData(orgsQueryKey('demo'), [{ marker: 'org-list' }]);
     client.setQueryData(['session'], { marker: 'session' });
 
     clearWorkspaceCaches(client, liveId);
@@ -91,20 +92,20 @@ describe('workspace contexts', () => {
     expect(client.getQueryData(['inventory', demoId])).toBeUndefined();
     expect(client.getQueryData(['transforms', demoId])).toBeUndefined();
     expect(client.getQueryData(['inventory', liveId])).toEqual({ marker: 'live' });
-    expect(client.getQueryData(['orgs'])).toEqual([{ marker: 'org-list' }]);
+    expect(client.getQueryData(orgsQueryKey('demo'))).toEqual([{ marker: 'org-list' }]);
     expect(client.getQueryData(['session'])).toEqual({ marker: 'session' });
 
     // Leaving a context entirely (org removal or mode switch) drops all data.
     clearWorkspaceCaches(client, null);
     expect(client.getQueryData(['inventory', liveId])).toBeUndefined();
-    expect(client.getQueryData(['orgs'])).toEqual([{ marker: 'org-list' }]);
+    expect(client.getQueryData(orgsQueryKey('demo'))).toEqual([{ marker: 'org-list' }]);
   });
 
   it('invalidates shared and context-scoped state in one place', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(['bridge-status'], { paired: true });
     client.setQueryData(['health'], { status: 'ok' });
-    client.setQueryData(['orgs'], [demoOrg]);
+    client.setQueryData(orgsQueryKey('demo'), [demoOrg]);
     client.setQueryData(['inventory', 'demo:demo-uat'], { marker: 'inventory' });
     client.setQueryData(['transforms', 'demo:demo-uat', 'bundle', 't1'], { marker: 'transform' });
     client.setQueryData(['session'], { mode: 'demo' });
@@ -114,7 +115,7 @@ describe('workspace contexts', () => {
     for (const key of [
       ['bridge-status'],
       ['health'],
-      ['orgs'],
+      orgsQueryKey('demo'),
       ['inventory', 'demo:demo-uat'],
       ['transforms', 'demo:demo-uat', 'bundle', 't1'],
     ]) {
@@ -127,7 +128,7 @@ describe('workspace contexts', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(['bridge-status'], { paired: true });
     client.setQueryData(['health'], { status: 'ok' });
-    client.setQueryData(['orgs'], [demoOrg]);
+    client.setQueryData(orgsQueryKey('demo'), [demoOrg]);
     client.setQueryData(['inventory', 'demo:demo-uat'], { marker: 'inventory' });
 
     invalidateBridgeState(client);
@@ -135,7 +136,7 @@ describe('workspace contexts', () => {
     expect(client.getQueryState(['bridge-status'])?.isInvalidated).toBe(true);
     expect(client.getQueryState(['health'])?.isInvalidated).toBe(true);
     expect(client.getQueryState(['inventory', 'demo:demo-uat'])?.isInvalidated).toBe(true);
-    expect(client.getQueryState(['orgs'])?.isInvalidated).toBe(false);
+    expect(client.getQueryState(orgsQueryKey('demo'))?.isInvalidated).toBe(false);
   });
 
   it('labels the active context explicitly in the header', () => {

@@ -62,6 +62,7 @@ function createConnectorState(): ConnectorState {
 interface MockConnectorOptions {
   modeDelayMs?: number;
   modeCalls?: string[];
+  calls?: { orgs: number; inventory: number };
 }
 
 /** Mock connector: no CLI, no real org, deterministic and mode-aware fixtures. */
@@ -88,6 +89,7 @@ async function mockConnector(page: Page, state: ConnectorState, options: MockCon
     const path = new URL(route.request().url()).pathname;
     const segments = path.split('/').filter(Boolean);
     if (segments.length === 2) {
+      if (options.calls) options.calls.orgs += 1;
       return route.fulfill({ json: state.mode === 'demo' ? demoOrgs : state.orgs });
     }
     const alias = decodeURIComponent(segments[2] ?? '');
@@ -99,6 +101,7 @@ async function mockConnector(page: Page, state: ConnectorState, options: MockCon
         : route.fulfill({ status: 404, json: { error: { code: 'TRANSFORM_NOT_FOUND', message: 'Unknown transform' } } });
     }
     if (segments[3] === 'inventory') {
+      if (options.calls) options.calls.inventory += 1;
       const inventory = state.mode === 'demo' ? demoInventory : state.inventories[alias] ?? demoInventory;
       if (segments[4] === 'session') {
         const sessionId = segments[5] ?? 'e2e-session';
@@ -126,6 +129,33 @@ async function seedLiveMode(page: Page) {
 async function openDemo(page: Page) {
   await mockConnector(page, createConnectorState());
   await page.goto('/');
+}
+
+const PERSISTED_CACHE_KEY = 'dcat.inventory-cache.v1';
+
+async function readPersistedCache(page: Page): Promise<string | null> {
+  return page.evaluate((key) => new Promise<string | null>((resolve, reject) => {
+    const open = indexedDB.open('keyval-store', 1);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      if (!db.objectStoreNames.contains('keyval')) db.createObjectStore('keyval');
+    };
+    open.onerror = () => reject(open.error ?? new Error('IndexedDB open failed.'));
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('keyval', 'readonly');
+      const request = tx.objectStore('keyval').get(key);
+      request.onsuccess = () => {
+        const value: unknown = request.result;
+        db.close();
+        resolve(typeof value === 'string' ? value : value == null ? null : JSON.stringify(value));
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error ?? new Error('IndexedDB read failed.'));
+      };
+    };
+  }), PERSISTED_CACHE_KEY);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -202,6 +232,81 @@ test('menu links use fragments and browser history restores the right view', asy
 
   await page.goto('/#data-streams');
   await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
+});
+
+test('reload restores cached inventory and navigation does not retrieve it again', async ({ page }) => {
+  const calls = { orgs: 0, inventory: 0 };
+  await mockConnector(page, createConnectorState(), { calls });
+  await page.goto('/');
+
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect.poll(() => calls.orgs).toBe(1);
+  await expect.poll(() => calls.inventory).toBeGreaterThan(0);
+  // The async persister writes after cache events; wait for both allowlisted
+  // snapshots before reloading so the test verifies restore, not write timing.
+  await expect.poll(async () => (await readPersistedCache(page)) ?? '').toContain('"orgs"');
+  await expect.poll(async () => (await readPersistedCache(page)) ?? '').toContain('"inventory"');
+  const inventoryCallsAfterLoad = calls.inventory;
+  await expect(page.getByTestId('inventory-freshness')).toContainText('Updated');
+
+  await page.reload();
+
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect(page.getByTestId('inventory-freshness')).toContainText('Updated');
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
+  await expect(page.getByRole('table', { name: 'DLO Explorer results' })).toBeVisible();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Stream Explorer' }).click();
+  await expect(page.getByRole('table', { name: 'Data Stream Explorer results' })).toBeVisible();
+
+  expect(calls.orgs).toBe(1);
+  expect(calls.inventory).toBe(inventoryCallsAfterLoad);
+
+  const beforeManualRefresh = calls.inventory;
+  await page.getByRole('main').getByRole('button', { name: 'Refresh inventory' }).click();
+  await expect.poll(() => calls.inventory).toBeGreaterThan(beforeManualRefresh);
+});
+
+test('live reload restores the live context without demo crossover', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  const calls = { orgs: 0, inventory: 0 };
+  await seedLiveMode(page);
+  await mockConnector(page, state, { calls });
+  await page.goto('/');
+
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+  await expect.poll(() => calls.orgs).toBe(1);
+  await expect.poll(() => calls.inventory).toBeGreaterThan(0);
+  await expect.poll(async () => (await readPersistedCache(page)) ?? '').toContain('"orgs","live"');
+  await expect.poll(async () => (await readPersistedCache(page)) ?? '').toContain('"inventory","live:');
+  const inventoryCallsAfterLoad = calls.inventory;
+
+  await page.reload();
+
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toHaveCount(0);
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Spaces' }).click();
+  await expect(page.locator('#main-content').getByRole('heading', { name: 'Data Spaces' })).toBeVisible();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DMO Explorer' }).click();
+  await expect(page.getByRole('table', { name: 'DMO Explorer results' })).toBeVisible();
+
+  expect(calls.orgs).toBe(1);
+  expect(calls.inventory).toBe(inventoryCallsAfterLoad);
+});
+
+test('persisted cache never contains a session token', async ({ page }) => {
+  await mockConnector(page, createConnectorState());
+  await page.goto('/');
+
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await expect.poll(() => readPersistedCache(page)).not.toBeNull();
+
+  const cache = await readPersistedCache(page);
+  const localStorageText = await page.evaluate(() =>
+    Object.entries(localStorage).map(([key, value]) => `${key}=${value}`).join('\n'));
+
+  expect(cache).not.toContain('e2e-token');
+  expect(localStorageText).not.toContain('e2e-token');
 });
 
 test('switching to live mode announces the context and never flashes demo metadata', async ({ page }) => {
@@ -874,6 +979,10 @@ test('detail drawer contains keyboard focus and closes on Escape', async ({ page
 test('reduced motion disables transitions and entrance animations', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openDemo(page);
+  // Wait for the elements whose computed styles are asserted. A loaded page
+  // alone is not enough when the test workers are saturated.
+  await expect(page.locator('#desktop-sidebar')).toBeVisible();
+  await expect(page.locator('.page-enter').first()).toBeVisible();
 
   const durations = await page.evaluate(() => {
     const sidebar = document.querySelector<HTMLElement>('#desktop-sidebar');

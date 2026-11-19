@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api.ts';
+import { persistedQueryOptions } from './queryPersistence.ts';
 import type { WorkspaceContext } from './workspace.ts';
 
 /**
@@ -29,5 +30,6 @@ export function useInventory(context: WorkspaceContext | null) {
       });
     },
     enabled: Boolean(context?.alias),
+    ...persistedQueryOptions,
   });
 }

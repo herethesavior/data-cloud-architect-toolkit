@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { BridgeStatus, OrgSummary } from '@dcat/core';
 import { api } from '../lib/api.ts';
+import { orgsQueryKey } from '../lib/workspace.ts';
 import { OrgConnections } from './OrgConnections.tsx';
 
 function status(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
@@ -38,16 +39,23 @@ const connectedOrg: OrgSummary = {
 interface RenderOptions {
   hiddenAliases?: readonly string[];
   seedOrgs?: OrgSummary[];
+  invalidateSeededOrgs?: boolean;
+  mode?: 'demo' | 'live';
 }
 
 function renderOrgConnections(onSelect = vi.fn(), options: RenderOptions = {}) {
+  const mode = options.mode ?? 'live';
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  if (options.seedOrgs) queryClient.setQueryData<OrgSummary[]>(['orgs'], options.seedOrgs);
+  if (options.seedOrgs) {
+    queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), options.seedOrgs);
+    if (options.invalidateSeededOrgs) void queryClient.invalidateQueries({ queryKey: orgsQueryKey(mode) });
+  }
   const onRemoveOrg = vi.fn();
   const onRestoreOrg = vi.fn();
   render(
     <QueryClientProvider client={queryClient}>
       <OrgConnections
+        mode={mode}
         selectedAlias={null}
         onSelect={onSelect}
         hiddenAliases={options.hiddenAliases ?? []}
@@ -167,11 +175,20 @@ describe('OrgConnections connect wizard', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Connect org' }));
 
     await waitFor(() => expect(connect).toHaveBeenCalledWith('my-data360-org', '', undefined));
-    await waitFor(() => expect(queryClient.getQueryData<OrgSummary[]>(['orgs'])).toEqual([connectedOrg]));
+    await waitFor(() => expect(queryClient.getQueryData<OrgSummary[]>(orgsQueryKey('live'))).toEqual([connectedOrg]));
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('prod-org'));
     expect(onRestoreOrg).toHaveBeenCalledWith('prod-org');
     expect(await screen.findByText(/prod-org is connected/)).toBeInTheDocument();
     expect(vi.mocked(api.orgs).mock.calls).toHaveLength(1);
+  });
+
+  it('renders a persisted org list without another org.list request', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status());
+    renderOrgConnections(vi.fn(), { seedOrgs: [connectedOrg] });
+
+    expect(await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
+    expect(api.orgs).not.toHaveBeenCalled();
   });
 
   it('ignores repeated Connect org clicks while a login is in flight', async () => {
@@ -226,7 +243,7 @@ describe('OrgConnections connect wizard', () => {
       finish = resolve;
     });
     vi.mocked(api.orgs).mockReturnValue(pending);
-    renderOrgConnections(vi.fn(), { seedOrgs: [] });
+    renderOrgConnections(vi.fn(), { seedOrgs: [], invalidateSeededOrgs: true });
 
     expect(await screen.findByText('Checking for Salesforce orgs…')).toBeInTheDocument();
     expect(screen.queryByText('Connect an org to view live inventory')).not.toBeInTheDocument();
@@ -240,7 +257,7 @@ describe('OrgConnections connect wizard', () => {
   it('surfaces an org-list failure instead of hiding it behind the locked empty state', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     vi.mocked(api.orgs).mockRejectedValue(new Error('Org check failed.'));
-    renderOrgConnections(vi.fn(), { seedOrgs: [] });
+    renderOrgConnections(vi.fn(), { seedOrgs: [], invalidateSeededOrgs: true });
 
     expect(await screen.findByText('Org check failed.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry org check' })).toBeInTheDocument();

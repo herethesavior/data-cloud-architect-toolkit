@@ -33,6 +33,10 @@ DCAT has two editions with different trust boundaries. The default local CLI edi
 
 The local connector never runs in the Worker. Operational controls such as audit logging and a formal retention policy are not part of this scaffold; add them before using the hosted edition for regulated data. See [HOSTED_ONBOARDING.md](docs/HOSTED_ONBOARDING.md) for deployment and user flow.
 
+## Browser metadata cache
+
+Loaded org lists and inventory snapshots are stored in IndexedDB for the current browser origin and expire after 7 days. The persisted cache is an explicit allowlist: session/CSRF tokens, pairing codes and commands, health checks, transform details, and disabled-query placeholders are never written. The cache contains org metadata, so treat shared browsers accordingly; clearing site data removes it.
+
 ## Reporting a vulnerability
 
 Please report security issues privately through the repository's security advisory feature rather than opening a public issue. Include reproduction steps and the affected version. Do not include real org credentials or customer data in a report.

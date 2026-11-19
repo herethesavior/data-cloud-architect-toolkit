@@ -70,12 +70,14 @@ describe('inventory helpers', () => {
   it('describes inventory freshness using a supplied clock', () => {
     const now = Date.parse('2026-11-18T12:00:00.000Z');
     const recent = '2026-11-18T11:59:30.000Z';
-    const stale = '2026-11-18T11:00:00.000Z';
+    const freshPersisted = '2026-11-18T11:46:00.000Z';
+    const stale = '2026-11-18T11:44:00.000Z';
 
     expect(formatUpdatedAt(recent, now)).toBe('just now');
-    expect(formatUpdatedAt(stale, now)).toBe('1 hr ago');
+    expect(formatUpdatedAt(stale, now)).toBe('16 min ago');
     expect(formatUpdatedAt('not a date', now)).toBe('at an unknown time');
     expect(isInventoryStale(recent, now)).toBe(false);
+    expect(isInventoryStale(freshPersisted, now)).toBe(false);
     expect(isInventoryStale(stale, now)).toBe(true);
     expect(isInventoryStale('not a date', now)).toBe(false);
   });

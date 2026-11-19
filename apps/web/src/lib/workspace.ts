@@ -15,6 +15,16 @@ export interface WorkspaceContext {
 }
 
 const CONTEXT_SCOPED_QUERIES = ['inventory', 'transforms', 'erd'] as const;
+const CONTEXT_ID_PATTERN = /^(?:demo:[^:]+|live:[^:]+:[^:]+)$/;
+
+/** The org list is scoped by mode so persisted results cannot cross a Demo/Live boundary. */
+export function orgsQueryKey(mode: WorkspaceMode): readonly ['orgs', WorkspaceMode] {
+  return ['orgs', mode];
+}
+
+export function isWorkspaceContextId(value: unknown): value is string {
+  return typeof value === 'string' && CONTEXT_ID_PATTERN.test(value);
+}
 
 export function createWorkspaceContext(
   mode: WorkspaceMode,

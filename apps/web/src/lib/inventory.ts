@@ -31,7 +31,7 @@ const statusWeights: Record<string, number> = {
   error: 0,
 };
 
-const STALE_AFTER_MS = 60_000;
+const STALE_AFTER_MS = 15 * 60_000;
 const RESOURCE_FAMILY_NAMES: ReadonlySet<string> = new Set<string>(RESOURCE_FAMILIES);
 
 function isResourceFamily(family: string): boolean {
@@ -56,7 +56,7 @@ export function formatUpdatedAt(value: string, now = Date.now()): string {
   return `${Math.round(elapsed / 86_400_000)} d ago`;
 }
 
-/** Live inventory is cached for 60s; older snapshots should say so. */
+/** Persisted live snapshots are read-only until refresh; older results say so. */
 export function isInventoryStale(value: string, now = Date.now()): boolean {
   const time = Date.parse(value);
   return Number.isFinite(time) && now - time > STALE_AFTER_MS;

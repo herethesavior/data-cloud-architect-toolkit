@@ -87,7 +87,7 @@ const steps: { title: string; body: string }[] = [
   },
   {
     title: 'Refresh or export when you choose',
-    body: 'Inventories are cached briefly. The refresh control bypasses that cache with a token-protected request and needs a selected org. Exports are generated locally only after you choose a format.',
+    body: 'Loaded orgs and inventories are saved in this browser and restored after a reload, so menu navigation does not retrieve them again. The Updated chip shows their age; use Refresh for a token-protected retrieval. Exports stay local.',
   },
 ];
 
