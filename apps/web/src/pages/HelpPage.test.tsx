@@ -85,17 +85,23 @@ describe('HelpPage', () => {
     expect(await screen.findByRole('tab', { name: 'Connect & refresh' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('keeps authorship and safe external links', async () => {
+  it('keeps authorship and contact links without repeating the product story', async () => {
     const user = userEvent.setup();
-    render(<HelpPage onNavigate={vi.fn()} />);
+    const onNavigate = vi.fn();
+    render(<HelpPage onNavigate={onNavigate} />);
 
     await user.click(screen.getByRole('tab', { name: 'About & contact' }));
     expect(await screen.findByText('Ryan Joshua Dela Cruz')).toBeInTheDocument();
     expect(screen.getByText('Technical Architect at Salesforce')).toBeInTheDocument();
-    expect(screen.getByText(/See the architecture\. Understand the connections\. Make better decisions\./)).toBeInTheDocument();
-    expect(screen.getByText(/local-first, read-only workbench designed to make Salesforce Data Cloud/)).toBeInTheDocument();
-    expect(screen.getByText(/distinguishes confirmed relationships from inferred ones/)).toBeInTheDocument();
     expect(screen.getByText(/Created in a personal capacity/)).toBeInTheDocument();
+    expect(screen.getByText(/Looking for the product story/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Read the product story' }));
+    expect(onNavigate).toHaveBeenCalledWith('about');
+
+    expect(screen.queryByText(/See the architecture\. Understand the connections\. Make better decisions\./)).not.toBeInTheDocument();
+    expect(screen.queryByText(/local-first, read-only workbench designed to make Salesforce Data Cloud/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/distinguishes confirmed relationships from inferred ones/)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open GitHub Issues \(opens in a new tab\)/ })).toHaveAttribute(
       'href',
       'https://github.com/herethesavior/data-cloud-architect-toolkit/issues',

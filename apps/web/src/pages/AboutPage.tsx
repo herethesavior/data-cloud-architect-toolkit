@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -549,51 +549,98 @@ function ChapterView({ chapter, mode }: { chapter: Chapter; mode: 'story' | 'pre
 export function AboutPage({ onNavigate }: AboutPageProps) {
   const deckRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
+  const restoreFrame = useRef<number | null>(null);
+  const wasFullscreen = useRef(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [slideIndex, setSlideIndex] = useState(0);
   const [notice, setNotice] = useState('');
 
+  const goToSlide = useCallback((index: number) => {
+    setSlideIndex(Math.max(0, Math.min(chapters.length - 1, index)));
+  }, []);
+
+  const stepSlide = useCallback((delta: number) => {
+    setSlideIndex((current) => Math.max(0, Math.min(chapters.length - 1, current + delta)));
+  }, []);
+
   useEffect(() => {
-    const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === deckRef.current);
+    const syncFullscreen = () => {
+      const active = document.fullscreenElement === deckRef.current;
+      setIsFullscreen(active);
+      if (wasFullscreen.current && !active) {
+        document.getElementById('about-present-button')?.focus({ preventScroll: true });
+      }
+      wasFullscreen.current = active;
+    };
     document.addEventListener('fullscreenchange', syncFullscreen);
     return () => document.removeEventListener('fullscreenchange', syncFullscreen);
   }, []);
 
   useEffect(() => {
+    if (!isFullscreen) return;
+    deckRef.current?.focus({ preventScroll: true });
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, [isFullscreen]);
+
+  useEffect(() => {
     const restoreChapter = () => {
+      if (document.fullscreenElement) return;
       const prefix = '#story-scroll-';
       if (!window.location.hash.startsWith(prefix)) return;
       const id = window.location.hash.slice(prefix.length);
       if (!chapters.some((chapter) => chapter.id === id)) return;
-      requestAnimationFrame(() => {
-        document.getElementById(`story-scroll-${id}`)?.scrollIntoView({ block: 'start' });
+      if (restoreFrame.current !== null) cancelAnimationFrame(restoreFrame.current);
+      restoreFrame.current = requestAnimationFrame(() => {
+        restoreFrame.current = null;
+        if (document.fullscreenElement) return;
+        document.getElementById(`story-scroll-${id}`)?.scrollIntoView({ behavior: 'instant', block: 'start' });
       });
     };
     restoreChapter();
     window.addEventListener('popstate', restoreChapter);
-    return () => window.removeEventListener('popstate', restoreChapter);
+    return () => {
+      window.removeEventListener('popstate', restoreChapter);
+      if (restoreFrame.current !== null) cancelAnimationFrame(restoreFrame.current);
+    };
   }, []);
 
   useEffect(() => {
     if (!isFullscreen) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement) {
+        if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+        if ((target.tagName === 'BUTTON' || target.tagName === 'A') && event.key === ' ') return;
+      }
       if (['ArrowRight', 'PageDown', ' '].includes(event.key)) {
         event.preventDefault();
-        setSlideIndex((current) => Math.min(chapters.length - 1, current + 1));
+        stepSlide(1);
       } else if (['ArrowLeft', 'PageUp'].includes(event.key)) {
         event.preventDefault();
-        setSlideIndex((current) => Math.max(0, current - 1));
+        stepSlide(-1);
       } else if (event.key === 'Home') {
         event.preventDefault();
-        setSlideIndex(0);
+        goToSlide(0);
       } else if (event.key === 'End') {
         event.preventDefault();
-        setSlideIndex(chapters.length - 1);
+        goToSlide(chapters.length - 1);
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [isFullscreen]);
+  }, [goToSlide, isFullscreen, stepSlide]);
 
   const startPresenting = async () => {
     setNotice('');
@@ -618,7 +665,7 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
     } catch {
       /* The browser may already have exited full screen. */
     }
-    document.getElementById('about-present-button')?.focus();
+    document.getElementById('about-present-button')?.focus({ preventScroll: true });
   };
 
   const activeChapter = chapters[slideIndex];
@@ -690,13 +737,17 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
       <div
         ref={deckRef}
         className="deck-shell"
+        role="region"
+        aria-label="Product story presentation"
+        tabIndex={-1}
         aria-hidden={!isFullscreen}
         inert={!isFullscreen}
         onTouchStart={(event) => { touchStartX.current = event.changedTouches[0].screenX; }}
+        onTouchCancel={() => { touchStartX.current = null; }}
         onTouchEnd={(event) => {
           if (touchStartX.current === null) return;
           const delta = event.changedTouches[0].screenX - touchStartX.current;
-          if (Math.abs(delta) > 55) setSlideIndex((current) => Math.max(0, Math.min(chapters.length - 1, current + (delta < 0 ? 1 : -1))));
+          if (Math.abs(delta) > 55) stepSlide(delta < 0 ? 1 : -1);
           touchStartX.current = null;
         }}
       >
@@ -718,21 +769,21 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
         </div>
 
         <div className="deck-stage">
-          {chapters.map((chapter, index) => (
-            <div key={chapter.id} className={`deck-slide ${index === slideIndex ? 'is-active' : ''}`} aria-hidden={index !== slideIndex}>
-              <ChapterView chapter={chapter} mode="present" />
+          {activeChapter ? (
+            <div className="deck-slide is-active" key={activeChapter.id}>
+              <ChapterView chapter={activeChapter} mode="present" />
             </div>
-          ))}
+          ) : null}
         </div>
 
         <div className="deck-controls">
           <span className="deck-hint"><span className="key">←</span><span className="key">→</span> to navigate · Esc to exit</span>
           <div className="deck-current-title">{activeChapter.shortTitle}</div>
           <div className="deck-nav">
-            <button type="button" className="deck-icon-btn" onClick={() => setSlideIndex((current) => Math.max(0, current - 1))} disabled={slideIndex === 0} aria-label="Previous slide">
+            <button type="button" className="deck-icon-btn" onClick={() => stepSlide(-1)} disabled={slideIndex === 0} aria-label="Previous slide">
               <Icon name="arrowRight" size={17} className="rotate-180" />
             </button>
-            <button type="button" className="deck-icon-btn" onClick={() => setSlideIndex((current) => Math.min(chapters.length - 1, current + 1))} disabled={slideIndex === chapters.length - 1} aria-label="Next slide">
+            <button type="button" className="deck-icon-btn" onClick={() => stepSlide(1)} disabled={slideIndex === chapters.length - 1} aria-label="Next slide">
               <Icon name="arrowRight" size={17} />
             </button>
           </div>

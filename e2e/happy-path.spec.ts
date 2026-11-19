@@ -1121,6 +1121,8 @@ test('Help page answers common questions and maps them to explorers', async ({ p
   await expect(page.getByText('Ryan Joshua Dela Cruz')).toBeVisible();
   await expect(page.getByText('Technical Architect at Salesforce')).toBeVisible();
   await expect(page.getByText(/Created in a personal capacity/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Read the product story' })).toBeVisible();
+  await expect(page.getByText(/local-first, read-only workbench designed/)).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Open GitHub Issues \(opens in a new tab\)/ })).toHaveAttribute(
     'href',
     'https://github.com/herethesavior/data-cloud-architect-toolkit/issues',
@@ -1344,7 +1346,7 @@ test('every screen fits a phone viewport', async ({ page }) => {
   }
 });
 
-test('about page shows the story and a navigable full-screen deck', async ({ page }) => {
+test('about page shows the story and a stable, navigable full-screen deck', async ({ page }) => {
   await openDemo(page);
   await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
 
@@ -1362,16 +1364,34 @@ test('about page shows the story and a navigable full-screen deck', async ({ pag
   await page.getByRole('button', { name: 'Present' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   await expect(deck.locator('.deck-counter')).toContainText('01');
+  const deckScroll = await page.evaluate(() => Math.round(window.scrollY));
+
+  const slideTop = await deck.locator('.deck-slide').evaluate((element) => Math.round(element.getBoundingClientRect().top));
+  await page.evaluate(() => {
+    for (let index = 0; index < 12; index += 1) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', repeat: index > 0, bubbles: true }));
+    }
+  });
+  await expect(deck.locator('.deck-counter')).toContainText('02');
+  expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(deckScroll);
+  expect(await deck.locator('.deck-slide').evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBe(slideTop);
+  await expect.poll(() => new URL(page.url()).hash).toBe('#story-scroll-flow');
+
+  await page.mouse.move(240, 320);
+  await page.mouse.wheel(0, 600);
+  expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(deckScroll);
 
   await deck.getByRole('button', { name: 'Next slide' }).click();
-  await expect(deck.locator('.deck-counter')).toContainText('02');
-  await page.keyboard.press('ArrowRight');
   await expect(deck.locator('.deck-counter')).toContainText('03');
+  await page.keyboard.press('ArrowRight');
+  await expect(deck.locator('.deck-counter')).toContainText('04');
   await page.keyboard.press('End');
   await expect(deck.locator('.deck-counter')).toContainText('13');
 
   await deck.getByRole('button', { name: 'Exit presentation' }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+  await expect(page.getByRole('button', { name: 'Present' })).toBeFocused();
+  expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(deckScroll);
 });
 
 test('about chapter deep links restore the target section on a direct load', async ({ page }) => {
