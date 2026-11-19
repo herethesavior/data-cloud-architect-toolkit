@@ -884,20 +884,35 @@ test('export menu consolidates local export formats', async ({ page }) => {
   await expect(trigger).toBeFocused();
 });
 
-test('Help page explains DCAT, Data Cloud terms, privacy, and authorship', async ({ page }) => {
+test('Help page answers common questions and maps them to explorers', async ({ page }) => {
   await openDemo(page);
   await page.locator('header').getByRole('button', { name: 'Help' }).click();
 
   await expect(page.locator('h1')).toHaveText('Help');
   await expect(page.getByRole('heading', { name: 'Help & documentation' })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'What is DCAT?' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByText(/Read metadata with allowlisted, read-only Salesforce CLI commands/)).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Start here' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText('What do I need to get started?')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open Data Lineage Explorer' })).toBeVisible();
 
-  await page.getByRole('tab', { name: 'Data Cloud glossary' }).click();
+  await page.getByRole('tab', { name: 'Connect & refresh' }).click();
+  await expect(page.getByText('Forbidden')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Explore & trace' }).click();
+  await expect(page.getByText('Named in metadata')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open' }).first()).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Glossary' }).click();
   await expect(page.getByText('Data Lake Object (DLO)')).toBeVisible();
   await expect(page.getByText('Discovery Health')).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Filter glossary terms' }).fill('unified model');
+  await expect(page.getByText(/Showing 1 of 12 terms/)).toBeVisible();
+  await expect(page).toHaveURL(/topic=glossary/);
 
-  await page.getByRole('tab', { name: 'Privacy' }).click();
+  await page.reload();
+  await expect(page.getByRole('tab', { name: 'Glossary' })).toHaveAttribute('aria-selected', 'true');
+
+  await page.getByRole('tab', { name: 'Status & privacy' }).click();
+  await expect(page.getByText(/Read metadata with allowlisted, read-only Salesforce CLI commands/)).toBeVisible();
   await expect(page.getByText('No hosted OAuth')).toBeVisible();
   await expect(page.getByText(/\/api\/auth\/\* routes are intentionally removed and return 404/)).toBeVisible();
 
@@ -916,6 +931,37 @@ test('Help page explains DCAT, Data Cloud terms, privacy, and authorship', async
 
   await page.locator('#desktop-sidebar').getByRole('link', { name: 'Help' }).click();
   await expect(page.locator('h1')).toHaveText('Help');
+});
+
+test('help tabs wrap on a phone and stay reachable by keyboard', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Open navigation' }).click();
+  await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('link', { name: 'Help' }).click();
+  await expect(page.locator('h1')).toHaveText('Help');
+
+  const tablist = page.getByRole('tablist', { name: 'Help topics' });
+  const metrics = await tablist.evaluate((list) => ({ content: list.scrollWidth, viewport: list.clientWidth }));
+  expect(metrics.content, 'tab strip should not scroll horizontally').toBeLessThanOrEqual(metrics.viewport);
+
+  for (const name of [
+    'Start here',
+    'Connect & refresh',
+    'Explore & trace',
+    'Status & privacy',
+    'Glossary',
+    'About & contact',
+  ]) {
+    const box = await page.getByRole('tab', { name }).boundingBox();
+    expect(box, `${name} tab bounds`).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(-1);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(391);
+  }
+
+  await page.getByRole('tab', { name: 'Start here' }).focus();
+  await page.keyboard.press('End');
+  await expect(page.getByRole('tab', { name: 'About & contact' })).toBeFocused();
+  await expect(page).toHaveURL(/topic=about/);
 });
 
 test('theme toggle switches to dark and persists across reloads', async ({ page }) => {
