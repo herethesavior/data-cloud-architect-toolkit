@@ -579,7 +579,7 @@ function ErdExplorerView({ context, inventory, freshness }: ErdViewProps) {
                 type="button"
                 onClick={() => focusEdge(edge.id)}
                 className={`rounded-lg border px-3 py-3 text-left transition-colors ${
-                  selectedEdgeId === edge.id ? 'border-brand bg-brand-soft' : 'border-line bg-surface-alt hover:border-line-strong'
+                  selectedEdgeId === edge.id ? 'border-brand bg-brand-soft' : 'border-line-strong bg-surface-alt hover:border-brand'
                 }`}
               >
                 <div className="flex flex-wrap items-center gap-2">

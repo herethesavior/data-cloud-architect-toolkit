@@ -142,7 +142,7 @@ export function MappingExplorer({ context }: { context: WorkspaceContext | null 
                       </div>
 
                       <details className="group mt-4">
-                        <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg border border-line px-3 py-2 text-sm font-medium text-ink hover:bg-surface-alt [&::-webkit-details-marker]:hidden">
+                        <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg border border-line-strong px-3 py-2 text-sm font-medium text-ink hover:bg-surface-alt [&::-webkit-details-marker]:hidden">
                           <span>{mapping.fieldMappings.length} field mappings</span>
                           <Icon name="chevronDown" size={16} className="text-ink-soft transition-transform group-open:rotate-180" />
                         </summary>

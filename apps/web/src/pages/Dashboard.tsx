@@ -317,7 +317,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                     <Icon name={data360Unavailable ? 'info' : 'check'} size={17} />
                     <span>
                       {data360Unavailable
-                        ? 'Data 360 is not enabled for this user or org. The unavailable families are listed in Discovery health; no retry is needed.'
+                        ? 'No family reported a warning. Unavailable families are listed in Discovery health; no retry is needed.'
                         : 'Nothing needs attention. All requested metadata families were retrieved.'}
                     </span>
                   </div>
@@ -347,7 +347,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                     key={link.page}
                     type="button"
                     onClick={() => onNavigate(link.page)}
-                    className="flex items-center gap-3 rounded-lg border border-line px-4 py-3 text-left transition-colors hover:border-line-strong hover:bg-surface-alt"
+                    className="flex items-center gap-3 rounded-lg border border-line-strong px-4 py-3 text-left transition-colors hover:border-brand hover:bg-surface-alt"
                   >
                     <Icon name={link.icon} size={18} className="text-brand" />
                     <span className="min-w-0 flex-1">

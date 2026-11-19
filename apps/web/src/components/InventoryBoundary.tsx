@@ -66,7 +66,7 @@ function InventoryProgressBanner({
             type="button"
             onClick={onResume}
             disabled={isResuming}
-            className="min-h-8 rounded-lg border border-line bg-surface px-3 text-xs font-semibold text-brand transition-colors hover:bg-surface-alt disabled:opacity-50"
+            className="min-h-8 rounded-lg border border-line-strong bg-surface px-3 text-xs font-semibold text-brand transition-colors hover:bg-surface-alt disabled:opacity-50"
           >
             {isResuming ? 'Resuming…' : 'Resume loading'}
           </button>
@@ -112,7 +112,7 @@ function InventoryRefreshSkeleton({ onCancel }: { onCancel?: () => void }) {
             onClick={onCancel}
             aria-label="Cancel refresh"
             title="Cancel this refresh"
-            className="min-h-9 rounded-lg border border-line px-3 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink"
+            className="min-h-9 rounded-lg border border-line-strong px-3 text-sm font-medium text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink"
           >
             Cancel refresh
           </button>
