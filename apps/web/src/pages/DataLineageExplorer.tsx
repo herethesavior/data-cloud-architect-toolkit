@@ -34,6 +34,7 @@ import type {
   LineageTraceMode,
 } from '@dcat/exporters';
 import type { InventorySnapshot } from '@dcat/core';
+import { navigateFromLink } from '../components/AppShell.tsx';
 import { LineageNodeComponent } from '../components/lineage/LineageNode.tsx';
 import { ExportMenu } from '../components/ExportMenu.tsx';
 import type { ExportMenuItem } from '../components/ExportMenu.tsx';
@@ -122,9 +123,10 @@ interface LineageViewProps {
   context: WorkspaceContext | null;
   inventory: InventorySnapshot;
   freshness: ReactNode;
+  onNavigate: (page: Page) => void;
 }
 
-function DataLineageExplorerView({ context, inventory, freshness }: LineageViewProps) {
+function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: LineageViewProps) {
   const contextId = context?.contextId ?? 'none';
   const [initial] = useState(() => loadLineageViewState(contextId));
   const [kinds, setKinds] = useState<LineageNodeKind[]>(initial.kinds);
@@ -742,7 +744,11 @@ function DataLineageExplorerView({ context, inventory, freshness }: LineageViewP
                   </p>
                 ) : null}
                 {selectedPage ? (
-                  <a href={pageHref(selectedPage)} className="text-xs font-semibold text-brand underline underline-offset-2">
+                  <a
+                    href={pageHref(selectedPage)}
+                    onClick={(event) => navigateFromLink(event, selectedPage, onNavigate)}
+                    className="text-xs font-semibold text-brand underline underline-offset-2"
+                  >
                     Open in {PAGE_TITLES[selectedPage]} →
                   </a>
                 ) : null}
@@ -840,13 +846,24 @@ function DataLineageExplorerView({ context, inventory, freshness }: LineageViewP
   );
 }
 
-export function DataLineageExplorer({ context }: { context: WorkspaceContext | null }) {
+export function DataLineageExplorer({
+  context,
+  onNavigate,
+}: {
+  context: WorkspaceContext | null;
+  onNavigate: (page: Page) => void;
+}) {
   const query = useInventory(context);
   return (
     <InventoryBoundary query={query} context={context}>
       {(inventory, freshness) => (
         <ReactFlowProvider>
-          <DataLineageExplorerView context={context} inventory={inventory} freshness={freshness} />
+          <DataLineageExplorerView
+            context={context}
+            inventory={inventory}
+            freshness={freshness}
+            onNavigate={onNavigate}
+          />
         </ReactFlowProvider>
       )}
     </InventoryBoundary>

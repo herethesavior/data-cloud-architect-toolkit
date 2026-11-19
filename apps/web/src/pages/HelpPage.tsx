@@ -4,6 +4,7 @@ import type { BadgeTone } from '../components/ui/index.ts';
 import { Icon } from '../components/Icon.tsx';
 import type { IconName } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
+import { pagePath } from '../navigation.ts';
 import type { Page } from '../navigation.ts';
 
 interface HelpPageProps {
@@ -375,7 +376,9 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
     const url = new URL(window.location.href);
     if (next === DEFAULT_TOPIC) url.searchParams.delete('topic');
     else url.searchParams.set('topic', next);
-    window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    url.pathname = pagePath('help');
+    url.hash = '';
+    window.history.pushState(null, '', `${url.pathname}${url.search}`);
   };
 
   const query = termFilter.trim().toLowerCase();
@@ -701,14 +704,24 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
                 <p className="mt-0.5 text-sm font-medium text-brand">Technical Architect at Salesforce</p>
               </div>
             </div>
-            <p className="mt-5 max-w-3xl text-sm leading-relaxed text-ink-soft">
-              DCAT grew out of a simple need: make Data 360 model discovery legible without turning it into a
-              credential-handling exercise. It replaces scattered CLI output and screenshots with a grounded,
-              status-aware view of Data Spaces, DLOs, DMOs, mappings, streams, and transforms.
+            <p className="mt-5 max-w-3xl text-sm font-medium text-brand">
+              See the architecture. Understand the connections. Make better decisions.
             </p>
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-soft">
-              The design goal is to show what metadata actually says — including gaps, unsupported endpoints, and
-              provenance — while keeping authentication with Salesforce CLI and exports under the user’s control.
+              <strong className="font-semibold text-ink">Data Cloud Architect Toolkit (DCAT)</strong> is a
+              local-first, read-only workbench designed to make Salesforce Data Cloud (Data 360) architectures
+              easier to explore, understand, and validate.
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-soft">
+              It brings together Data Spaces, data streams, DLOs, DMOs, mappings, and transformations into a
+              connected architectural view. With interactive data models, lineage, and metadata explorers,
+              architects can trace relationships, understand dependencies, identify gaps, and turn complex
+              implementations into clear, actionable insights.
+            </p>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-soft">
+              Built with security and transparency in mind, DCAT relies on Salesforce CLI for authentication,
+              distinguishes confirmed relationships from inferred ones, and keeps metadata discovery and exports
+              under the user&apos;s control.
             </p>
             <p className="mt-4 rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
               Created in a personal capacity. DCAT is not an official Salesforce product.

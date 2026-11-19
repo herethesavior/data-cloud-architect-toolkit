@@ -29,7 +29,8 @@ export type IconName =
   | 'sun'
   | 'moon'
   | 'monitor'
-  | 'panelLeft';
+  | 'panelLeft'
+  | 'presentation';
 
 const paths: Record<IconName, ReactNode> = {
   dashboard: (
@@ -191,6 +192,13 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path d="M9 4v16" />
+    </>
+  ),
+  presentation: (
+    <>
+      <rect x="3" y="4" width="18" height="13" rx="2" />
+      <path d="M12 17v4M8 21h8" />
+      <path d="m10 8 5 2.5-5 2.5V8Z" />
     </>
   ),
 };

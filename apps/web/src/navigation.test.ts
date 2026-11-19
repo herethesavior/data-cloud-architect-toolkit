@@ -1,40 +1,59 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { pageFromHash, pageHref, pageUrl, writePageHash } from './navigation.ts';
+import {
+  isLegacyPageHash,
+  pageFromLocation,
+  pageFromPath,
+  pageHref,
+  pagePath,
+  pageUrl,
+  writePagePath,
+} from './navigation.ts';
 
-describe('hash navigation', () => {
-  it('maps page fragments and treats unknown hashes as Dashboard', () => {
-    expect(pageFromHash('')).toBe('dashboard');
-    expect(pageFromHash('#dlos')).toBe('dlos');
-    expect(pageFromHash('#/data-streams')).toBe('data-streams');
-    expect(pageFromHash('#does-not-exist')).toBe('dashboard');
-    expect(pageFromHash('#main-content')).toBe('dashboard');
+describe('path navigation', () => {
+  it('maps real paths and treats unknown paths as Dashboard', () => {
+    expect(pageFromPath('/')).toBe('dashboard');
+    expect(pageFromPath('/dlos')).toBe('dlos');
+    expect(pageFromPath('/data-streams/')).toBe('data-streams');
+    expect(pageFromPath('/DOES-NOT-EXIST')).toBe('dashboard');
   });
 
-  it('keeps Dashboard links clean and every other menu item addressable', () => {
-    expect(pageHref('dashboard')).toBe('./');
-    expect(pageHref('orgs')).toBe('#orgs');
-    expect(pageHref('data-transforms')).toBe('#data-transforms');
+  it('gives every menu item a crawlable href', () => {
+    expect(pagePath('dashboard')).toBe('/');
+    expect(pageHref('dashboard')).toBe('/');
+    expect(pageHref('orgs')).toBe('/orgs');
+    expect(pageHref('data-transforms')).toBe('/data-transforms');
+    expect(pageHref('about')).toBe('/about');
   });
 
-  it('preserves path and query while rewriting the page fragment', () => {
-    const url = pageUrl('dlos', 'https://sfdcat.pages.dev/workbench/?view=compact#old');
-
-    expect(url).toBe('/workbench/?view=compact#dlos');
-    expect(pageUrl('dashboard', 'https://sfdcat.pages.dev/workbench/?view=compact#dlos')).toBe(
-      '/workbench/?view=compact',
-    );
+  it('accepts legacy page fragments only when there is no matching path', () => {
+    expect(pageFromLocation({ pathname: '/', hash: '' })).toBe('dashboard');
+    expect(pageFromLocation({ pathname: '/', hash: '#dlos' })).toBe('dlos');
+    expect(pageFromLocation({ pathname: '/', hash: '#/data-streams' })).toBe('data-streams');
+    expect(pageFromLocation({ pathname: '/', hash: '#about' })).toBe('about');
+    expect(pageFromLocation({ pathname: '/', hash: '#main-content' })).toBe('dashboard');
+    expect(pageFromLocation({ pathname: '/help', hash: '#dlos' })).toBe('help');
+    expect(isLegacyPageHash('#dlos')).toBe(true);
+    expect(isLegacyPageHash('#main-content')).toBe(false);
   });
 
-  it('pushes and replaces the URL fragment without a page reload', () => {
-    window.history.replaceState(null, '', '/workbench/?view=compact#dlos');
+  it('rewrites the path while preserving query state and clearing fragments', () => {
+    const url = pageUrl('dlos', 'https://sfdcat.pages.dev/help?topic=glossary#old');
 
-    writePageHash('dashboard');
+    expect(url).toBe('/dlos?topic=glossary');
+    expect(pageUrl('dashboard', 'https://sfdcat.pages.dev/dlos?view=compact#dlos')).toBe('/?view=compact');
+  });
+
+  it('pushes and replaces the URL path without a page reload', () => {
+    window.history.replaceState(null, '', '/?view=compact#dlos');
+
+    writePagePath('dashboard');
+    expect(window.location.pathname).toBe('/');
     expect(window.location.hash).toBe('');
     expect(window.location.search).toBe('?view=compact');
 
-    writePageHash('settings', 'replace');
-    expect(window.location.hash).toBe('#settings');
+    writePagePath('settings', 'replace');
+    expect(window.location.pathname).toBe('/settings');
     expect(window.location.search).toBe('?view=compact');
   });
 });

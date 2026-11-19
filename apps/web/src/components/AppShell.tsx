@@ -35,6 +35,7 @@ const pageIcons: Record<Page, IconName> = {
   dictionary: 'book',
   settings: 'settings',
   help: 'info',
+  about: 'presentation',
 };
 
 interface AppShellProps {
@@ -67,7 +68,7 @@ interface NavigationListProps {
 }
 
 /** Preserve browser behavior for modified clicks while routing plain clicks. */
-function navigateFromLink(
+export function navigateFromLink(
   event: MouseEvent<HTMLAnchorElement>,
   page: Page,
   onNavigate: (page: Page) => void,
