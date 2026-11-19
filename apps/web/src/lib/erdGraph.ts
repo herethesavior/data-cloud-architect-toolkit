@@ -34,7 +34,10 @@ export interface ErdObjectNodeData extends Record<string, unknown> {
 export interface ErdRelationshipEdgeData extends Record<string, unknown> {
   certainty: 'confirmed' | 'inferred' | 'unknown';
   cardinality: string;
+  /** Source status when Salesforce supplied one; DCAT never guesses it. */
+  status: string | null;
   joinField: string;
+  targetField: string | null;
   sourceLabel: string;
   targetLabel: string;
 }
@@ -209,15 +212,16 @@ export function buildErdGraph(
     const source = byApiName.get(relationship.source)!;
     const target = byApiName.get(relationship.target)!;
     const joinField = relationship.label ?? relationship.certainty;
-    const sourceField = relationship.label ? findJoinField(source, relationship.label) : null;
-    const targetField = relationship.label ? findJoinField(target, relationship.label) : null;
+    const targetJoinField = relationship.targetField ?? null;
+    const sourceFieldMatch = relationship.label ? findJoinField(source, relationship.label) : null;
+    const targetFieldMatch = targetJoinField ? findJoinField(target, targetJoinField) : null;
     const tone = erdTone(relationship.certainty);
     return {
       id: relationship.id,
       source: relationship.source,
       target: relationship.target,
-      sourceHandle: erdSourceHandleId(sourceField ?? undefined),
-      targetHandle: erdTargetHandleId(targetField ?? undefined),
+      sourceHandle: erdSourceHandleId(sourceFieldMatch ?? undefined),
+      targetHandle: erdTargetHandleId(targetFieldMatch ?? undefined),
       type: 'smoothstep',
       sourcePosition: erdHandlePosition(options.direction, 'source'),
       targetPosition: erdHandlePosition(options.direction, 'target'),
@@ -232,11 +236,13 @@ export function buildErdGraph(
         strokeDasharray: relationship.certainty === 'confirmed' ? undefined : '7 5',
       },
       markerEnd: { type: MarkerType.ArrowClosed, color: tone, width: 16, height: 16 },
-      ariaLabel: `${source.label ?? source.apiName} to ${target.label ?? target.apiName} via ${joinField}, ${relationship.certainty}`,
+      ariaLabel: `${source.label ?? source.apiName} to ${target.label ?? target.apiName} via ${joinField}${targetJoinField ? ` to ${targetJoinField}` : ''}, ${relationship.certainty}`,
       data: {
         certainty: relationship.certainty,
         cardinality: relationship.cardinality ?? '',
+        status: relationship.status ?? null,
         joinField,
+        targetField: targetJoinField,
         sourceLabel: source.label ?? source.apiName,
         targetLabel: target.label ?? target.apiName,
       },

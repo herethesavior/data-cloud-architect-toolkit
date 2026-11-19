@@ -10,10 +10,21 @@ import type {
 import { RESOURCE_FAMILIES, inventorySnapshotSchema } from '@dcat/core';
 import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure } from './capabilities.ts';
-import { buildData360Path, buildMappingPath, buildVersionsPath, DATA360_ENDPOINT_REGISTRY } from './endpoints.ts';
+import {
+  buildData360Path,
+  buildDmoRelationshipsPath,
+  buildFamilyPath,
+  buildMappingPath,
+  buildVersionsPath,
+  DATA360_ENDPOINT_REGISTRY,
+  DMO_PAGE_SIZE,
+  isValidDataspace,
+  isValidDmoDeveloperName,
+} from './endpoints.ts';
 import {
   deriveInferredRelationships,
   extractCollection,
+  normalizeDmoRelationships,
   normalizeDataSpaces,
   normalizeDataStreams,
   normalizeDataTransforms,
@@ -21,15 +32,17 @@ import {
   normalizeDmos,
   normalizeMappings,
   parseJsonResponse,
+  mappingCandidateDmos,
 } from './normalize.ts';
 import type { NormalizeContext, NormalizedCollection, NormalizedDmos } from './normalize.ts';
-import { buildNextPath, extractContinuation } from './pagination.ts';
+import { buildNextPath, extractContinuation, offsetContinuation } from './pagination.ts';
 import { selectLatestApiVersion } from './versions.ts';
 
 // A high safety ceiling rather than a result limit. Progressive discovery uses
 // checkpoints and stops on exhaustion; this only guards against a looping token.
 export const DEFAULT_MAX_PAGES = 1_000;
 export const MAX_MAPPING_DMO_QUERIES = 500;
+export const MAX_RELATIONSHIP_DMO_QUERIES = 500;
 
 /** Minimal surface the discovery layer needs; the CLI adapter satisfies it. */
 export interface RestClient {
@@ -66,6 +79,16 @@ export function extractContinuationToken(value: unknown): string | null {
   return continuation.cursor ?? continuation.nextPath;
 }
 
+/**
+ * A mapping lookup with a valid DMO name can return NOT_FOUND when that DMO has
+ * no object-source-target maps. That is an empty result, not a failed family.
+ */
+export function isMappingAbsence(error: unknown): boolean {
+  const message = safeErrorMessage(error);
+  return /\bNOT_FOUND\b/i.test(message)
+    && /object\s+source\s+target\s+map|no\s+mappings?\s+(?:found|for)|not\s+found\s+for\s+the\s+given\s+target\s+object/i.test(message);
+}
+
 export interface FetchedCollection {
   entries: unknown[];
   warnings: string[];
@@ -77,6 +100,8 @@ export async function fetchCollection(
   path: string,
   label: string,
   maxPages: number,
+  offsetPageSize?: number,
+  allowEmptyBody = false,
 ): Promise<FetchedCollection> {
   const entries: unknown[] = [];
   const warnings: string[] = [];
@@ -85,8 +110,11 @@ export async function fetchCollection(
   let pages = 0;
 
   while (pages < maxPages) {
-    const decoded = parseJsonResponse(await cli.restGet(alias, requestPath), label);
-    for (const entry of extractCollection(decoded, label)) {
+    const raw = await cli.restGet(alias, requestPath);
+    // Salesforce answers a DMO with no relationships as 204 No Content.
+    const decoded = allowEmptyBody && !raw.trim() ? [] : parseJsonResponse(raw, label);
+    const pageEntries = extractCollection(decoded, label);
+    for (const entry of pageEntries) {
       const key = JSON.stringify(entry);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -94,7 +122,9 @@ export async function fetchCollection(
     }
     pages += 1;
 
-    const continuation = extractContinuation(decoded);
+    const continuation = offsetPageSize === undefined
+      ? extractContinuation(decoded)
+      : offsetContinuation(decoded, requestPath, offsetPageSize, pageEntries.length);
     if (!continuation.hasMore) break;
     if (continuation.uncertain || (!continuation.cursor && !continuation.nextPath)) {
       warnings.push('The response reported more results but did not include a usable continuation cursor.');
@@ -162,12 +192,19 @@ async function retrieveFamily<T, N extends NormalizedCollection<T>>(
   normalizer: (raw: unknown, context: NormalizeContext) => N,
   maxPages: number,
 ): Promise<FamilyResult<N>> {
-  const endpoint = buildData360Path(family, apiVersion);
+  const endpoint = buildFamilyPath(family, apiVersion);
   const context: NormalizeContext = { ...base, apiVersion, endpoint };
   const started = Date.now();
 
   try {
-    const attempt = await withBoundedRetry(() => fetchCollection(cli, alias, endpoint, family, maxPages));
+    const attempt = await withBoundedRetry(() => fetchCollection(
+      cli,
+      alias,
+      endpoint,
+      family,
+      maxPages,
+      family === 'dmos' ? DMO_PAGE_SIZE : undefined,
+    ));
     const fetched = attempt.value;
     const normalized = normalizer(fetched.entries, context);
     const dataWarnings: RetrievalWarning[] = fetched.warnings.map((message) => ({
@@ -251,11 +288,14 @@ function skippedMappings(
   apiVersion: string,
   base: Omit<NormalizeContext, 'apiVersion' | 'endpoint'>,
   dmoCapability: ApiCapability,
+  reason: 'no-dmos' | 'no-eligible-dmos' = 'no-dmos',
 ): FamilyResult<NormalizedCollection<DataMapping>> {
   const dmosConfirmed = dmoCapability.status === 'available' || dmoCapability.status === 'partial';
-  const message = dmosConfirmed
-    ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
-    : 'Skipped: DMO lookup was unavailable; mapping lookup requires a DMO developer name.';
+  const message = reason === 'no-eligible-dmos'
+    ? 'Skipped: no enabled or custom DMOs were found; mapping lookup requires an eligible DMO developer name.'
+    : dmosConfirmed
+      ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
+      : 'Skipped: DMO lookup was unavailable; mapping lookup requires a DMO developer name.';
   // Preserve a Data 360 disablement across every family instead of hiding it
   // behind a generic skip when DMO discovery itself reported unsupported.
   const status: ApiCapability['status'] = !dmosConfirmed && dmoCapability.status === 'unsupported'
@@ -284,18 +324,27 @@ function skippedMappings(
  * Salesforce rejects an unfiltered mapping lookup. Query one allowlisted,
  * encoded dmoDeveloperName at a time and merge the grounded results.
  */
+interface MappingCandidate {
+  apiName: string;
+  dataspace: string | null;
+}
+
 async function retrieveMappingsByDmo(
   cli: RestClient,
   alias: string,
   apiVersion: string,
   base: Omit<NormalizeContext, 'apiVersion' | 'endpoint'>,
-  dmoApiNames: string[],
+  candidates: MappingCandidate[],
   maxPages: number,
 ): Promise<FamilyResult<NormalizedCollection<DataMapping>>> {
   const started = Date.now();
   const endpoint = buildData360Path('mappings', apiVersion);
   const context: NormalizeContext = { ...base, apiVersion, endpoint };
-  const uniqueApiNames = [...new Set(dmoApiNames.filter((name) => name.trim().length > 0))];
+  const uniqueApiNames = [
+    ...new Map(candidates
+      .filter((candidate) => candidate.apiName.trim().length > 0)
+      .map((candidate) => [candidate.apiName, candidate])).values(),
+  ];
   const queried = uniqueApiNames.slice(0, MAX_MAPPING_DMO_QUERIES);
   const items: DataMapping[] = [];
   const warnings: RetrievalWarning[] = [];
@@ -303,8 +352,9 @@ async function retrieveMappingsByDmo(
   let skipped = 0;
   let retriedQueries = 0;
 
-  for (const apiName of queried) {
-    const path = buildMappingPath(apiName, apiVersion);
+  for (const candidate of queried) {
+    const apiName = candidate.apiName;
+    const path = buildMappingPath(apiName, apiVersion, candidate.dataspace);
     try {
       const attempt = await withBoundedRetry(() => fetchCollection(cli, alias, path, 'mappings', maxPages));
       const normalized = normalizeMappings(attempt.value.entries, context);
@@ -318,6 +368,7 @@ async function retrieveMappingsByDmo(
         severity: 'warning' as const,
       })));
     } catch (error) {
+      if (isMappingAbsence(error)) continue;
       const message = safeErrorMessage(error);
       const classified = classifyRestFailure(extractHttpStatus(message), message);
       failures.push(classified);
@@ -392,6 +443,122 @@ async function retrieveMappingsByDmo(
     },
     warnings,
   };
+}
+
+interface RelationshipQueryResult {
+  edges: RelationshipEdge[];
+  warnings: RetrievalWarning[];
+}
+
+/**
+ * v68 has only a per-DMO relationship endpoint. Query the DMOs the source marks
+ * as usable; a row's own sourceObject/targetObject decide direction, so the same
+ * edge can be returned by either endpoint and must be deduplicated.
+ */
+async function retrieveRelationshipsByDmo(
+  cli: RestClient,
+  alias: string,
+  apiVersion: string,
+  base: Omit<NormalizeContext, 'apiVersion' | 'endpoint'>,
+  candidates: MappingCandidate[],
+  maxPages: number,
+): Promise<RelationshipQueryResult> {
+  const unique = [
+    ...new Map(candidates
+      .filter((candidate) => candidate.apiName.trim().length > 0)
+      .map((candidate) => [candidate.apiName, candidate])).values(),
+  ];
+  const queried = unique.slice(0, MAX_RELATIONSHIP_DMO_QUERIES);
+  const edges: RelationshipEdge[] = [];
+  const warnings: RetrievalWarning[] = [];
+  let skipped = 0;
+  let skippedQueries = 0;
+  let attempts = 0;
+  let failures = 0;
+  let retried = 0;
+
+  for (const candidate of queried) {
+    if (!isValidDmoDeveloperName(candidate.apiName) || !isValidDataspace(candidate.dataspace)) {
+      skippedQueries += 1;
+      warnings.push({
+        family: 'dmos',
+        code: 'RELATIONSHIP_QUERY_SKIPPED',
+        message: `Relationship lookup skipped for DMO ${candidate.apiName}: its name or data space cannot be used safely in a REST path.`,
+        severity: 'warning',
+      });
+      continue;
+    }
+    const path = buildDmoRelationshipsPath(candidate.apiName, apiVersion, candidate.dataspace);
+    const context: NormalizeContext = { ...base, apiVersion, endpoint: path };
+    attempts += 1;
+    try {
+      const attempt = await withBoundedRetry(() =>
+        fetchCollection(cli, alias, path, 'relationships', maxPages, undefined, true));
+      const normalized = normalizeDmoRelationships(attempt.value.entries, context);
+      edges.push(...normalized.items);
+      skipped += normalized.skipped;
+      if (attempt.retried) retried += 1;
+      warnings.push(...attempt.value.warnings.map((message) => ({
+        family: 'dmos' as const,
+        code: message.startsWith('Pagination stopped') ? 'RELATIONSHIP_PAGINATION_LIMIT' : 'RELATIONSHIP_CONTINUATION_MISSING',
+        message: `Relationship lookup for DMO ${candidate.apiName}: ${message}`,
+        severity: 'warning' as const,
+      })));
+    } catch (error) {
+      failures += 1;
+      const message = safeErrorMessage(error);
+      const classified = classifyRestFailure(extractHttpStatus(message), message);
+      warnings.push({
+        family: 'dmos',
+        code: 'RELATIONSHIP_QUERY_FAILED',
+        message: `Relationship lookup for DMO ${candidate.apiName} failed. ${classified.message}`,
+        severity: classified.status === 'unsupported' ? 'warning' : 'error',
+      });
+    }
+  }
+
+  if (retried > 0) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIP_RETRY_SUCCEEDED',
+      message: `${retried} relationship lookup(s) succeeded after a transient retry.`,
+      severity: 'info',
+    });
+  }
+  if (skipped > 0) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIP_ITEMS_SKIPPED',
+      message: `${skipped} relationship row(s) were skipped because source or target object names were missing.`,
+      severity: 'warning',
+    });
+  }
+  if (skippedQueries > 0) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIP_QUERIES_SKIPPED',
+      message: `${skippedQueries} relationship lookup(s) were skipped because the DMO name or data space could not be used safely in a REST path.`,
+      severity: 'warning',
+    });
+  }
+  if (unique.length > queried.length) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIP_QUERY_LIMIT',
+      message: `Checked the first ${MAX_RELATIONSHIP_DMO_QUERIES} DMOs; remaining relationship lookups were not attempted.`,
+      severity: 'warning',
+    });
+  }
+  if (attempts > 0 && failures === attempts) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIPS_UNAVAILABLE',
+      message: 'No DMO relationship lookups succeeded; relationship edges may be incomplete.',
+      severity: 'warning',
+    });
+  }
+
+  return { edges, warnings };
 }
 
 function dedupeRelationships(edges: RelationshipEdge[]): RelationshipEdge[] {
@@ -498,13 +665,25 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     retrieveFamily(cli, alias, 'data-transforms', version, base, normalizeDataTransforms, maxPages),
   ]);
 
-  // Mapping metadata needs a DMO developer name. An org with zero DMOs is a
-  // healthy empty result, not an error and not a reason to call Salesforce with
-  // an unfiltered request that Salesforce itself rejects.
-  const dmoApiNames = dmos.result.items.map((dmo) => dmo.apiName);
-  const mappings = dmoApiNames.length === 0
+  // Mapping metadata needs a DMO developer name. Query only DMOs the source
+  // marks as usable; unused standard DMOs answer NOT_FOUND and would otherwise
+  // fill Needs attention with false failures.
+  const defaultDataspace = spaces.result.items.find((space) => space.isDefault)?.apiName
+    ?? spaces.result.items[0]?.apiName
+    ?? null;
+  const candidateDmos = mappingCandidateDmos(dmos.result.items);
+  const mappingCandidates: MappingCandidate[] = candidateDmos.map((dmo) => ({
+    apiName: dmo.apiName,
+    dataspace: dmo.dataSpace ?? defaultDataspace,
+  }));
+  const mappings = dmos.result.items.length === 0
     ? skippedMappings(version, base, dmos.capability)
-    : await retrieveMappingsByDmo(cli, alias, version, base, dmoApiNames, maxPages);
+    : mappingCandidates.length === 0
+      ? skippedMappings(version, base, dmos.capability, 'no-eligible-dmos')
+      : await retrieveMappingsByDmo(cli, alias, version, base, mappingCandidates, maxPages);
+  const relationshipQueries = mappingCandidates.length === 0
+    ? { edges: [], warnings: [] }
+    : await retrieveRelationshipsByDmo(cli, alias, version, base, mappingCandidates, maxPages);
 
   capabilities.push(
     spaces.capability,
@@ -519,6 +698,7 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     ...dlos.warnings,
     ...dmos.warnings,
     ...mappings.warnings,
+    ...relationshipQueries.warnings,
     ...streams.warnings,
     ...transforms.warnings,
   );
@@ -526,10 +706,11 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
   const dmoContext: NormalizeContext = {
     ...base,
     apiVersion: version,
-    endpoint: buildData360Path('dmos', version),
+    endpoint: buildFamilyPath('dmos', version),
   };
   const relationships = dedupeRelationships([
     ...dmos.result.relationships,
+    ...relationshipQueries.edges,
     ...deriveInferredRelationships(dmos.result.items, dmoContext),
   ]);
 

@@ -6,16 +6,19 @@ import {
   demoInventory,
   demoTransformBundles,
   dlosJson,
+  dmoRelationshipsJson,
   dmosJson,
   mappingsJson,
 } from '@dcat/test-fixtures';
 import {
   deriveInferredRelationships,
   extractCollection,
+  mappingCandidateDmos,
   normalizeDataSpaces,
   normalizeDataStreams,
   normalizeDlos,
   normalizeDmos,
+  normalizeDmoRelationships,
   normalizeMappings,
   normalizeDataTransforms,
   parseJsonResponse,
@@ -54,6 +57,32 @@ describe('Data 360 response normalization', () => {
     );
     expect(result.items).toHaveLength(1);
     expect(result.relationships).toEqual([]);
+  });
+
+  it('normalizes v68 per-DMO relationships without changing source status', () => {
+    const result = normalizeDmoRelationships(parseJsonResponse(dmoRelationshipsJson, 'Relationships'), context);
+
+    expect(result.skipped).toBe(0);
+    expect(result.items).toEqual([expect.objectContaining({
+      id: '0geDEMO000000001AAA',
+      source: 'Account_DMO__dlm',
+      target: 'Contact_DMO__dlm',
+      label: 'ContactId',
+      targetField: 'Id',
+      cardinality: 'ManyToOne',
+      status: 'INACTIVE',
+      certainty: 'confirmed',
+      provenance: expect.objectContaining({ apiVersion: '65.0', confidence: 'source' }),
+    })]);
+  });
+
+  it('skips relationship rows without both object names', () => {
+    const result = normalizeDmoRelationships({
+      relationships: [{ id: 'incomplete', sourceObject: { name: 'Account_DMO__dlm' } }],
+    }, context);
+
+    expect(result.items).toEqual([]);
+    expect(result.skipped).toBe(1);
   });
 
   it('normalizes data spaces using alternate field names', () => {
@@ -99,9 +128,22 @@ describe('Data 360 response normalization', () => {
     });
 
     const dmos = normalizeDmos({
-      dataModelObject: [{ name: 'Account_DMO__dlm', dataSpaceName: 'default', fields: [] }],
+      dataModelObject: [{
+        name: 'Account_DMO__dlm',
+        dataSpaceName: 'default',
+        creationType: 'Custom',
+        isEnabled: true,
+        hasExternalDataLakeObjectMappings: false,
+        fields: [],
+      }],
     }, context);
-    expect(dmos.items[0]).toMatchObject({ apiName: 'Account_DMO__dlm', dataSpace: 'default' });
+    expect(dmos.items[0]).toMatchObject({
+      apiName: 'Account_DMO__dlm',
+      dataSpace: 'default',
+      isCustom: true,
+      isEnabled: true,
+      hasExternalDataLakeObjectMappings: false,
+    });
 
     const streams = normalizeDataStreams({
       currentPageUrl: '/services/data/v68.0/ssot/data-streams?limit=10&offset=1',
@@ -124,6 +166,21 @@ describe('Data 360 response normalization', () => {
       dataSpace: 'default',
       sourceConnector: 'SalesforceDotCom',
     });
+  });
+
+  it('selects only explicitly enabled or custom DMOs for mapping lookups', () => {
+    const dmos = normalizeDmos({
+      dataModelObject: [
+        { name: 'Enabled__dlm', isEnabled: true, creationType: 'Standard', fields: [] },
+        { name: 'External__dlm', isEnabled: false, hasExternalDataLakeObjectMappings: true, fields: [] },
+        { name: 'Unused__dlm', isEnabled: false, creationType: 'Standard', fields: [] },
+      ],
+    }, context).items;
+
+    expect(mappingCandidateDmos(dmos).map((dmo) => dmo.apiName)).toEqual(['Enabled__dlm', 'External__dlm']);
+    expect(mappingCandidateDmos([
+      { ...dmos[0]!, isEnabled: null, hasExternalDataLakeObjectMappings: null },
+    ])).toHaveLength(1);
   });
 
   it('normalizes fields from inline, alternate, and nested schema shapes', () => {

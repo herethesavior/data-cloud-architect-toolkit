@@ -4,13 +4,16 @@ import {
   dataStreamsJson,
   dataTransformsJson,
   demoOrgs,
+  dmoRelationshipsJson,
   dmosJson,
+  dmosOffsetPage2Json,
+  mappingNotFoundOutput,
   mappingsJson,
   versionsJson,
 } from '@dcat/test-fixtures';
 import { CliError } from '@dcat/salesforce-cli';
 import type { RestClient } from './discover.ts';
-import { buildMappingPath } from './endpoints.ts';
+import { buildDmoRelationshipsPath, buildMappingPath } from './endpoints.ts';
 import {
   advanceProgressiveDiscovery,
   createProgressiveDiscovery,
@@ -23,7 +26,13 @@ import {
 const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
 const dloPath = `${base}/data-lake-objects`;
+const dmoPath = `${base}/data-model-objects?limit=100&offset=0`;
 const dmoNames = ['Account_DMO__dlm', 'Contact_DMO__dlm', 'Order_DMO__dlm'];
+const dmoSpaces: Record<string, string> = {
+  Account_DMO__dlm: 'default',
+  Contact_DMO__dlm: 'default',
+  Order_DMO__dlm: 'sales_space',
+};
 
 const retry = {
   maxAttempts: 3,
@@ -69,10 +78,12 @@ function fakeCli(
     [`${base}/data-spaces`]: dataSpacesJson,
     [dloPath]: pagedDlos()[dloPath]!,
     ...pagedDlos(),
-    [`${base}/data-model-objects`]: dmosJson,
+    [dmoPath]: dmosJson,
     [`${base}/data-streams`]: dataStreamsJson,
     [`${base}/data-transforms`]: dataTransformsJson,
-    ...Object.fromEntries(dmoNames.map((name) => [buildMappingPath(name, '65.0'), mappingsJson])),
+    ...Object.fromEntries(dmoNames.map((name) => [
+      buildMappingPath(name, '65.0', dmoSpaces[name]), mappingsJson,
+    ])),
     ...overrides,
   };
   return {
@@ -90,6 +101,7 @@ function fakeCli(
         throw new CliError('COMMAND_FAILED', 'ERROR: 500 Server Error');
       }
       const value = paths[path];
+      if (value === undefined && path.includes('/relationships?')) return '';
       if (value === undefined) throw new Error(`Unexpected REST path: ${path}`);
       return value;
     },
@@ -231,7 +243,7 @@ describe('progressive discovery', () => {
 
   it('completes when no DMOs exist and mapping lookup is intentionally skipped', async () => {
     const cli = fakeCli({
-      [`${base}/data-model-objects`]: JSON.stringify({ records: [] }),
+      [dmoPath]: JSON.stringify({ records: [] }),
     });
     const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
     await drain(state);
@@ -244,6 +256,95 @@ describe('progressive discovery', () => {
     expect(snapshot.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ family: 'mappings', code: 'MAPPINGS_SKIPPED' }),
     ]));
+  });
+
+  it('loads DMO offset pages without a continuation token', async () => {
+    const fullPage = JSON.stringify({
+      dataModelObject: Array.from({ length: 100 }, (_, index) => ({
+        name: `Standard_${index}__dlm`,
+        dataSpaceName: 'default',
+        isEnabled: false,
+        fields: [],
+      })),
+    });
+    const nextPath = `${base}/data-model-objects?limit=100&offset=100`;
+    const cli = fakeCli({
+      [dmoPath]: fullPage,
+      [nextPath]: dmosOffsetPage2Json,
+      [buildMappingPath('Page2_DMO__dlm', '65.0', 'default')]: mappingsJson,
+    });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(snapshot.dmos).toHaveLength(101);
+    expect(cli.calls.filter((path) => path === nextPath)).toHaveLength(1);
+    expect(snapshot.capabilities.find((capability) => capability.family === 'dmos')).toMatchObject({
+      status: 'available',
+      itemCount: 101,
+    });
+    expect(snapshot.warnings.every((warning) => warning.severity !== 'error')).toBe(true);
+  });
+
+  it('follows nextPageUrl for live stream responses', async () => {
+    const streamPage1 = JSON.stringify({
+      currentPageUrl: '/services/data/v65.0/ssot/data-streams?limit=10&offset=1',
+      dataStreams: [{ name: 'Account_Stream', dataLakeObjectInfo: { name: 'Account_DLO__dll' } }],
+      nextPageUrl: '/services/data/v65.0/ssot/data-streams?limit=10&offset=11',
+      totalSize: 2,
+    });
+    const streamPage2 = JSON.stringify({
+      dataStreams: [{ name: 'Order_Stream', dataLakeObjectInfo: { name: 'Order_DLO__dll' } }],
+      totalSize: 2,
+    });
+    const cli = fakeCli({
+      [`${base}/data-streams`]: streamPage1,
+      [`${base}/data-streams?limit=10&offset=11`]: streamPage2,
+    });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(snapshot.dataStreams.map((stream) => stream.apiName)).toEqual(['Account_Stream', 'Order_Stream']);
+    expect(snapshot.capabilities.find((capability) => capability.family === 'data-streams')?.itemCount).toBe(2);
+  });
+
+  it('does not mark a DMO-specific mapping NOT_FOUND as a failed family', async () => {
+    const cli = fakeCli({}, {}, {
+      [buildMappingPath('Account_DMO__dlm', '65.0', 'default')]: mappingNotFoundOutput,
+    });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(snapshot.warnings.every((warning) => warning.severity !== 'error')).toBe(true);
+    expect(snapshot.capabilities.find((capability) => capability.family === 'mappings')).toMatchObject({
+      status: 'available',
+      itemCount: 2,
+    });
+  });
+
+  it('loads the same per-DMO relationships as one-shot discovery', async () => {
+    const relationshipPath = buildDmoRelationshipsPath('Account_DMO__dlm', '65.0', 'default');
+    const cli = fakeCli({ [relationshipPath]: dmoRelationshipsJson });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(cli.calls).toContain(relationshipPath);
+    expect(snapshot.relationships).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: '0geDEMO000000001AAA',
+        source: 'Account_DMO__dlm',
+        target: 'Contact_DMO__dlm',
+        label: 'ContactId',
+        targetField: 'Id',
+        cardinality: 'ManyToOne',
+        status: 'INACTIVE',
+        certainty: 'confirmed',
+      }),
+    ]));
+    expect(snapshot.progress?.state).toBe('complete');
   });
 
   it('retries transient page failures with bounded attempts', async () => {

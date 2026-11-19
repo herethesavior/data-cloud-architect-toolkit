@@ -766,6 +766,11 @@ function DataLineageExplorerView({ context, inventory, freshness }: LineageViewP
                     Source certainty: <span className="font-semibold">{selectedGraphEdge.relationshipCertainty}</span>
                   </p>
                 ) : null}
+                {selectedGraphEdge.relationshipStatus ? (
+                  <p className="text-xs text-ink-soft">
+                    Source status: <span className="font-semibold">{selectedGraphEdge.relationshipStatus}</span>
+                  </p>
+                ) : null}
                 {selectedGraphEdge.fieldLinks.length > 0 ? (
                   <div className="max-h-56 overflow-auto rounded-lg border border-line">
                     <table className="data-table" aria-label={`Field mappings for ${selectedGraphEdge.label}`}>

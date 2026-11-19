@@ -238,8 +238,12 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
                           <Badge tone={edge.certainty === 'confirmed' ? 'success' : 'warning'} dot>{edge.certainty}</Badge>
+                          {edge.status ? <Badge tone="neutral" dot>{edge.status}</Badge> : null}
                           {edge.cardinality ? <span>{edge.cardinality}</span> : null}
                           {edge.label ? <span className="mono">{edge.label}</span> : null}
+                          {edge.targetField && edge.targetField !== edge.label ? (
+                            <span className="mono">→ {edge.targetField}</span>
+                          ) : null}
                         </div>
                       </li>
                     ))}

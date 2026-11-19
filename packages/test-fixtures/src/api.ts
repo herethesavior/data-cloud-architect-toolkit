@@ -72,6 +72,24 @@ export const dmosJson = JSON.stringify({
   ],
 });
 
+/** Live v68 per-DMO relationship shape, including source status. */
+export const dmoRelationshipsJson = JSON.stringify({
+  currentPageUrl: '/services/data/v68.0/ssot/data-model-objects/Account_DMO__dlm/relationships?limit=500',
+  relationships: [{
+    cardinality: 'ManyToOne',
+    creationType: 'Standard',
+    id: '0geDEMO000000001AAA',
+    name: 'Account_ContactId_map_Contact_Id_N_1',
+    owner: 'DataCloud',
+    sourceField: { label: 'Contact', name: 'ContactId', type: 'MktDataModelField' },
+    sourceObject: { keyQualifierField: null, label: 'Account', name: 'Account_DMO__dlm' },
+    status: 'INACTIVE',
+    targetField: { label: 'Id', name: 'Id', type: 'MktDataModelField' },
+    targetObject: { keyQualifierField: null, label: 'Contact', name: 'Contact_DMO__dlm' },
+  }],
+  totalSize: 1,
+});
+
 export const mappingsJson = JSON.stringify({
   records: [
     {
@@ -177,7 +195,14 @@ export const paginatedDlosPage2Json = JSON.stringify({
   records: [{ apiName: 'Page2_DLO__dll', fields: [] }],
 });
 
+export const dmosOffsetPage2Json = JSON.stringify({
+  dataModelObject: [{ name: 'Page2_DMO__dlm', dataSpaceName: 'default', isEnabled: true, fields: [] }],
+});
+
 export const malformedApiJson = 'this is not json';
+
+/** Salesforce answer for a valid DMO developer name that has no object-source-target maps. */
+export const mappingNotFoundOutput = 'Salesforce CLI command failed: NOT_FOUND: Object Source Target Map not found for the given Target Object Dev Name : Account_DMO__dlm  ,';
 
 export const forbiddenRestOutput = 'ERROR running api request rest: status code 403 Forbidden';
 

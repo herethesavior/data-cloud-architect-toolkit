@@ -16,11 +16,29 @@ import { RESOURCE_FAMILIES } from '@dcat/core';
 import { safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure } from './capabilities.ts';
 import type { RestClient } from './discover.ts';
-import { extractHttpStatus, isTransientRestFailure, validateInventorySnapshot } from './discover.ts';
-import { buildData360Path, buildMappingPath, buildVersionsPath, DATA360_ENDPOINT_REGISTRY } from './endpoints.ts';
+import {
+  extractHttpStatus,
+  isMappingAbsence,
+  isTransientRestFailure,
+  MAX_RELATIONSHIP_DMO_QUERIES,
+  validateInventorySnapshot,
+} from './discover.ts';
+import {
+  buildData360Path,
+  buildDmoRelationshipsPath,
+  buildFamilyPath,
+  buildMappingPath,
+  buildVersionsPath,
+  DATA360_ENDPOINT_REGISTRY,
+  DMO_PAGE_SIZE,
+  isValidDataspace,
+  isValidDmoDeveloperName,
+} from './endpoints.ts';
 import {
   deriveInferredRelationships,
   extractCollection,
+  mappingCandidateDmos,
+  normalizeDmoRelationships,
   normalizeDataSpaces,
   normalizeDataStreams,
   normalizeDataTransforms,
@@ -30,7 +48,7 @@ import {
   parseJsonResponse,
 } from './normalize.ts';
 import type { NormalizeContext, NormalizedCollection, NormalizedDmos } from './normalize.ts';
-import { buildNextPath, extractContinuation } from './pagination.ts';
+import { buildNextPath, extractContinuation, offsetContinuation } from './pagination.ts';
 import { selectLatestApiVersion } from './versions.ts';
 
 const NON_MAPPING_FAMILIES = [
@@ -45,6 +63,7 @@ type NonMappingFamily = (typeof NON_MAPPING_FAMILIES)[number];
 /** One CLI call can safely carry a path of this length; cursors are opaque. */
 const MAX_REST_PATH_LENGTH = 480;
 const MAPPING_CONCURRENCY = 4;
+const RELATIONSHIP_CONCURRENCY = 4;
 
 export interface PageRetryOptions {
   maxAttempts: number;
@@ -91,6 +110,18 @@ interface MappingState extends CursorState {
   limitHit: boolean;
 }
 
+interface RelationshipTask extends CursorState {
+  dmoName: string;
+}
+
+interface RelationshipQueryState extends CursorState {
+  tasks: RelationshipTask[];
+  queuedDmos: string[];
+  edges: RelationshipEdge[];
+  failedQueries: number;
+  limitHit: boolean;
+}
+
 export interface ProgressiveDiscoveryState {
   cli: RestClient;
   sessionId: string;
@@ -104,10 +135,12 @@ export interface ProgressiveDiscoveryState {
   options: {
     maxPages: number;
     maxMappingQueries: number;
+    maxRelationshipQueries: number;
     retry: PageRetryOptions;
   };
   families: Record<NonMappingFamily, FamilyState>;
   mappings: MappingState;
+  relationshipQueries: RelationshipQueryState;
   capabilities: ApiCapability[];
   warnings: RetrievalWarning[];
   relationships: RelationshipEdge[];
@@ -122,6 +155,7 @@ export interface ProgressiveDiscoveryOptions {
   signal?: AbortSignal;
   maxPages?: number;
   maxMappingQueries?: number;
+  maxRelationshipQueries?: number;
   retry?: Partial<PageRetryOptions>;
 }
 
@@ -195,15 +229,30 @@ function makeCursor(basePath: string): CursorState {
 
 function makeFamily(family: NonMappingFamily, apiVersion: string): FamilyState {
   return {
-    ...makeCursor(buildData360Path(family, apiVersion)),
+    ...makeCursor(buildFamilyPath(family, apiVersion)),
     family,
     items: [],
     relationships: [],
   };
 }
 
-function makeMappingTask(dmoName: string, apiVersion: string): MappingTask {
-  return { ...makeCursor(buildMappingPath(dmoName, apiVersion)), dmoName };
+function makeMappingTask(dmoName: string, apiVersion: string, dataspace: string | null): MappingTask {
+  return { ...makeCursor(buildMappingPath(dmoName, apiVersion, dataspace)), dmoName };
+}
+
+function makeRelationshipTask(dmoName: string, apiVersion: string, dataspace: string | null): RelationshipTask {
+  return { ...makeCursor(buildDmoRelationshipsPath(dmoName, apiVersion, dataspace)), dmoName };
+}
+
+function makeRelationshipQueries(apiVersion: string): RelationshipQueryState {
+  return {
+    ...makeCursor(buildData360Path('dmos', apiVersion)),
+    tasks: [],
+    queuedDmos: [],
+    edges: [],
+    failedQueries: 0,
+    limitHit: false,
+  };
 }
 
 /** Versionless paths for catalog entries that never issued a request. */
@@ -231,6 +280,18 @@ function contextFor(
   return { ...state.base, apiVersion: state.apiVersion ?? '', endpoint, retrievedAt };
 }
 
+function contextForRelationshipTask(
+  state: ProgressiveDiscoveryState,
+  task: RelationshipTask,
+): NormalizeContext {
+  return {
+    ...state.base,
+    apiVersion: state.apiVersion ?? '',
+    endpoint: task.basePath,
+    retrievedAt: new Date().toISOString(),
+  };
+}
+
 function identityFor(family: ResourceFamily, item: unknown): string {
   if (family === 'mappings' && typeof item === 'object' && item !== null) {
     const record = item as Record<string, unknown>;
@@ -254,10 +315,13 @@ function mergeNormalized<T>(
   normalized: NormalizedCollection<T>,
 ): void {
   const items = family === 'mappings' ? state.mappings.items : state.families[family as NonMappingFamily].items;
+  // Mapping pages come from several DMO tasks, so dedupe against the shared
+  // mapping state rather than each task's local page keys.
+  const seenKeys = family === 'mappings' ? state.mappings.seenKeys : cursor.seenKeys;
   for (const item of normalized.items) {
     const key = identityFor(family, item);
-    if (cursor.seenKeys.includes(key)) continue;
-    cursor.seenKeys.push(key);
+    if (seenKeys.includes(key)) continue;
+    seenKeys.push(key);
     items.push(item);
   }
   cursor.skipped += normalized.skipped;
@@ -368,9 +432,16 @@ async function requestPage<T>(
       pushWarning(state, family, 'RETRY_SUCCEEDED',
         `Retrieved a page after ${attempt.attempts} attempts following a transient failure.`, 'info');
     }
-    applyContinuation(state, family, cursor, extractContinuation(decoded));
+    const continuation = family === 'dmos'
+      ? offsetContinuation(decoded, cursor.path, DMO_PAGE_SIZE, entries.length)
+      : extractContinuation(decoded);
+    applyContinuation(state, family, cursor, continuation);
     return cursor.pageIndex > before || cursor.done !== false;
   } catch (error) {
+    if (family === 'mappings' && isMappingAbsence(error)) {
+      cursor.done = true;
+      return true;
+    }
     markFailure(state, family, cursor, error);
     return true;
   }
@@ -394,9 +465,16 @@ async function fetchFamilyPage(state: ProgressiveDiscoveryState, family: NonMapp
   return requestPage(state, family, cursor, family, normalizer);
 }
 
+function defaultDataspace(state: ProgressiveDiscoveryState): string | null {
+  const spaces = state.families['data-spaces'].items as Array<{ apiName?: string; isDefault?: boolean | null }>;
+  return spaces.find((space) => space.isDefault)?.apiName ?? spaces[0]?.apiName ?? null;
+}
+
 function syncMappingTasks(state: ProgressiveDiscoveryState): void {
   const dmos = state.families.dmos.items as DataModelObject[];
-  for (const dmo of dmos) {
+  const candidates = mappingCandidateDmos(dmos);
+  const fallback = defaultDataspace(state);
+  for (const dmo of candidates) {
     const name = dmo.apiName?.trim();
     if (!name || state.mappings.queuedDmos.includes(name)) continue;
     if (state.mappings.tasks.length >= state.options.maxMappingQueries) {
@@ -409,12 +487,15 @@ function syncMappingTasks(state: ProgressiveDiscoveryState): void {
       break;
     }
     state.mappings.queuedDmos.push(name);
-    state.mappings.tasks.push(makeMappingTask(name, state.apiVersion ?? ''));
+    state.mappings.tasks.push(makeMappingTask(name, state.apiVersion ?? '', dmo.dataSpace ?? fallback));
   }
 
-  if (state.families.dmos.done && dmos.length === 0 && state.mappings.tasks.length === 0) {
+  if (state.families.dmos.done && state.mappings.tasks.length === 0) {
     pushWarning(state, 'mappings', 'MAPPINGS_SKIPPED',
-      'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.', 'info');
+      dmos.length === 0
+        ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
+        : 'Skipped: no enabled or custom DMOs were found; mapping lookup requires an eligible DMO developer name.',
+      'info');
   }
 }
 
@@ -436,11 +517,86 @@ async function fetchMappingTaskPage(state: ProgressiveDiscoveryState, task: Mapp
   return true;
 }
 
+function syncRelationshipTasks(state: ProgressiveDiscoveryState): void {
+  const dmos = state.families.dmos.items as DataModelObject[];
+  const candidates = mappingCandidateDmos(dmos);
+  const fallback = defaultDataspace(state);
+  for (const dmo of candidates) {
+    const name = dmo.apiName?.trim();
+    if (!name || state.relationshipQueries.queuedDmos.includes(name)) continue;
+    const dataspace = dmo.dataSpace ?? fallback;
+    if (!isValidDmoDeveloperName(name) || !isValidDataspace(dataspace)) {
+      state.relationshipQueries.queuedDmos.push(name);
+      pushWarning(state, 'dmos', 'RELATIONSHIP_QUERY_SKIPPED',
+        `Relationship lookup skipped for DMO ${name}: its name or data space cannot be used safely in a REST path.`,
+        'warning');
+      continue;
+    }
+    if (state.relationshipQueries.tasks.length >= state.options.maxRelationshipQueries) {
+      if (!state.relationshipQueries.limitHit) {
+        state.relationshipQueries.limitHit = true;
+        stopWithWarning(state, 'dmos', state.relationshipQueries,
+          'RELATIONSHIP_QUERY_LIMIT',
+          `Checked the first ${state.options.maxRelationshipQueries} DMOs; remaining relationship lookups were not attempted.`);
+      }
+      break;
+    }
+    state.relationshipQueries.queuedDmos.push(name);
+    state.relationshipQueries.tasks.push(makeRelationshipTask(name, state.apiVersion ?? '', dataspace));
+  }
+}
+
+async function fetchRelationshipTaskPage(
+  state: ProgressiveDiscoveryState,
+  task: RelationshipTask,
+): Promise<boolean> {
+  if (task.done || task.failed) return false;
+  const before = task.pageIndex;
+
+  try {
+    const attempt = await withPageRetry(async () => {
+      const raw = await state.cli.restGet(state.alias, task.path, { signal: state.signal });
+      return raw.trim() ? parseJsonResponse(raw, 'relationships') : [];
+    }, state.options.retry);
+
+    const decoded = attempt.value;
+    const entries = extractCollection(decoded, 'relationships');
+    const normalized = normalizeDmoRelationships(entries, contextForRelationshipTask(state, task));
+    for (const edge of normalized.items) {
+      if (!state.relationshipQueries.edges.some((existing) => existing.id === edge.id)) {
+        state.relationshipQueries.edges.push(edge);
+      }
+    }
+    task.skipped += normalized.skipped;
+    if (attempt.retried) {
+      task.retried += 1;
+      pushWarning(state, 'dmos', 'RELATIONSHIP_RETRY_SUCCEEDED',
+        `Relationship lookup for DMO ${task.dmoName} succeeded after a transient retry.`, 'info');
+    }
+    const continuation = extractContinuation(decoded);
+    applyContinuation(state, 'dmos', task, continuation);
+    state.relationshipQueries.pageIndex += task.pageIndex - before;
+    state.relationshipQueries.total = Math.max(state.relationshipQueries.total ?? 0, task.total ?? 0) || state.relationshipQueries.total;
+    return task.pageIndex > before || task.done !== false;
+  } catch (error) {
+    task.failed = true;
+    const message = safeErrorMessage(error);
+    const classified = classifyRestFailure(extractHttpStatus(message), message);
+    task.error = `Relationship lookup for DMO ${task.dmoName} failed. ${classified.message}`;
+    task.errorStatus = classified.status;
+    state.relationshipQueries.failedQueries += 1;
+    pushWarning(state, 'dmos', 'RELATIONSHIP_QUERY_FAILED', task.error,
+      classified.status === 'unsupported' ? 'warning' : 'error');
+    return true;
+  }
+}
+
 function anyActive(state: ProgressiveDiscoveryState): boolean {
   return NON_MAPPING_FAMILIES.some((family) => {
     const cursor = state.families[family];
     return !cursor.done && !cursor.failed;
-  }) || state.mappings.tasks.some((task) => !task.done && !task.failed);
+  }) || state.mappings.tasks.some((task) => !task.done && !task.failed)
+  || state.relationshipQueries.tasks.some((task) => !task.done && !task.failed);
 }
 
 function statusForFamily(state: ProgressiveDiscoveryState, family: ResourceFamily): ApiCapability['status'] {
@@ -538,6 +694,13 @@ function recompute(state: ProgressiveDiscoveryState): void {
     }
   }
 
+  const skippedRelationships = state.relationshipQueries.tasks.reduce((count, task) => count + task.skipped, 0);
+  if (skippedRelationships > 0) {
+    pushWarning(state, 'dmos', 'RELATIONSHIP_ITEMS_SKIPPED',
+      `${skippedRelationships} relationship row(s) were skipped because source or target object names were missing.`,
+      'warning');
+  }
+
   const dmoContext: NormalizeContext = {
     ...state.base,
     apiVersion: state.apiVersion,
@@ -546,6 +709,7 @@ function recompute(state: ProgressiveDiscoveryState): void {
   };
   state.relationships = dedupeEdges([
     ...state.families.dmos.relationships,
+    ...state.relationshipQueries.edges,
     ...deriveInferredRelationships(state.families.dmos.items as DataModelObject[], dmoContext),
   ]);
 }
@@ -665,6 +829,7 @@ function unavailableState(
     options: {
       maxPages: options.maxPages ?? 1_000,
       maxMappingQueries: options.maxMappingQueries ?? 500,
+      maxRelationshipQueries: options.maxRelationshipQueries ?? MAX_RELATIONSHIP_DMO_QUERIES,
       retry: retryOptions(options.retry),
     },
     families: {
@@ -680,6 +845,18 @@ function unavailableState(
       items: [],
       tasks: [],
       queuedDmos: [],
+      failedQueries: 0,
+      limitHit: false,
+      done: true,
+      failed: true,
+      error: message,
+      errorStatus: status,
+    },
+    relationshipQueries: {
+      ...makeCursor(unavailablePath('dmos')),
+      tasks: [],
+      queuedDmos: [],
+      edges: [],
       failedQueries: 0,
       limitHit: false,
       done: true,
@@ -761,6 +938,7 @@ export async function createProgressiveDiscovery(
     options: {
       maxPages: options.maxPages ?? 1_000,
       maxMappingQueries: options.maxMappingQueries ?? 500,
+      maxRelationshipQueries: options.maxRelationshipQueries ?? MAX_RELATIONSHIP_DMO_QUERIES,
       retry: retryOptions(options.retry),
     },
     families: {
@@ -779,6 +957,7 @@ export async function createProgressiveDiscovery(
       failedQueries: 0,
       limitHit: false,
     },
+    relationshipQueries: makeRelationshipQueries(apiVersion),
     capabilities: [{
       family: 'api-versions',
       status: 'available',
@@ -814,7 +993,13 @@ export async function advanceProgressiveDiscovery(
     .slice(0, MAPPING_CONCURRENCY);
   const mappingResults = await Promise.all(tasks.map((task) => fetchMappingTaskPage(state, task)));
 
-  const changed = results.some(Boolean) || mappingResults.some(Boolean);
+  syncRelationshipTasks(state);
+  const relationshipTasks = state.relationshipQueries.tasks
+    .filter((task) => !task.done && !task.failed)
+    .slice(0, RELATIONSHIP_CONCURRENCY);
+  const relationshipResults = await Promise.all(relationshipTasks.map((task) => fetchRelationshipTaskPage(state, task)));
+
+  const changed = results.some(Boolean) || mappingResults.some(Boolean) || relationshipResults.some(Boolean);
   // Freshness follows the most recently loaded page, not the session start.
   if (changed) state.generatedAt = new Date().toISOString();
   recompute(state);
@@ -855,7 +1040,27 @@ export function resumeProgressiveDiscovery(
       clearedFamilies.add('mappings');
     }
   }
-  const retryableCodes = new Set(['ERROR', 'RETRY_LIMIT', 'MAPPING_QUERY_FAILED']);
+  if (!family || family === 'dmos') {
+    for (const task of state.relationshipQueries.tasks) {
+      if (!task.failed || task.errorStatus !== 'error') continue;
+      task.failed = false;
+      task.error = null;
+      task.errorStatus = 'error';
+      clearedFamilies.add('dmos');
+    }
+    if (state.relationshipQueries.failed && state.relationshipQueries.errorStatus === 'error') {
+      state.relationshipQueries.failed = false;
+      state.relationshipQueries.error = null;
+      clearedFamilies.add('dmos');
+    }
+    state.relationshipQueries.failedQueries = state.relationshipQueries.tasks.filter((task) => task.failed).length;
+  }
+  const retryableCodes = new Set([
+    'ERROR',
+    'RETRY_LIMIT',
+    'MAPPING_QUERY_FAILED',
+    'RELATIONSHIP_QUERY_FAILED',
+  ]);
   state.warnings = state.warnings.filter((warning) =>
     !clearedFamilies.has(warning.family) || !retryableCodes.has(warning.code));
   recompute(state);

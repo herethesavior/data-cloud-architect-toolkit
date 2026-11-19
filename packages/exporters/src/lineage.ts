@@ -56,6 +56,8 @@ export interface LineageEdge {
   detail: string;
   confidence: LineageConfidence;
   relationshipCertainty: 'confirmed' | 'inferred' | 'unknown' | null;
+  /** Source status for relationship edges; never inferred by DCAT. */
+  relationshipStatus?: string | null;
   fieldLinks: LineageFieldLink[];
   provenance: ResourceProvenance | null;
 }
@@ -422,12 +424,20 @@ export function buildLineageGraph(inventory: InventorySnapshot): LineageGraph {
         target: targetNode,
         label: text(relationship.label, relationship.certainty),
         detail: relationship.certainty === 'confirmed'
-          ? `Source-confirmed relationship${relationship.cardinality ? ` · ${relationship.cardinality}` : ''}.`
-          : `DCAT-derived relationship (${relationship.certainty})${relationship.cardinality ? ` · ${relationship.cardinality}` : ''}. Not a source fact.`,
+          ? `Source-confirmed relationship${relationship.status ? ` · status ${relationship.status}` : ''}${relationship.cardinality ? ` · ${relationship.cardinality}` : ''}.`
+          : `DCAT-derived relationship (${relationship.certainty})${relationship.status ? ` · status ${relationship.status}` : ''}${relationship.cardinality ? ` · ${relationship.cardinality}` : ''}. Not a source fact.`,
         confidence: relationship.certainty === 'confirmed' ? 'source' : 'derived',
         provenance: relationship.provenance,
       }),
       relationshipCertainty: relationship.certainty,
+      relationshipStatus: relationship.status ?? null,
+      fieldLinks: relationship.label && relationship.targetField
+        ? [{
+          sourceField: relationship.label,
+          targetField: relationship.targetField,
+          transformation: null,
+        }]
+        : [],
     });
   }
 

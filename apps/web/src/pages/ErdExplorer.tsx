@@ -584,12 +584,20 @@ function ErdExplorerView({ context, inventory, freshness }: ErdViewProps) {
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={badgeTone(edge.data?.certainty ?? 'unknown')} dot>{edge.data?.certainty ?? 'unknown'}</Badge>
+                  {edge.data?.status ? (
+                    <Badge tone={edge.data.status === 'ACTIVE' ? 'success' : 'neutral'} dot>{edge.data.status}</Badge>
+                  ) : null}
                   {edge.data?.cardinality ? <span className="text-xs text-ink-soft">{edge.data.cardinality}</span> : null}
                 </div>
                 <p className="mono mt-2 text-xs text-ink">
                   {edge.source} <span className="text-ink-faint">→</span> {edge.target}
                 </p>
-                <p className="mt-1 text-xs text-ink-soft">Join field: <span className="mono">{edge.data?.joinField}</span></p>
+                <p className="mt-1 text-xs text-ink-soft">
+                  Join fields: <span className="mono">{edge.data?.joinField}</span>
+                  {edge.data?.targetField && edge.data.targetField !== edge.data.joinField ? (
+                    <><span className="text-ink-faint"> → </span><span className="mono">{edge.data.targetField}</span></>
+                  ) : null}
+                </p>
               </button>
             ))}
             {edges.length === 0 ? (
@@ -637,6 +645,7 @@ function ErdExplorerView({ context, inventory, freshness }: ErdViewProps) {
                 <p className="rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
                   Selected edge: <span className="mono">{selectedEdge.data?.joinField}</span>
                   {' · '}{selectedEdge.data?.certainty}
+                  {selectedEdge.data?.status ? ` · ${selectedEdge.data.status}` : ''}
                 </p>
               ) : null}
             </div>

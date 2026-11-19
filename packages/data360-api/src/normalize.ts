@@ -42,7 +42,7 @@ export function parseJsonResponse(raw: string, label: string): unknown {
   }
 }
 
-const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions'];
+const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'relationships', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions'];
 const CONTAINER_KEYS = ['result', 'data', 'response', 'payload'];
 
 /**
@@ -341,13 +341,20 @@ export function normalizeDmos(raw: unknown, context: NormalizeContext): Normaliz
       skipped += 1;
       continue;
     }
+    const creationType = firstString(entry, ['creationType', 'objectCreationType']);
     items.push({
       apiName,
       label: firstString(entry, ['label', 'displayName', 'Label']),
       category: firstString(entry, ['category', 'objectCategory', 'Category']),
       dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace'])
         ?? dataSpaceName(entry.dataSpaceInfo),
-      isCustom: firstBoolean(entry, ['isCustom', 'custom', 'isCustomObject']),
+      isCustom: firstBoolean(entry, ['isCustom', 'custom', 'isCustomObject'])
+        ?? (creationType ? /^custom$/i.test(creationType) : null),
+      isEnabled: firstBoolean(entry, ['isEnabled', 'enabled']),
+      hasExternalDataLakeObjectMappings: firstBoolean(entry, [
+        'hasExternalDataLakeObjectMappings',
+        'hasDataLakeObjectMappings',
+      ]),
       fields: normalizeFields(fieldSource(entry), context),
       provenance: makeProvenance(context),
     });
@@ -370,6 +377,8 @@ export function normalizeDmos(raw: unknown, context: NormalizeContext): Normaliz
         target,
         label: firstString(relation, ['joinField', 'field', 'label', 'sourceField']),
         cardinality: firstString(relation, ['cardinality', 'relationshipType', 'type']),
+        status: firstString(relation, ['status', 'relationshipStatus']),
+        targetField: firstString(relation, ['targetField', 'targetFieldName']),
         certainty: 'confirmed',
         provenance: makeProvenance(context),
       });
@@ -377,6 +386,69 @@ export function normalizeDmos(raw: unknown, context: NormalizeContext): Normaliz
   }
 
   return { items, skipped, relationships };
+}
+
+function nestedName(value: unknown, keys: readonly string[]): string | null {
+  if (isRecord(value)) return firstString(value, keys);
+  return asString(value);
+}
+
+/**
+ * Normalize the v68 per-DMO relationship subresource. Rows are self-describing:
+ * the queried DMO can be either endpoint, so no direction is assumed here.
+ */
+export function normalizeDmoRelationships(raw: unknown, context: NormalizeContext): NormalizedCollection<RelationshipEdge> {
+  const entries = extractCollection(raw, 'Relationships');
+  const items: RelationshipEdge[] = [];
+  let skipped = 0;
+
+  for (const entry of entries) {
+    if (!isRecord(entry)) {
+      skipped += 1;
+      continue;
+    }
+    const source = nestedName(entry.sourceObject, ['name', 'apiName', 'developerName', 'objectName'])
+      ?? firstString(entry, ['sourceObjectName', 'sourceObjectApiName', 'source']);
+    const target = nestedName(entry.targetObject, ['name', 'apiName', 'developerName', 'objectName'])
+      ?? firstString(entry, ['targetObjectName', 'targetObjectApiName', 'target']);
+    if (!source || !target) {
+      skipped += 1;
+      continue;
+    }
+
+    const joinField = nestedName(entry.sourceField, ['name', 'apiName', 'developerName', 'fieldName'])
+      ?? firstString(entry, ['joinField', 'field', 'sourceFieldName']);
+    const targetField = nestedName(entry.targetField, ['name', 'apiName', 'developerName', 'fieldName'])
+      ?? firstString(entry, ['targetFieldName']);
+    const sourceId = firstString(entry, ['id', 'Id']);
+    items.push({
+      id: sourceId ?? `source:${source}:${target}:${joinField ?? firstString(entry, ['name']) ?? 'relationship'}`,
+      source,
+      target,
+      label: joinField ?? firstString(entry, ['sourceFieldLabel', 'label']),
+      cardinality: firstString(entry, ['cardinality', 'relationshipType', 'type']),
+      status: firstString(entry, ['status', 'relationshipStatus']),
+      targetField,
+      certainty: 'confirmed',
+      provenance: makeProvenance(context),
+    });
+  }
+
+  return { items, skipped };
+}
+
+/**
+ * Salesforce returns many disabled standard DMOs with no object-source-target
+ * maps. Only look up mappings for DMOs the source explicitly marks as usable;
+ * when a payload lacks that metadata, keep the conservative all-DMO behavior.
+ */
+export function mappingCandidateDmos(dmos: DataModelObject[]): DataModelObject[] {
+  const isEligible = (dmo: DataModelObject): boolean =>
+    dmo.isEnabled === true || dmo.isCustom === true || dmo.hasExternalDataLakeObjectMappings === true;
+  const isClassified = (dmo: DataModelObject): boolean =>
+    dmo.isEnabled !== null && dmo.isEnabled !== undefined || isEligible(dmo);
+  if (!dmos.every(isClassified)) return dmos;
+  return dmos.filter(isEligible);
 }
 
 export function normalizeMappings(raw: unknown, context: NormalizeContext): NormalizedCollection<DataMapping> {
