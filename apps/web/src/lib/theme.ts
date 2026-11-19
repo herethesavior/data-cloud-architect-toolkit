@@ -9,6 +9,7 @@ export interface ThemePalette {
   brandSoft: string;
   warning: string;
   success: string;
+  danger: string;
 }
 
 export function getThemePalette(): ThemePalette {
@@ -25,5 +26,6 @@ export function getThemePalette(): ThemePalette {
     brandSoft: read('--color-brand-soft'),
     warning: read('--color-warning'),
     success: read('--color-success'),
+    danger: read('--color-danger'),
   };
 }

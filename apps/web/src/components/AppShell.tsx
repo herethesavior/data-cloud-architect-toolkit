@@ -31,6 +31,7 @@ const pageIcons: Record<Page, IconName> = {
   'data-streams': 'stream',
   'data-transforms': 'sparkles',
   erd: 'graph',
+  lineage: 'route',
   dictionary: 'book',
   settings: 'settings',
   help: 'info',

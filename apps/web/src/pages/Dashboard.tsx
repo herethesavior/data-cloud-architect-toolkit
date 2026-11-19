@@ -137,6 +137,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
           { label: 'Data Stream Explorer', description: 'Ingestion streams and cadence', page: 'data-streams', icon: 'stream' },
           { label: 'Data Transform Explorer', description: 'Batch and streaming transforms', page: 'data-transforms', icon: 'sparkles' },
           { label: 'ERD Explorer', description: 'Relationships and certainty', page: 'erd', icon: 'graph' },
+          { label: 'Data Lineage Explorer', description: 'End-to-end grounded flow', page: 'lineage', icon: 'route' },
           { label: 'Data Dictionary', description: 'Fields and exports', page: 'dictionary', icon: 'book' },
         ];
 

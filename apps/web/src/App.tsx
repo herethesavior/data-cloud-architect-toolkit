@@ -32,6 +32,7 @@ import { MappingExplorer } from './pages/MappingExplorer.tsx';
 import { DataStreamExplorer } from './pages/DataStreamExplorer.tsx';
 import { DataTransformExplorer } from './pages/DataTransformExplorer.tsx';
 import { ErdExplorer } from './pages/ErdExplorer.tsx';
+import { DataLineageExplorer } from './pages/DataLineageExplorer.tsx';
 import { DataDictionary } from './pages/DataDictionary.tsx';
 import { HelpPage } from './pages/HelpPage.tsx';
 import { pageFromHash, pageHash, writePageHash } from './navigation.ts';
@@ -427,6 +428,8 @@ export function App() {
         );
       case 'erd':
         return <ErdExplorer context={context} />;
+      case 'lineage':
+        return <DataLineageExplorer context={context} />;
       case 'dictionary':
         return <DataDictionary context={context} />;
       case 'help':

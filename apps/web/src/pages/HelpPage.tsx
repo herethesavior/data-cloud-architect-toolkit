@@ -121,6 +121,10 @@ const glossary: { term: string; definition: string }[] = [
     definition: 'A relationship view that separates confirmed and inferred edges and lets you filter by certainty.',
   },
   {
+    term: 'Data Lineage Explorer',
+    definition: 'An end-to-end view of source systems, streams, DLOs, mappings, transforms, and DMOs. Solid links are named in metadata, dashed links are derived, and missing references appear as gaps.',
+  },
+  {
     term: 'Discovery Health',
     definition: 'The per-family status summary that distinguishes complete, partial, forbidden, unsupported, and failed retrievals.',
   },

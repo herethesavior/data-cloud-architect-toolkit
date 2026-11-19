@@ -701,6 +701,11 @@ test('live export surfaces the metadata sharing notice', async ({ page }) => {
 
   await page.locator('#desktop-sidebar').getByRole('link', { name: 'ERD Explorer' }).click();
   await expect(page.getByText(notice)).toBeVisible();
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Lineage Explorer' }).click();
+  await expect(page.locator('h1')).toHaveText('Data Lineage Explorer');
+  await expect(page.getByText('30 steps', { exact: true })).toBeVisible();
+  await expect(page.getByText(notice)).toBeVisible();
 });
 
 test('data stream explorer shows grounded source-to-target detail and visible exports', async ({ page }) => {
@@ -824,6 +829,38 @@ test('ERD Explorer shows the richer demo model and filters grounded edges', asyn
   await expect(page.getByRole('button', { name: 'Confirmed', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('3 visible edges', { exact: true })).toBeVisible();
   await expect(page.locator('.react-flow__edge')).toHaveCount(3);
+});
+
+test('Data Lineage Explorer joins all metadata families and persists grounded filters', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Lineage Explorer' }).click();
+
+  await expect(page.locator('h1')).toHaveText('Data Lineage Explorer');
+  await expect(page.getByText('30 steps', { exact: true })).toBeVisible();
+  await expect(page.getByText('43 visible links', { exact: true })).toBeVisible();
+  await expect(page.getByText('0 gaps', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Data lineage canvas' })).toBeVisible();
+  await expect(page.locator('.react-flow__node-lineageStep')).toHaveCount(30);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(43);
+  await expect(page.locator('.react-flow__node-lineageStep').getByText('Normalize Contacts', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Full screen' }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+  await page.getByRole('region', { name: 'Data lineage canvas' })
+    .getByRole('button', { name: 'Exit full screen' })
+    .click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+
+  await page.getByRole('button', { name: 'Source-named', exact: true }).click();
+  await expect(page.getByText('37 visible links', { exact: true })).toBeVisible();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(37);
+  await expect(page.getByRole('button', { name: 'DCAT-derived', exact: true })).toHaveAttribute('aria-pressed', 'false');
+
+  await page.reload();
+  await page.locator('.react-flow__node-lineageStep').first().waitFor();
+  await expect(page.getByRole('button', { name: 'Source-named', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('37 visible links', { exact: true })).toBeVisible();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(37);
 });
 
 test('export menu consolidates local export formats', async ({ page }) => {
@@ -1031,6 +1068,7 @@ test('every screen fits a phone viewport', async ({ page }) => {
     'Data Stream Explorer',
     'Data Transform Explorer',
     'ERD Explorer',
+    'Data Lineage Explorer',
     'Data Dictionary',
     'Settings & Diagnostics',
     'Help',
