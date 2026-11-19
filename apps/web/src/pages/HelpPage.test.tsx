@@ -1,28 +1,92 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HelpPage } from './HelpPage.tsx';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.history.replaceState(null, '', '/');
+});
 
 describe('HelpPage', () => {
-  it('explains Data Cloud terms and privacy in grounded tabs', async () => {
+  it('opens with quick answers and actions that navigate to the right views', async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<HelpPage onNavigate={onNavigate} />);
+
+    expect(screen.getByRole('heading', { name: 'Help & documentation' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Start here' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('What do I need to get started?')).toBeInTheDocument();
+    expect(screen.getByText(/Will I see customer or transaction records/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Open Data Lineage Explorer' }));
+    expect(onNavigate).toHaveBeenCalledWith('lineage');
+  });
+
+  it('explains connection, status, and refresh behaviour', async () => {
     const user = userEvent.setup();
     render(<HelpPage onNavigate={vi.fn()} />);
 
-    expect(screen.getByRole('heading', { name: 'Help & documentation' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'What is DCAT?' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByText(/Read metadata with allowlisted, read-only Salesforce CLI commands/)).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: 'Connect & refresh' }));
+    expect(await screen.findByText('Connect in three steps')).toBeInTheDocument();
+    expect(screen.getByText('Forbidden')).toBeInTheDocument();
+    expect(screen.getByText(/Ask your admin for metadata API access/)).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole('tab', { name: 'Data Cloud glossary' }));
+  it('maps questions to explorers and explains link grounding', async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<HelpPage onNavigate={onNavigate} />);
+
+    await user.click(screen.getByRole('tab', { name: 'Explore & trace' }));
+    expect(await screen.findByText('Pick the view for your question')).toBeInTheDocument();
+    expect(screen.getByText('Named in metadata')).toBeInTheDocument();
+    expect(screen.getByText(/never presented as a declared edge/)).toBeInTheDocument();
+
+    const openButtons = screen.getAllByRole('button', { name: 'Open' });
+    await user.click(openButtons[0]!);
+    expect(onNavigate).toHaveBeenCalledWith('dlos');
+  });
+
+  it('filters glossary terms and keeps the privacy guarantees', async () => {
+    const user = userEvent.setup();
+    render(<HelpPage onNavigate={vi.fn()} />);
+
+    await user.click(screen.getByRole('tab', { name: 'Glossary' }));
     expect(await screen.findByText('Data Lake Object (DLO)')).toBeInTheDocument();
     expect(screen.getByText('Discovery Health')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('tab', { name: 'Privacy' }));
-    expect(await screen.findByText('No hosted OAuth')).toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox', { name: 'Filter glossary terms' }), 'mapping');
+    expect(screen.getByText('Mapping')).toBeInTheDocument();
+    expect(screen.getByText('Data Lineage Explorer')).toBeInTheDocument();
+    expect(screen.queryByText('Discovery Health')).not.toBeInTheDocument();
+    expect(screen.getByText(/Showing 2 of 12 terms/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Status & privacy' }));
+    expect(await screen.findByText(/Read metadata with allowlisted, read-only Salesforce CLI commands/)).toBeInTheDocument();
+    expect(screen.getByText('No hosted OAuth')).toBeInTheDocument();
     expect(screen.getByText(/\/api\/auth\/\* routes are intentionally removed and return 404/)).toBeInTheDocument();
+  });
+
+  it('keeps the selected topic in the URL for reload, back, and deep links', async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(null, '', '/?topic=glossary#help');
+    render(<HelpPage onNavigate={vi.fn()} />);
+    expect(screen.getByRole('tab', { name: 'Glossary' })).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(screen.getByRole('tab', { name: 'Status & privacy' }));
+    expect(window.location.search).toBe('?topic=status');
+
+    window.history.replaceState(null, '', '/?topic=connect#help');
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+    expect(await screen.findByRole('tab', { name: 'Connect & refresh' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('keeps authorship and safe external links', async () => {
+    const user = userEvent.setup();
+    render(<HelpPage onNavigate={vi.fn()} />);
 
     await user.click(screen.getByRole('tab', { name: 'About & contact' }));
     expect(await screen.findByText('Ryan Joshua Dela Cruz')).toBeInTheDocument();

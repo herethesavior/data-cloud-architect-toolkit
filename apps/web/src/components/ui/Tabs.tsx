@@ -10,14 +10,23 @@ export interface TabItem {
 interface TabsProps {
   items: TabItem[];
   label: string;
+  /** Controlled selection for tabs that are reflected in the URL. */
+  activeId?: string;
+  onActiveChange?: (id: string) => void;
 }
 
-export function Tabs({ items, label }: TabsProps) {
+export function Tabs({ items, label, activeId, onActiveChange }: TabsProps) {
   const baseId = useId();
-  const [activeId, setActiveId] = useState(items[0]?.id ?? '');
-  const activeItem = items.find((item) => item.id === activeId) ?? items[0];
+  const [internalActiveId, setInternalActiveId] = useState(items[0]?.id ?? '');
+  const currentId = activeId ?? internalActiveId;
+  const activeItem = items.find((item) => item.id === currentId) ?? items[0];
 
   if (!activeItem) return null;
+
+  const select = (id: string) => {
+    if (activeId === undefined) setInternalActiveId(id);
+    onActiveChange?.(id);
+  };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     let next = index;
@@ -28,13 +37,16 @@ export function Tabs({ items, label }: TabsProps) {
     else return;
 
     event.preventDefault();
-    setActiveId(items[next]!.id);
-    document.getElementById(`${baseId}-tab-${items[next]!.id}`)?.focus();
+    const target = items[next]!;
+    select(target.id);
+    const element = document.getElementById(`${baseId}-tab-${target.id}`);
+    element?.focus();
+    element?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   };
 
   return (
     <div>
-      <div role="tablist" aria-label={label} className="flex gap-1 overflow-x-auto border-b border-line">
+      <div role="tablist" aria-label={label} className="flex flex-wrap gap-1.5 border-b border-line pb-2">
         {items.map((item, index) => {
           const active = item.id === activeItem.id;
           return (
@@ -46,12 +58,12 @@ export function Tabs({ items, label }: TabsProps) {
               aria-controls={`${baseId}-panel-${item.id}`}
               aria-selected={active}
               tabIndex={active ? 0 : -1}
-              onClick={() => setActiveId(item.id)}
+              onClick={() => select(item.id)}
               onKeyDown={(event) => handleKeyDown(event, index)}
-              className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
                 active
-                  ? 'border-brand text-brand'
-                  : 'border-transparent text-ink-soft hover:border-line-strong hover:text-ink'
+                  ? 'bg-brand-soft text-brand'
+                  : 'text-ink-soft hover:bg-surface-alt hover:text-ink'
               }`}
             >
               {item.label}

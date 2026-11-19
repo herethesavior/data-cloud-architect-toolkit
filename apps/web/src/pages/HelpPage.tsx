@@ -1,4 +1,6 @@
-import { Badge, Button, Panel, Tabs } from '../components/ui/index.ts';
+import { useEffect, useState } from 'react';
+import { Badge, Button, Panel, SearchField, Tabs } from '../components/ui/index.ts';
+import type { BadgeTone } from '../components/ui/index.ts';
 import { Icon } from '../components/Icon.tsx';
 import type { IconName } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
@@ -11,6 +13,15 @@ interface HelpPageProps {
 const REPOSITORY_URL = 'https://github.com/herethesavior/data-cloud-architect-toolkit';
 const ISSUES_URL = `${REPOSITORY_URL}/issues`;
 const LINKEDIN_URL = 'https://www.linkedin.com/in/ryanjoshuadc';
+
+const TOPIC_IDS = ['start', 'connect', 'explore', 'status', 'glossary', 'about'] as const;
+type TopicId = (typeof TOPIC_IDS)[number];
+const DEFAULT_TOPIC: TopicId = 'start';
+
+function topicFromUrl(): TopicId {
+  const requested = new URLSearchParams(window.location.search).get('topic');
+  return TOPIC_IDS.find((id) => id === requested) ?? DEFAULT_TOPIC;
+}
 
 interface ExternalLinkProps {
   href: string;
@@ -39,6 +50,60 @@ function ExternalLink({ href, label, description, primary = false }: ExternalLin
   );
 }
 
+function PanelTitle({ icon, title, description }: { icon: IconName; title: string; description?: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand">
+        <Icon name={icon} size={18} />
+      </span>
+      <div className="min-w-0">
+        <h3 className="text-base font-semibold text-ink">{title}</h3>
+        {description ? <p className="mt-1 max-w-3xl text-sm text-ink-soft">{description}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+const quickAnswers = [
+  {
+    question: 'What do I need to get started?',
+    answer: 'Nothing for demo mode — it uses labelled sample data and works offline. Live mode reads metadata through Salesforce CLI on this machine, or through your local bridge when you use the hosted site.',
+  },
+  {
+    question: 'Can DCAT change anything in my org?',
+    answer: 'No. Every command it runs is read-only. DCAT never writes, deploys, ingests, or activates metadata, and all exports are generated locally.',
+  },
+  {
+    question: 'Where should I begin?',
+    answer: 'Open the Dashboard for a health snapshot, then pick the explorer that matches your question. The Explore & trace tab maps common questions to the right view.',
+  },
+  {
+    question: 'Will I see customer or transaction records?',
+    answer: 'Never. DCAT reads configuration and schema metadata only.',
+  },
+];
+
+const firstSteps: { title: string; body: string; action: string; page: Page }[] = [
+  {
+    title: 'Explore the sample inventory',
+    body: 'Start in demo mode. No Salesforce CLI, org, or network access to Salesforce is needed.',
+    action: 'Open Dashboard',
+    page: 'dashboard',
+  },
+  {
+    title: 'Follow one path end to end',
+    body: 'Trace a source connector through streams, DLOs, transforms, and DMOs in a single grounded view.',
+    action: 'Open Data Lineage Explorer',
+    page: 'lineage',
+  },
+  {
+    title: 'Bring your own org',
+    body: 'Connect an org, then check Discovery Health before you trust what an explorer is showing you.',
+    action: 'Open Org Connections',
+    page: 'orgs',
+  },
+];
+
 const editions: { title: string; description: string; icon: IconName }[] = [
   {
     title: 'Local edition',
@@ -52,85 +117,146 @@ const editions: { title: string; description: string; icon: IconName }[] = [
   },
 ];
 
-const does: string[] = [
-  'Read metadata with allowlisted, read-only Salesforce CLI commands.',
-  'Show Data Spaces, DLOs, DMOs, mappings, streams, transforms, and relationships.',
-  'Show source endpoint, API version, retrieval time, and confidence for metadata.',
-  'Mark unsupported, forbidden, and partial results explicitly.',
-  'Keep exports local and user-initiated.',
-];
-
-const doesNot: string[] = [
-  'Create, update, delete, deploy, activate, ingest, or refresh org data.',
-  'Query or display customer or transaction records.',
-  'Invent counts, objects, or relationships.',
-  'Turn a permissions problem into an empty dataset.',
-  'Send org metadata to a third party.',
-];
-
-const steps: { title: string; body: string }[] = [
+const connectSteps = [
   {
-    title: 'Choose a mode and an org',
-    body: 'Demo mode uses a fully labelled sample inventory and needs no Salesforce CLI. Live mode reads an authenticated org from Salesforce CLI, or through your local bridge when you use the hosted site.',
+    title: 'Pick a mode',
+    body: 'Use the switch in the header. Demo needs no setup; live reads an authenticated org from Salesforce CLI, or from the local bridge when hosted.',
   },
   {
-    title: 'Read the supported API version',
-    body: 'DCAT first asks Salesforce CLI for the latest supported API version. If that fails, it requests no metadata and explains the gap.',
+    title: 'Select an org',
+    body: 'Choose an alias in the header picker, or connect a new one in Org Connections. Credentials stay in Salesforce CLI — DCAT never sees them.',
   },
   {
-    title: 'Probe each metadata family independently',
-    body: 'Data Spaces, DLOs, DMOs, mappings, streams, and transforms are checked separately. A failure in one family does not erase successful results from another.',
-  },
-  {
-    title: 'Show status, provenance, and gaps',
-    body: 'A 403 is shown as forbidden, an unsupported endpoint as unsupported, and malformed responses as errors. Partial results are labelled, and the inventory shows where each finding came from.',
-  },
-  {
-    title: 'Refresh or export when you choose',
-    body: 'Loaded orgs and inventories are saved in this browser and restored after a reload, so menu navigation does not retrieve them again. The Updated chip shows their age; use Refresh for a token-protected retrieval. Exports stay local.',
+    title: 'Check Discovery Health',
+    body: 'Each metadata family reports its own status. A failure in one family never hides successful results from another.',
   },
 ];
 
-const glossary: { term: string; definition: string }[] = [
+const statusRows: { status: string; tone: BadgeTone; meaning: string; action: string }[] = [
   {
-    term: 'Data Space',
-    definition: 'A logical boundary that groups metadata objects and defines ownership in Data 360.',
+    status: 'Complete',
+    tone: 'success',
+    meaning: 'Every object in the family was retrieved.',
+    action: 'No action needed.',
   },
   {
-    term: 'Data Lake Object (DLO)',
-    definition: 'A raw ingested object. DLOs are the starting point for most source-to-target lineage in DCAT.',
+    status: 'Partial',
+    tone: 'warning',
+    meaning: 'Some objects were retrieved and the rest are listed as gaps.',
+    action: 'Review the gaps, then retry that family.',
   },
   {
-    term: 'Data Model Object (DMO)',
-    definition: 'A unified model object that downstream Data 360 experiences consume.',
+    status: 'Forbidden',
+    tone: 'danger',
+    meaning: 'The CLI user lacks permission for this endpoint.',
+    action: 'Ask your admin for metadata API access. Other families keep their results.',
   },
   {
-    term: 'Mapping',
-    definition: 'A grounded source-to-target relationship, usually from DLO fields to DMO fields. DCAT does not infer mappings that metadata does not provide.',
+    status: 'Unsupported',
+    tone: 'neutral',
+    meaning: 'This API version does not expose the endpoint.',
+    action: 'Check the supported API version in Settings & Diagnostics.',
   },
   {
-    term: 'Data Stream',
-    definition: 'An ingestion path with a source connector, target DLO, status, and cadence when those details are exposed.',
+    status: 'Failed',
+    tone: 'danger',
+    meaning: 'The request errored before it could finish.',
+    action: 'Retry from the inventory, then check diagnostics if it repeats.',
   },
   {
-    term: 'Data Transform',
-    definition: 'A batch or streaming step that prepares data. DCAT shows its definition, lineage, schedule, and run history only when metadata exposes them.',
+    status: 'Stale',
+    tone: 'warning',
+    meaning: 'The saved snapshot is older than expected.',
+    action: 'Use Refresh to retrieve it again.',
+  },
+];
+
+const explorerRows: { question: string; label: string; shows: string; page: Page }[] = [
+  {
+    question: 'What objects exist, and which fields do they have?',
+    label: 'DLO Explorer',
+    shows: 'Ingested objects with fields and provenance',
+    page: 'dlos',
   },
   {
-    term: 'ERD Explorer',
-    definition: 'A relationship view that separates confirmed and inferred edges and lets you filter by certainty.',
+    question: 'How is a unified model structured?',
+    label: 'DMO Explorer',
+    shows: 'Model objects, fields, and relationships',
+    page: 'dmos',
   },
   {
-    term: 'Data Lineage Explorer',
-    definition: 'An end-to-end view of source systems, streams, DLOs, mappings, transforms, and DMOs. Solid links are named in metadata, dashed links are derived, and missing references appear as gaps.',
+    question: 'How do fields move from source to target?',
+    label: 'Mapping Explorer',
+    shows: 'Grounded field-level mappings',
+    page: 'mappings',
   },
   {
-    term: 'Discovery Health',
-    definition: 'The per-family status summary that distinguishes complete, partial, forbidden, unsupported, and failed retrievals.',
+    question: 'Where does ingested data land?',
+    label: 'Data Stream Explorer',
+    shows: 'Connectors, target DLOs, cadence, and status',
+    page: 'data-streams',
   },
   {
-    term: 'Provenance',
-    definition: 'The source endpoint, API version, retrieval time, and confidence attached to a metadata finding.',
+    question: 'What prepares the data before it is modelled?',
+    label: 'Data Transform Explorer',
+    shows: 'Definitions, lineage, schedules, and run history',
+    page: 'data-transforms',
+  },
+  {
+    question: 'How do objects relate to one another?',
+    label: 'ERD Explorer',
+    shows: 'Confirmed and inferred relationships',
+    page: 'erd',
+  },
+  {
+    question: 'What is the whole path, end to end?',
+    label: 'Data Lineage Explorer',
+    shows: 'Sources → streams → DLOs → transforms → DMOs',
+    page: 'lineage',
+  },
+];
+
+const linkLegend = [
+  {
+    className: 'border-solid',
+    label: 'Named in metadata',
+    detail: 'The link is written in the current snapshot — for example a stream target or a declared mapping.',
+  },
+  {
+    className: 'border-dashed',
+    label: 'Derived by DCAT',
+    detail: 'DCAT joined grounded references into a relationship. It is labelled as derived, never presented as a declared edge.',
+  },
+  {
+    className: 'border-dotted',
+    label: 'Missing reference',
+    detail: 'Metadata names an object that is absent from this snapshot. It appears as a gap, not as an invented node.',
+  },
+];
+
+const navigationTips = [
+  'Search metadata from anywhere with Ctrl K (⌘K on Mac).',
+  'Filter and search inside each explorer instead of scanning every row.',
+  'On the canvases, drag nodes, zoom, pan, and use Fit to frame the graph.',
+  'Filters, layout, positions, and viewport persist per org, so returning to a view keeps your place.',
+  'Exports are generated locally and only when you choose a format.',
+];
+
+const evidenceItems = [
+  {
+    title: 'Source-named',
+    icon: 'check' as const,
+    body: 'The object or link is explicitly present in the metadata returned by Salesforce CLI.',
+  },
+  {
+    title: 'Derived',
+    icon: 'route' as const,
+    body: 'DCAT connected two grounded facts. Derived items are labelled and can be filtered out.',
+  },
+  {
+    title: 'Gap',
+    icon: 'warning' as const,
+    body: 'A reference points to something the snapshot does not contain. DCAT shows the missing name instead of guessing.',
   },
 ];
 
@@ -165,82 +291,176 @@ const privacyItems: { title: string; body: string; icon: IconName }[] = [
     body: '/api/auth/* routes are intentionally removed and return 404. Demo data is labelled Demo and never appears under a live label.',
     icon: 'info',
   },
+];
+
+const glossaryGroups: { title: string; terms: { term: string; definition: string }[] }[] = [
   {
-    title: 'Exports stay local',
-    body: 'Exports are generated locally and only after you choose a format. They can still reveal internal architecture, so share them according to your organization’s policies.',
-    icon: 'download',
+    title: 'Data model',
+    terms: [
+      {
+        term: 'Data Space',
+        definition: 'A logical boundary that groups metadata objects and defines ownership in Data 360.',
+      },
+      {
+        term: 'Data Lake Object (DLO)',
+        definition: 'A raw ingested object. DLOs are the starting point for most source-to-target lineage in DCAT.',
+      },
+      {
+        term: 'Data Model Object (DMO)',
+        definition: 'A unified model object that downstream Data 360 experiences consume.',
+      },
+      {
+        term: 'Mapping',
+        definition: 'A grounded source-to-target relationship, usually from DLO fields to DMO fields. DCAT does not infer mappings that metadata does not provide.',
+      },
+    ],
   },
   {
-    title: 'No telemetry',
-    body: 'No analytics or telemetry service receives org metadata.',
-    icon: 'monitor',
+    title: 'Movement',
+    terms: [
+      {
+        term: 'Data Stream',
+        definition: 'An ingestion path with a source connector, target DLO, status, and cadence when those details are exposed.',
+      },
+      {
+        term: 'Data Transform',
+        definition: 'A batch or streaming step that prepares data. DCAT shows its definition, lineage, schedule, and run history only when metadata exposes them.',
+      },
+      {
+        term: 'ERD Explorer',
+        definition: 'A relationship view that separates confirmed and inferred edges and lets you filter by certainty.',
+      },
+      {
+        term: 'Data Lineage Explorer',
+        definition: 'An end-to-end view of source systems, streams, DLOs, mappings, transforms, and DMOs. Solid links are named in metadata, dashed links are derived, and missing references appear as gaps.',
+      },
+    ],
+  },
+  {
+    title: 'Evidence & health',
+    terms: [
+      {
+        term: 'Discovery Health',
+        definition: 'The per-family status summary that distinguishes complete, partial, forbidden, unsupported, and failed retrievals.',
+      },
+      {
+        term: 'Provenance',
+        definition: 'The source endpoint, API version, retrieval time, and confidence attached to a metadata finding.',
+      },
+      {
+        term: 'Gap',
+        definition: 'A metadata reference to an object that is not present in the loaded snapshot. Gaps are shown explicitly so a missing answer is never mistaken for an empty result.',
+      },
+      {
+        term: 'Source-named link',
+        definition: 'A relationship written directly in the metadata, shown with a solid line in the explorers.',
+      },
+    ],
   },
 ];
 
 export function HelpPage({ onNavigate }: HelpPageProps) {
+  const [activeTopic, setActiveTopic] = useState<TopicId>(topicFromUrl);
+  const [termFilter, setTermFilter] = useState('');
+
+  useEffect(() => {
+    const syncTopicFromUrl = () => setActiveTopic(topicFromUrl());
+    window.addEventListener('popstate', syncTopicFromUrl);
+    return () => window.removeEventListener('popstate', syncTopicFromUrl);
+  }, []);
+
+  const changeTopic = (id: string) => {
+    const next = TOPIC_IDS.find((topic) => topic === id) ?? DEFAULT_TOPIC;
+    setActiveTopic(next);
+    const url = new URL(window.location.href);
+    if (next === DEFAULT_TOPIC) url.searchParams.delete('topic');
+    else url.searchParams.set('topic', next);
+    window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const query = termFilter.trim().toLowerCase();
+  const matchedGroups = glossaryGroups
+    .map((group) => ({
+      ...group,
+      terms: group.terms.filter((term) => `${term.term} ${term.definition}`.toLowerCase().includes(query)),
+    }))
+    .filter((group) => group.terms.length > 0);
+  const matchedTerms = matchedGroups.reduce((total, group) => total + group.terms.length, 0);
+
   const tabs = [
     {
-      id: 'what',
-      label: 'What is DCAT?',
+      id: 'start',
+      label: 'Start here',
       content: (
         <div className="space-y-5">
           <Panel>
-            <h3 className="text-lg font-semibold text-ink">A read-only workbench for Data 360 metadata</h3>
-            <p className="mt-2 max-w-3xl text-sm text-ink-soft">
-              DCAT helps architects see how a Data 360 model is put together. It reads configuration and schema
-              metadata through Salesforce CLI on your machine. It never asks for a password, token, auth URL, or
-              client secret.
-            </p>
-            <div className="mt-5 grid gap-3 md:grid-cols-2">
-              {editions.map((edition) => (
-                <div key={edition.title} className="rounded-lg border border-line bg-surface-alt p-4">
-                  <div className="flex items-center gap-2 text-brand">
-                    <Icon name={edition.icon} size={18} />
-                    <p className="font-semibold text-ink">{edition.title}</p>
-                  </div>
-                  <p className="mt-2 text-sm text-ink-soft">{edition.description}</p>
+            <PanelTitle
+              icon="info"
+              title="Quick answers"
+              description="The four questions people ask most before they explore a real org."
+            />
+            <dl className="mt-4 space-y-3">
+              {quickAnswers.map((item) => (
+                <div key={item.question} className="rounded-lg border border-line bg-surface-alt p-3">
+                  <dt className="text-sm font-semibold text-ink">{item.question}</dt>
+                  <dd className="mt-1 text-sm leading-relaxed text-ink-soft">{item.answer}</dd>
                 </div>
               ))}
-            </div>
-            <p className="mt-4 text-sm text-ink-soft">
-              Both editions include a clearly labelled <strong className="font-semibold text-ink">Demo</strong> mode.
-              Demo needs no Salesforce CLI, no org, and no network access to Salesforce.
-            </p>
+            </dl>
           </Panel>
 
           <Panel>
-            <h3 className="text-lg font-semibold text-ink">What it does — and does not</h3>
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <div className="rounded-lg border border-success/20 bg-success-soft p-4">
-                <p className="flex items-center gap-2 font-semibold text-success">
-                  <Icon name="check" size={17} /> DCAT does
-                </p>
-                <ul className="mt-3 space-y-2 text-sm text-ink-soft">
-                  {does.map((item) => <li key={item} className="flex gap-2"><span aria-hidden="true">•</span><span>{item}</span></li>)}
-                </ul>
-              </div>
-              <div className="rounded-lg border border-line bg-surface-alt p-4">
-                <p className="flex items-center gap-2 font-semibold text-ink">
-                  <Icon name="info" size={17} className="text-ink-soft" /> DCAT does not
-                </p>
-                <ul className="mt-3 space-y-2 text-sm text-ink-soft">
-                  {doesNot.map((item) => <li key={item} className="flex gap-2"><span aria-hidden="true">•</span><span>{item}</span></li>)}
-                </ul>
-              </div>
-            </div>
+            <PanelTitle
+              icon="dashboard"
+              title="Your first five minutes"
+              description="Each step opens the view it describes, so you can follow along immediately."
+            />
+            <ol className="mt-4 space-y-3">
+              {firstSteps.map((step, index) => (
+                <li key={step.title} className="grid gap-3 rounded-lg border border-line bg-surface-alt p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                  <div className="flex min-w-0 gap-3">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-soft text-xs font-semibold text-brand">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-medium text-ink">{step.title}</p>
+                      <p className="mt-1 text-sm text-ink-soft">{step.body}</p>
+                    </div>
+                  </div>
+                  <Button variant="secondary" onClick={() => onNavigate(step.page)} className="sm:justify-self-end">
+                    {step.action}
+                  </Button>
+                </li>
+              ))}
+            </ol>
           </Panel>
         </div>
       ),
     },
     {
-      id: 'how',
-      label: 'How it works',
+      id: 'connect',
+      label: 'Connect & refresh',
       content: (
         <div className="space-y-5">
           <Panel>
-            <h3 className="text-lg font-semibold text-ink">From org selection to inventory</h3>
+            <PanelTitle icon="plug" title="Two editions, one workflow" description="Both editions read the same metadata and offer the same labelled demo mode." />
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {editions.map((edition) => (
+                <div key={edition.title} className="rounded-lg border border-line bg-surface-alt p-4">
+                  <p className="flex items-center gap-2 font-semibold text-ink">
+                    <Icon name={edition.icon} size={18} className="text-brand" />
+                    {edition.title}
+                  </p>
+                  <p className="mt-2 text-sm text-ink-soft">{edition.description}</p>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel>
+            <PanelTitle icon="layers" title="Connect in three steps" />
             <ol className="mt-4 space-y-3">
-              {steps.map((step, index) => (
+              {connectSteps.map((step, index) => (
                 <li key={step.title} className="flex gap-3 rounded-lg border border-line bg-surface-alt p-3">
                   <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-soft text-xs font-semibold text-brand">
                     {index + 1}
@@ -252,13 +472,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
                 </li>
               ))}
             </ol>
-          </Panel>
-          <Panel className="flex flex-wrap items-center justify-between gap-4">
-            <div className="min-w-0">
-              <p className="font-semibold text-ink">Ready to look at your own metadata?</p>
-              <p className="mt-1 text-sm text-ink-soft">Connect an org, or review the connector status and privacy summary.</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="mt-4 flex flex-wrap gap-2">
               <Button variant="primary" onClick={() => onNavigate('orgs')} icon={<Icon name="plug" size={16} />}>
                 Open Org Connections
               </Button>
@@ -267,53 +481,133 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
               </Button>
             </div>
           </Panel>
-        </div>
-      ),
-    },
-    {
-      id: 'glossary',
-      label: 'Data Cloud glossary',
-      content: (
-        <div className="space-y-5">
+
           <Panel>
-            <h3 className="text-lg font-semibold text-ink">Terms you will see in the explorers</h3>
-            <dl className="mt-4 grid gap-x-8 gap-y-5 md:grid-cols-2">
-              {glossary.map((entry) => (
-                <div key={entry.term} className="border-l-2 border-line pl-3">
-                  <dt className="text-sm font-semibold text-ink">{entry.term}</dt>
-                  <dd className="mt-1 text-sm text-ink-soft">{entry.definition}</dd>
-                </div>
-              ))}
-            </dl>
-          </Panel>
-          <Panel className="flex items-start gap-3 border-info/20 bg-info-soft">
-            <Icon name="info" size={18} className="mt-0.5 shrink-0 text-info" />
-            <p className="text-sm text-ink-soft">
-              DCAT shows configuration and schema metadata only. It never queries or displays customer records.
+            <PanelTitle
+              icon="refresh"
+              title="Refresh and caching"
+              description="DCAT first asks Salesforce CLI for the latest supported API version. If that fails, it requests no metadata and explains the gap."
+            />
+            <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-soft">
+              Loaded orgs and inventories are saved in this browser and restored after a reload, so menu navigation does not
+              retrieve them again. The Updated chip shows their age. Use Refresh for a token-protected retrieval; you can
+              cancel an in-flight refresh, and a failure in one metadata family never erases another family’s results.
             </p>
           </Panel>
+
+          <Panel>
+            <PanelTitle
+              icon="warning"
+              title="Statuses, explained"
+              description="Find the label in Discovery Health, then use the last column as your next step."
+            />
+            <ul className="mt-4 space-y-2">
+              {statusRows.map((row) => (
+                <li key={row.status} className="grid gap-2 rounded-lg border border-line bg-surface-alt p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                  <div className="flex items-center gap-2">
+                    <Badge tone={row.tone} dot>{row.status}</Badge>
+                    <span className="text-xs text-ink-soft">{row.meaning}</span>
+                  </div>
+                  <p className="text-sm text-ink-soft">{row.action}</p>
+                </li>
+              ))}
+            </ul>
+          </Panel>
         </div>
       ),
     },
     {
-      id: 'privacy',
-      label: 'Privacy',
+      id: 'explore',
+      label: 'Explore & trace',
       content: (
         <div className="space-y-5">
           <Panel>
-            <div className="flex items-start gap-3">
-              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-success-soft text-success">
-                <Icon name="shield" size={20} />
-              </span>
-              <div className="min-w-0">
-                <h3 className="text-lg font-semibold text-ink">Private by boundary, not by promise</h3>
-                <p className="mt-1 max-w-3xl text-sm text-ink-soft">
-                  Both editions keep authentication with Salesforce CLI and limit what the browser can ask for.
-                  The hosted edition adds a short-lived session and an outbound bridge, but never hosts Salesforce OAuth.
-                </p>
-              </div>
-            </div>
-            <ul className="mt-5 grid gap-3 sm:grid-cols-2">
+            <PanelTitle
+              icon="graph"
+              title="Pick the view for your question"
+              description="Every view reads the same snapshot, so a finding in one explorer matches the others."
+            />
+            <ul className="mt-4 space-y-2">
+              {explorerRows.map((row) => (
+                <li key={row.label} className="grid gap-3 rounded-lg border border-line bg-surface-alt p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink">{row.question}</p>
+                    <p className="mt-1 text-xs text-ink-soft">{row.label} · {row.shows}</p>
+                  </div>
+                  <Button variant="quiet" onClick={() => onNavigate(row.page)} className="sm:justify-self-end">
+                    Open
+                    <Icon name="arrowRight" size={15} />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+
+          <Panel>
+            <PanelTitle
+              icon="route"
+              title="Read the links honestly"
+              description="Line style tells you how strongly a connection is grounded. DCAT never joins objects just because their names look alike."
+            />
+            <ul className="mt-4 space-y-3">
+              {linkLegend.map((item) => (
+                <li key={item.label} className="flex gap-3 rounded-lg border border-line bg-surface-alt p-3">
+                  <span aria-hidden="true" className={`mt-3 h-0 w-8 shrink-0 border-t-2 ${item.className} border-brand`} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink">{item.label}</p>
+                    <p className="mt-1 text-sm text-ink-soft">{item.detail}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+
+          <Panel>
+            <PanelTitle icon="search" title="Get around faster" />
+            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+              {navigationTips.map((tip) => (
+                <li key={tip} className="flex gap-2 rounded-lg border border-line bg-surface-alt p-3 text-sm text-ink-soft">
+                  <Icon name="check" size={15} className="mt-0.5 shrink-0 text-success" />
+                  <span>{tip}</span>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        </div>
+      ),
+    },
+    {
+      id: 'status',
+      label: 'Status & privacy',
+      content: (
+        <div className="space-y-5">
+          <Panel>
+            <PanelTitle
+              icon="shield"
+              title="How DCAT labels evidence"
+              description="A missing answer is shown as missing, never quietly replaced with a guess."
+            />
+            <ul className="mt-4 grid gap-3 sm:grid-cols-3">
+              {evidenceItems.map((item) => (
+                <li key={item.title} className="rounded-lg border border-line bg-surface-alt p-3">
+                  <p className="flex items-center gap-2 font-medium text-ink">
+                    <Icon name={item.icon} size={16} className="text-ink-soft" />
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-soft">{item.body}</p>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-4 max-w-3xl text-sm text-ink-soft">
+              Read metadata with allowlisted, read-only Salesforce CLI commands. DCAT shows the source endpoint,
+              API version, retrieval time, and confidence behind a finding, and it marks unsupported, forbidden, and
+              partial results explicitly.
+            </p>
+          </Panel>
+
+          <Panel>
+            <PanelTitle icon="lock" title="Privacy by boundary" description="Concretely, what DCAT can and cannot reach." />
+            <ul className="mt-4 grid gap-3 sm:grid-cols-2">
               {privacyItems.map((item) => (
                 <li key={item.title} className="rounded-lg border border-line bg-surface-alt p-3">
                   <p className="flex items-center gap-2 font-medium text-ink">
@@ -325,14 +619,67 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
               ))}
             </ul>
           </Panel>
+
           <Panel className="border-warning/20 bg-warning-soft">
             <h3 className="flex items-center gap-2 font-semibold text-ink">
               <Icon name="warning" size={17} className="text-warning" /> Limits to know
             </h3>
-            <p className="mt-2 text-sm text-ink-soft">
+            <p className="mt-2 max-w-3xl text-sm text-ink-soft">
               Operational controls such as audit logging and a formal retention policy are not part of this release.
               Add them before using the hosted edition for regulated data. Report security issues privately through the
               repository’s security advisory feature, and never include real credentials or customer data in a report.
+            </p>
+          </Panel>
+        </div>
+      ),
+    },
+    {
+      id: 'glossary',
+      label: 'Glossary',
+      content: (
+        <div className="space-y-5">
+          <Panel>
+            <PanelTitle
+              icon="book"
+              title="Terms you will see in the explorers"
+              description="Filter by term or definition, or browse by group."
+            />
+            <SearchField
+              className="mt-4 max-w-sm"
+              value={termFilter}
+              onChange={setTermFilter}
+              label="Filter glossary terms"
+              placeholder="Filter terms…"
+            />
+            <p className="mt-2 text-xs text-ink-soft" aria-live="polite">
+              Showing {matchedTerms} of {glossaryGroups.reduce((total, group) => total + group.terms.length, 0)} terms
+            </p>
+            {matchedGroups.length > 0 ? (
+              <div className="mt-4 space-y-5">
+                {matchedGroups.map((group) => (
+                  <section key={group.title}>
+                    <h4 className="label-xs">{group.title}</h4>
+                    <dl className="mt-2 grid gap-x-8 gap-y-4 md:grid-cols-2">
+                      {group.terms.map((entry) => (
+                        <div key={entry.term} className="border-l-2 border-line pl-3">
+                          <dt className="text-sm font-semibold text-ink">{entry.term}</dt>
+                          <dd className="mt-1 text-sm text-ink-soft">{entry.definition}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-lg border border-line bg-surface-alt p-3 text-sm text-ink-soft">
+                No glossary terms match “{termFilter}”. Try a shorter word such as “mapping” or “gap”.
+              </p>
+            )}
+          </Panel>
+          <Panel className="flex items-start gap-3 border-info/20 bg-info-soft">
+            <Icon name="info" size={18} className="mt-0.5 shrink-0 text-info" />
+            <p className="text-sm text-ink-soft">
+              DCAT shows configuration and schema metadata only. It never queries or displays customer records.
             </p>
           </Panel>
         </div>
@@ -402,11 +749,11 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
     <div className="space-y-5">
       <PageIntro
         title="Help & documentation"
-        description="Plain-language answers about DCAT, Data 360 metadata, and how your org information is handled."
+        description="Start with a quick answer, find the right explorer, then understand how DCAT labels evidence."
         meta={<Badge tone="brand" dot>Read-only · Local-first</Badge>}
       />
       <Panel className="p-4 sm:p-5">
-        <Tabs items={tabs} label="Help topics" />
+        <Tabs items={tabs} label="Help topics" activeId={activeTopic} onActiveChange={changeTopic} />
       </Panel>
     </div>
   );

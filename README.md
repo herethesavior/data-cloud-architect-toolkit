@@ -169,7 +169,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 | Data Lineage Explorer | End-to-end grounded flow across sources, streams, DLOs, mappings, transforms, and DMOs with path tracing, gap detection, details, and local exports. |
 | Data Dictionary | Unified field reference. |
 | Settings & Diagnostics | Connector and CLI status plus privacy summary. |
-| Help | Tabbed documentation: What is DCAT?, How it works, Data Cloud glossary, Privacy, and About & contact (creator, role, repository, and LinkedIn). |
+| Help | Task-first documentation with quick answers, connection and status guidance, a question-to-explorer map, link-grounding rules, a filterable glossary, privacy limits, and contact links. Topics are URL-addressable so reload, back/forward, and shared links keep your place. |
 
 The demo inventory is fully labelled and intentionally healthy. It contains eight DLOs, eight DMOs, seven field-level mappings, six streams, five transforms, and nine labelled ERD relationships so the explorers can be evaluated without implying that live data was discovered. The lineage explorer joins those families into 30 steps and 43 links, including source connector nodes, transform inputs/outputs, and explicit derived links; no references are missing in demo mode.
 
