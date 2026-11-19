@@ -612,12 +612,12 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
     <div className="space-y-5">
       <PageIntro
         title="About DCAT"
-        description="A product story: why DCAT exists, what it does, and where it can go next."
+        description="Scroll through the story below, or open the full-screen deck."
         meta={<Badge tone="brand" dot>Read-only · Local-first</Badge>}
         actions={
           <Button
             id="about-present-button"
-            variant="primary"
+            variant="secondary"
             icon={<Icon name="presentation" size={17} />}
             onClick={() => void startPresenting()}
           >
@@ -633,7 +633,7 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
       ) : null}
 
       <Panel className="p-4 sm:p-5">
-        <p className="label-xs mb-3">Chapters</p>
+        <p className="label-xs mb-3">Jump to a chapter</p>
         <nav className="chapter-index" aria-label="Chapters">
           {chapters.map((chapter, index) => (
             <button

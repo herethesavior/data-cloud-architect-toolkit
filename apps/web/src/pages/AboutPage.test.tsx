@@ -14,8 +14,9 @@ describe('AboutPage', () => {
     render(<AboutPage onNavigate={vi.fn()} />);
 
     expect(screen.getByRole('heading', { name: 'About DCAT', level: 2 })).toBeInTheDocument();
-    expect(screen.getByText('A product story: why DCAT exists, what it does, and where it can go next.')).toBeInTheDocument();
+    expect(screen.getByText('Scroll through the story below, or open the full-screen deck.')).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Chapters' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Present' })).toHaveClass('btn-secondary');
     expect(screen.getByRole('heading', { name: /See the architecture behind the data/ })).toBeInTheDocument();
     expect(screen.getAllByText(/See the architecture\. Understand the connections\. Make better decisions\./).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: /Trust makes it valuable/ })).toBeInTheDocument();
