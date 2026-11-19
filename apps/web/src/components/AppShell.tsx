@@ -53,6 +53,7 @@ interface AppShellProps {
   onSelectOrg: (alias: string) => void;
   onGoToOrgs: () => void;
   theme: ThemeController;
+  localDataEpoch?: number;
   searchResults: CommandResult[];
   onSelectSearchResult: (result: CommandResult) => void;
   children: ReactNode;
@@ -220,6 +221,7 @@ export function AppShell({
   onSelectOrg,
   onGoToOrgs,
   theme,
+  localDataEpoch = 0,
   searchResults,
   onSelectSearchResult,
   children,
@@ -229,6 +231,7 @@ export function AppShell({
   const [sidebarCollapsed, setCollapsed] = useState(getSidebarCollapsed);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [metadataResult, setMetadataResult] = useState<CommandResult | null>(null);
+  const previousDataEpochRef = useRef(localDataEpoch);
   const selectedOrg = orgs.find((org) => org.alias === selectedAlias) ?? null;
   const groupLabel = NAV_GROUPS.find((group) => group.items.some((item) => item.id === page))?.label ?? 'Workspace';
   // The session mode is the source of truth even when no org is selected. A
@@ -246,6 +249,13 @@ export function AppShell({
     setCollapsed(next);
     setSidebarCollapsed(next);
   };
+
+  useEffect(() => {
+    if (localDataEpoch === previousDataEpochRef.current) return;
+    previousDataEpochRef.current = localDataEpoch;
+    setCollapsed(false);
+    setSidebarCollapsed(false);
+  }, [localDataEpoch]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

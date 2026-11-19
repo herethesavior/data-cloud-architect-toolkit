@@ -243,7 +243,7 @@ export function Settings({ theme, onClearCachedMetadata, onResetSavedLayouts, on
               {dataNotice}
             </p>
           ) : null}
-          {dataError ? (
+          {dataError && !eraseOpen ? (
             <p className="mt-4 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">
               {dataError}
             </p>
@@ -282,7 +282,7 @@ export function Settings({ theme, onClearCachedMetadata, onResetSavedLayouts, on
                   authentication.
                 </p>
               </div>
-              <Button variant="danger" onClick={() => { setDataNotice(''); setEraseOpen(true); }} icon={<Icon name="warning" size={15} />}>
+              <Button variant="danger" onClick={() => { setDataNotice(''); setDataError(''); setEraseOpen(true); }} icon={<Icon name="warning" size={15} />}>
                 Erase all local data
               </Button>
             </div>
@@ -326,6 +326,7 @@ export function Settings({ theme, onClearCachedMetadata, onResetSavedLayouts, on
           }
           confirmLabel="Erase all local data"
           cancelLabel="Keep my data"
+          error={dataError}
           busy={erasing}
           onConfirm={() => void eraseData()}
           onClose={() => { if (!erasing) setEraseOpen(false); }}

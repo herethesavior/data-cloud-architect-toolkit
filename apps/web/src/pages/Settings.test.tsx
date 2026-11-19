@@ -184,4 +184,22 @@ describe('Settings stored data controls', () => {
     expect(await screen.findByText(/All local data erased/)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('shows a failed erase inside the dialog instead of hiding it behind the modal', async () => {
+    const onEraseLocalData = vi.fn().mockRejectedValue(new Error('Connector offline.'));
+    renderSettings({ onEraseLocalData });
+
+    await screen.findByRole('heading', { name: 'Stored data' });
+    await act(async () => {
+      screen.getByRole('button', { name: 'Erase all local data' }).click();
+    });
+    await act(async () => {
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Erase all local data' }).click();
+    });
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Connector offline.');
+    expect(screen.queryByText(/All local data erased/)).not.toBeInTheDocument();
+  });
 });

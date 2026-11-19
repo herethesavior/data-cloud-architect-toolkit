@@ -9,6 +9,7 @@ interface ConfirmDialogProps {
   title: string;
   description: ReactNode;
   consequences?: ReactNode;
+  error?: string;
   confirmLabel: string;
   cancelLabel?: string;
   busy?: boolean;
@@ -21,6 +22,7 @@ export function ConfirmDialog({
   title,
   description,
   consequences,
+  error,
   confirmLabel,
   cancelLabel = 'Cancel',
   busy = false,
@@ -77,6 +79,11 @@ export function ConfirmDialog({
         <div id={descriptionId} className="space-y-4 px-5 py-5">
           <div className="text-sm text-ink-soft">{description}</div>
           {consequences}
+          {error ? (
+            <p role="alert" className="rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger">
+              {error}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-4">
           <button

@@ -439,6 +439,7 @@ test('stored data controls clear caches, reset layouts, and gate a full erase', 
   await page.addInitScript(() => {
     try {
       localStorage.setItem('dcat.theme', 'dark');
+      localStorage.setItem('dcat.sidebarCollapsed', 'true');
       localStorage.setItem('dcat.erd.v1.demo:demo-uat', '{"nodes":[]}');
       localStorage.setItem('dcat.lineage.v1.demo:demo-uat', '{"nodes":[]}');
       localStorage.setItem('unrelated-app', 'keep');
@@ -450,6 +451,7 @@ test('stored data controls clear caches, reset layouts, and gate a full erase', 
   await page.goto('/');
 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#desktop-sidebar')).toHaveAttribute('data-collapsed', 'true');
   await expect(page.getByText('Sample inventory')).toBeVisible();
   await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
 
@@ -479,6 +481,8 @@ test('stored data controls clear caches, reset layouts, and gate a full erase', 
   await dialog.getByRole('button', { name: 'Keep my data' }).click();
   await expect(dialog).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('dcat.theme'))).toBe('dark');
+  expect(await page.evaluate(() => Boolean(localStorage.getItem('dcat.mode')))).toBe(true);
+  expect(await page.evaluate(() => Boolean(localStorage.getItem('dcat.selectedOrg')))).toBe(true);
 
   await storedData.getByRole('button', { name: 'Erase all local data' }).click();
   await dialog.getByRole('button', { name: 'Erase all local data' }).click();
@@ -490,10 +494,35 @@ test('stored data controls clear caches, reset layouts, and gate a full erase', 
     localStorage.getItem('dcat.sidebarCollapsed'),
     localStorage.getItem('dcat.erd.v1.demo:demo-uat'),
     localStorage.getItem('dcat.lineage.v1.demo:demo-uat'),
-  ])).toEqual([null, null, null, null, null]);
+    localStorage.getItem('dcat.mode'),
+    localStorage.getItem('dcat.selectedOrg'),
+  ])).toEqual([null, null, null, null, null, null, null]);
   expect(await page.evaluate(() => localStorage.getItem('unrelated-app'))).toBe('keep');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('#desktop-sidebar')).toHaveAttribute('data-collapsed', 'false');
   await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toBeVisible();
+});
+
+test('erasing from live mode keeps the demo reset and does not restore live mode', async ({ page }) => {
+  const modeCalls: string[] = [];
+  await seedLiveMode(page);
+  await mockConnector(page, createConnectorState(), { modeCalls });
+  await page.goto('/');
+
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+  await page.getByRole('button', { name: 'Erase all local data' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Erase all local data' }).click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('status')).toContainText('All local data erased');
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toBeVisible();
+  await expect.poll(() => modeCalls).toEqual(['live', 'demo']);
+  expect(await page.evaluate(() => [
+    localStorage.getItem('dcat.mode'),
+    localStorage.getItem('dcat.selectedOrg'),
+  ])).toEqual([null, null]);
 });
 
 test('demo mode without an org never presents itself as live', async ({ page }) => {
