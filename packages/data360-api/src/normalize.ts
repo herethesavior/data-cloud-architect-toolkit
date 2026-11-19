@@ -42,7 +42,7 @@ export function parseJsonResponse(raw: string, label: string): unknown {
   }
 }
 
-const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'relationships', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions'];
+const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'relationships', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions', 'connectorInfoList', 'connections'];
 const CONTAINER_KEYS = ['result', 'data', 'response', 'payload'];
 
 /**
@@ -528,6 +528,13 @@ export function normalizeDataStreams(raw: unknown, context: NormalizeContext): N
       sourceConnector: firstString(entry, ['sourceConnector', 'connector', 'sourceName', 'source'])
         ?? nestedString(entry, ['connectorInfo', 'connectorDetails', 'type'])
         ?? firstString(entry, ['dataSource']),
+      sourceConnectorLabel: firstString(entry, ['sourceConnectorLabel', 'connectorLabel'])
+        ?? nestedString(entry, ['connectorInfo', 'connectorDetails', 'label']),
+      sourceConnectionName: firstString(entry, ['sourceConnectionName', 'connectionName'])
+        ?? nestedString(entry, ['connectorInfo', 'connectorDetails', 'name']),
+      sourceConnectionLabel: firstString(entry, ['sourceConnectionLabel', 'connectionLabel']),
+      sourceConnectionStatus: firstString(entry, ['sourceConnectionStatus', 'connectionStatus']),
+      sourceDataSource: firstString(entry, ['dataSource']),
       // Live streams embed the DLO under `dataLakeObjectInfo`; that name is the
       // only reliable join key for Data Space card counts.
       targetDlo: firstString(entry, ['targetDlo', 'targetDloName', 'targetObject', 'dlo', 'target'])

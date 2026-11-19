@@ -932,6 +932,9 @@ test('data stream explorer shows grounded source-to-target detail and visible ex
   await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Target DLO' })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Raw Metadata' })).toBeVisible();
+  await expect(drawer.getByText('Salesforce CRM', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('Demo Salesforce Org', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('Connected · SalesforceDotCom_Home', { exact: true })).toBeVisible();
 
   await drawer.getByRole('tab', { name: 'Target DLO' }).click();
   await expect(drawer.getByText('Known in inventory')).toBeVisible();
@@ -1496,6 +1499,7 @@ test('command palette opens stream results in the Data Stream Explorer', async (
   await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Target DLO' })).toBeVisible();
   await expect(drawer.getByText('Salesforce CRM', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('Demo Salesforce Org', { exact: true })).toBeVisible();
 
   await drawer.getByRole('tab', { name: 'Raw Metadata' }).click();
   await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();

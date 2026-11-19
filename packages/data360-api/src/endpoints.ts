@@ -21,9 +21,14 @@ export const RELATIONSHIP_PAGE_SIZE = 500;
 
 const DMO_DEVELOPER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 const DATASPACE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
+const CONNECTOR_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 
 export function isValidDmoDeveloperName(name: string): boolean {
   return DMO_DEVELOPER_NAME_PATTERN.test(name.trim());
+}
+
+export function isValidConnectorType(type: string): boolean {
+  return CONNECTOR_TYPE_PATTERN.test(type.trim());
 }
 
 export function isValidDataspace(dataspace?: string | null): boolean {
@@ -100,6 +105,27 @@ export function buildDmoRelationshipsPath(
 
 export function buildVersionsPath(): string {
   return 'services/data/';
+}
+
+function buildConnectorBasePath(apiVersion: string): string {
+  if (!API_VERSION_PATTERN.test(apiVersion)) {
+    throw new CliError('INVALID_ARGUMENT', 'An invalid API version was supplied by the version adapter.');
+  }
+  return `services/data/v${apiVersion}/ssot`;
+}
+
+/** Connector catalog lookup. This is reference data, not an inventory family. */
+export function buildConnectorCatalogPath(apiVersion: string): string {
+  return `${buildConnectorBasePath(apiVersion)}/connectors`;
+}
+
+/** Query only the connector types that actually appear in discovered streams. */
+export function buildConnectorConnectionsPath(apiVersion: string, connectorType: string): string {
+  const trimmed = connectorType.trim();
+  if (!isValidConnectorType(trimmed)) {
+    throw new CliError('INVALID_ARGUMENT', 'The connector type contains unsupported characters.');
+  }
+  return `${buildConnectorBasePath(apiVersion)}/connections?connectorType=${encodeURIComponent(trimmed)}`;
 }
 
 export const TRANSFORM_SUBRESOURCE_SUFFIXES = {

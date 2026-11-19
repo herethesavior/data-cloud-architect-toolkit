@@ -48,6 +48,7 @@ describe('stream detail helpers', () => {
   it('keeps blank values out of search and distinguishes colliding API names', () => {
     expect(streamSearchValues(demoInventory, accounts)).toContain('Accounts Stream');
     expect(streamSearchValues(demoInventory, accounts)).toContain('Salesforce CRM');
+    expect(streamSearchValues(demoInventory, accounts)).toContain('Demo Salesforce Org');
     expect(streamSearchValues(demoInventory, { ...accounts, label: null })).not.toContain('');
 
     expect(streamValue('', 'fallback')).toBe('fallback');

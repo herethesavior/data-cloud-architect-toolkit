@@ -43,9 +43,11 @@ describe('global command search', () => {
 
     const apiMatches = filterCommandResults(results, 'account_dlo__dll');
     expect(apiMatches.map((result) => result.id)).toContain('dlo:Account_DLO__dll');
-    expect(apiMatches.every((result) => `${result.label} ${result.apiName}`.toLowerCase().includes('account_dlo__dll'))).toBe(true);
+    expect(apiMatches.every((result) =>
+      `${result.label} ${result.apiName} ${result.searchText ?? ''}`.toLowerCase().includes('account_dlo__dll'))).toBe(true);
 
     expect(filterCommandResults(results, 'data stream').map((result) => result.id)).toContain('stream:Accounts_Stream');
+    expect(filterCommandResults(results, 'Demo Salesforce Org').map((result) => result.id)).toContain('stream:Accounts_Stream');
     const spaceMatches = filterCommandResults(results, 'sales_space');
     expect(spaceMatches.map((result) => result.id)).toContain('space:sales_space');
     expect(spaceMatches.some((result) => result.dataSpace === 'sales_space')).toBe(true);
@@ -62,6 +64,12 @@ describe('global command search', () => {
       ...(transformRecord.description ? [{ label: 'Description', value: transformRecord.description }] : []),
       { label: 'Source endpoint', value: '/ssot/data-transforms' },
       { label: 'Confidence', value: 'source' },
+    ]));
+
+    const stream = results.find((result) => result.kind === 'stream')!;
+    expect(commandResultDetails(stream)).toEqual(expect.arrayContaining([
+      { label: 'Source connector', value: 'Salesforce CRM' },
+      { label: 'Configured connection', value: 'Demo Salesforce Org' },
     ]));
 
     const mapping = results.find((result) => result.kind === 'mapping')!;

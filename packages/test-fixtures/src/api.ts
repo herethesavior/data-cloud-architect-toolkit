@@ -110,12 +110,36 @@ export const dataStreamsJson = JSON.stringify({
     {
       apiName: 'Account_Stream',
       label: 'Account Stream',
-      sourceConnector: 'Salesforce CRM',
+      connectorInfo: {
+        connectorType: 'SalesforceDotCom',
+        connectorDetails: { name: 'SalesforceDotCom_Home', type: 'SalesforceDotCom' },
+      },
+      dataSource: 'Salesforce_Home',
       targetDlo: 'Account_DLO__dll',
       status: 'Running',
       refreshRate: '15m',
     },
   ],
+});
+
+export const connectorCatalogJson = JSON.stringify({
+  connectorInfoList: [
+    { name: 'SalesforceDotCom', label: 'Salesforce CRM', releaseLevel: 'GA' },
+    { name: 'CommerceCloud', label: 'Commerce Cloud', releaseLevel: 'GA' },
+  ],
+});
+
+export const connectorConnectionsJson = JSON.stringify({
+  connections: [{
+    alias: 'Home',
+    connectionStatus: 'Connected',
+    connectorType: 'SalesforceDotCom',
+    dataSource: 'Salesforce_Home',
+    label: 'EPIC OrgFarm',
+    name: 'SalesforceDotCom_Home',
+  }],
+  currentPageUrl: '/services/data/v65.0/ssot/connections?connectorType=SalesforceDotCom&limit=50&offset=0',
+  totalSize: 1,
 });
 
 export const dataTransformsJson = JSON.stringify({

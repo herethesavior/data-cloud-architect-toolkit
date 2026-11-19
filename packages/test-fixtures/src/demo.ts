@@ -766,12 +766,12 @@ export const demoInventory: InventorySnapshot = {
     },
   ],
   dataStreams: [
-    { apiName: 'Accounts_Stream', label: 'Accounts Stream', sourceConnector: 'Salesforce CRM', targetDlo: 'Account_DLO__dll', status: 'Active', refreshMetadata: 'Hourly', provenance: provenance('/ssot/data-streams') },
-    { apiName: 'Contacts_Stream', label: 'Contacts Stream', sourceConnector: 'Salesforce CRM', targetDlo: 'Contact_DLO__dll', status: 'Active', refreshMetadata: 'Hourly', provenance: provenance('/ssot/data-streams') },
-    { apiName: 'Orders_Stream', label: 'Orders Stream', sourceConnector: 'Salesforce CRM', targetDlo: 'Order_DLO__dll', status: 'Active', refreshMetadata: 'Every 15 minutes', provenance: provenance('/ssot/data-streams') },
+    { apiName: 'Accounts_Stream', label: 'Accounts Stream', sourceConnector: 'Salesforce CRM', sourceConnectorLabel: 'Salesforce CRM', sourceConnectionName: 'SalesforceDotCom_Home', sourceConnectionLabel: 'Demo Salesforce Org', sourceConnectionStatus: 'Connected', sourceDataSource: 'Salesforce_Home', targetDlo: 'Account_DLO__dll', status: 'Active', refreshMetadata: 'Hourly', provenance: provenance('/ssot/data-streams') },
+    { apiName: 'Contacts_Stream', label: 'Contacts Stream', sourceConnector: 'Salesforce CRM', sourceConnectorLabel: 'Salesforce CRM', sourceConnectionName: 'SalesforceDotCom_Home', sourceConnectionLabel: 'Demo Salesforce Org', sourceConnectionStatus: 'Connected', sourceDataSource: 'Salesforce_Home', targetDlo: 'Contact_DLO__dll', status: 'Active', refreshMetadata: 'Hourly', provenance: provenance('/ssot/data-streams') },
+    { apiName: 'Orders_Stream', label: 'Orders Stream', sourceConnector: 'Salesforce CRM', sourceConnectorLabel: 'Salesforce CRM', sourceConnectionName: 'SalesforceDotCom_Home', sourceConnectionLabel: 'Demo Salesforce Org', sourceConnectionStatus: 'Connected', sourceDataSource: 'Salesforce_Home', targetDlo: 'Order_DLO__dll', status: 'Active', refreshMetadata: 'Every 15 minutes', provenance: provenance('/ssot/data-streams') },
     { apiName: 'Order_Items_Stream', label: 'Order Items Stream', sourceConnector: 'Commerce Connector', targetDlo: 'OrderItem_DLO__dll', status: 'Active', refreshMetadata: 'Every 30 minutes', provenance: provenance('/ssot/data-streams') },
     { apiName: 'Web_Events_Stream', label: 'Web Events Stream', sourceConnector: 'Web Connector', targetDlo: 'WebClick_DLO__dll', status: 'Paused', refreshMetadata: null, provenance: provenance('/ssot/data-streams') },
-    { apiName: 'Cases_Stream', label: 'Cases Stream', sourceConnector: 'Salesforce CRM', targetDlo: 'Case_DLO__dll', status: 'Active', refreshMetadata: 'Hourly', provenance: provenance('/ssot/data-streams') },
+    { apiName: 'Cases_Stream', label: 'Cases Stream', sourceConnector: 'Salesforce CRM', sourceConnectorLabel: 'Salesforce CRM', sourceConnectionName: 'SalesforceDotCom_Home', sourceConnectionLabel: 'Demo Salesforce Org', sourceConnectionStatus: 'Connected', sourceDataSource: 'Salesforce_Home', targetDlo: 'Case_DLO__dll', status: 'Active', refreshMetadata: 'Hourly', provenance: provenance('/ssot/data-streams') },
   ],
   dataTransforms: demoTransforms,
   relationships: [

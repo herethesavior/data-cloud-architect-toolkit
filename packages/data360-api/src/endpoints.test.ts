@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { CliError } from '@dcat/salesforce-cli';
 import {
+  buildConnectorCatalogPath,
+  buildConnectorConnectionsPath,
   buildDmoPath,
   buildDmoRelationshipsPath,
   buildFamilyPath,
@@ -86,6 +88,15 @@ describe('allowlisted transform paths', () => {
     );
     expect(() => buildMappingPath('  ', '65.0')).toThrow(/DMO developer name is required/);
     expect(() => buildMappingPath('Account_DMO__dlm', 'latest')).toThrow(CliError);
+  });
+
+  it('builds allowlisted connector lookup paths without treating the catalog as a family', () => {
+    expect(buildConnectorCatalogPath('68.0')).toBe('services/data/v68.0/ssot/connectors');
+    expect(buildConnectorConnectionsPath('68.0', 'SalesforceDotCom')).toBe(
+      'services/data/v68.0/ssot/connections?connectorType=SalesforceDotCom',
+    );
+    expect(() => buildConnectorConnectionsPath('68.0', '../connections')).toThrow(CliError);
+    expect(() => buildConnectorCatalogPath('latest')).toThrow(CliError);
   });
 
   it('builds only the allowlisted per-DMO relationship subresource', () => {

@@ -165,6 +165,7 @@ describe('Data 360 response normalization', () => {
       targetDlo: 'Account_Home__dll',
       dataSpace: 'default',
       sourceConnector: 'SalesforceDotCom',
+      sourceConnectionName: 'Salesforce_Home',
     });
   });
 

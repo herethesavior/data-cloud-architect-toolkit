@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProcessRunner, RunOptions } from '@dcat/salesforce-cli';
 import {
   cliVersionOutput,
+  connectorCatalogJson,
+  connectorConnectionsJson,
   dataSpacesJson,
   dataStreamsJson,
   dataTransformsJson,
@@ -33,6 +35,8 @@ function liveCliRunner(): ProcessRunner {
     '/services/data/v65.0/ssot/data-model-objects?limit=100&offset=0': dmosJson,
     '/services/data/v65.0/ssot/data-model-object-mappings': mappingsJson,
     '/services/data/v65.0/ssot/data-streams': dataStreamsJson,
+    '/services/data/v65.0/ssot/connectors': connectorCatalogJson,
+    '/services/data/v65.0/ssot/connections?connectorType=SalesforceDotCom': connectorConnectionsJson,
     '/services/data/v65.0/ssot/data-transforms': dataTransformsJson,
     '/services/data/v65.0/ssot/data-transforms/Account_Transform': transformDetailJson,
     '/services/data/v65.0/ssot/data-transforms/Account_Transform/run-history': transformRunHistoryJson,

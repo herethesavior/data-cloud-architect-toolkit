@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  connectorCatalogJson,
+  connectorConnectionsJson,
   dataSpacesJson,
   dataStreamsJson,
   dataTransformsJson,
@@ -13,7 +15,12 @@ import {
 } from '@dcat/test-fixtures';
 import { CliError } from '@dcat/salesforce-cli';
 import type { RestClient } from './discover.ts';
-import { buildDmoRelationshipsPath, buildMappingPath } from './endpoints.ts';
+import {
+  buildConnectorCatalogPath,
+  buildConnectorConnectionsPath,
+  buildDmoRelationshipsPath,
+  buildMappingPath,
+} from './endpoints.ts';
 import {
   advanceProgressiveDiscovery,
   createProgressiveDiscovery,
@@ -80,6 +87,8 @@ function fakeCli(
     ...pagedDlos(),
     [dmoPath]: dmosJson,
     [`${base}/data-streams`]: dataStreamsJson,
+    [buildConnectorCatalogPath('65.0')]: connectorCatalogJson,
+    [buildConnectorConnectionsPath('65.0', 'SalesforceDotCom')]: connectorConnectionsJson,
     [`${base}/data-transforms`]: dataTransformsJson,
     ...Object.fromEntries(dmoNames.map((name) => [
       buildMappingPath(name, '65.0', dmoSpaces[name]), mappingsJson,
@@ -289,7 +298,15 @@ describe('progressive discovery', () => {
   it('follows nextPageUrl for live stream responses', async () => {
     const streamPage1 = JSON.stringify({
       currentPageUrl: '/services/data/v65.0/ssot/data-streams?limit=10&offset=1',
-      dataStreams: [{ name: 'Account_Stream', dataLakeObjectInfo: { name: 'Account_DLO__dll' } }],
+      dataStreams: [{
+        name: 'Account_Stream',
+        connectorInfo: {
+          connectorType: 'SalesforceDotCom',
+          connectorDetails: { name: 'SalesforceDotCom_Home', type: 'SalesforceDotCom' },
+        },
+        dataSource: 'Salesforce_Home',
+        dataLakeObjectInfo: { name: 'Account_DLO__dll' },
+      }],
       nextPageUrl: '/services/data/v65.0/ssot/data-streams?limit=10&offset=11',
       totalSize: 2,
     });
@@ -306,6 +323,11 @@ describe('progressive discovery', () => {
     const snapshot = progressiveSnapshot(state);
 
     expect(snapshot.dataStreams.map((stream) => stream.apiName)).toEqual(['Account_Stream', 'Order_Stream']);
+    expect(snapshot.dataStreams[0]).toMatchObject({
+      sourceConnector: 'SalesforceDotCom',
+      sourceConnectorLabel: 'Salesforce CRM',
+      sourceConnectionLabel: 'EPIC OrgFarm',
+    });
     expect(snapshot.capabilities.find((capability) => capability.family === 'data-streams')?.itemCount).toBe(2);
   });
 
