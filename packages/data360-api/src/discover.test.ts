@@ -6,6 +6,7 @@ import {
   dataTransformsJson,
   demoOrgs,
   dlosJson,
+  dmoRelationshipsJson,
   dmosJson,
   dmosOffsetPage2Json,
   forbiddenRestOutput,
@@ -20,7 +21,7 @@ import {
 import { classifyRestFailure } from './capabilities.ts';
 import { discoverInventory, extractHttpStatus } from './discover.ts';
 import type { RestClient } from './discover.ts';
-import { buildMappingPath } from './endpoints.ts';
+import { buildDmoRelationshipsPath, buildMappingPath } from './endpoints.ts';
 
 const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
@@ -56,6 +57,7 @@ function fakeCli(overrides: Record<string, string | Error | Array<string | Error
   return {
     restGet: vi.fn(async (_alias: string, path: string) => {
       const value = paths[path];
+      if (value === undefined && path.includes('/relationships?')) return '';
       if (value === undefined) throw new Error(`Unexpected REST path: ${path}`);
       if (Array.isArray(value)) {
         const index = indexes.get(path) ?? 0;
@@ -168,6 +170,28 @@ describe('live Data 360 discovery', () => {
       targetObject: dmoName,
       fieldMappings: [{ sourceField: 'Id', targetField: 'Id' }],
     });
+  });
+
+  it('loads per-DMO relationships and preserves source status', async () => {
+    const relationshipPath = buildDmoRelationshipsPath('Account_DMO__dlm', '65.0', 'default');
+    const cli = fakeCli({ [relationshipPath]: dmoRelationshipsJson });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+
+    expect(pathCalls(cli, relationshipPath)).toBe(1);
+    expect(inventory.relationships).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: '0geDEMO000000001AAA',
+        source: 'Account_DMO__dlm',
+        target: 'Contact_DMO__dlm',
+        label: 'ContactId',
+        targetField: 'Id',
+        cardinality: 'ManyToOne',
+        status: 'INACTIVE',
+        certainty: 'confirmed',
+      }),
+    ]));
+    expect(inventory.relationships.find((edge) => edge.id === '0geDEMO000000001AAA')?.provenance)
+      .toMatchObject({ sourceEndpoint: relationshipPath, confidence: 'source' });
   });
 
   it('follows DMO offset pages even when the response has no continuation cursor', async () => {

@@ -108,7 +108,7 @@ export function buildErdLayout(inventory: InventorySnapshot): ErdLayout {
     const target = byApiName.get(relationship.target);
     if (!source || !target) continue;
 
-    const label = relationship.label ?? relationship.certainty;
+    const label = [relationship.label ?? relationship.certainty, relationship.status].filter(Boolean).join(' · ');
     let path: string;
     let labelX: number;
     let labelY: number;
@@ -357,7 +357,7 @@ export function exportErdMermaid(
       ids.get(relationship.target)!,
       relationship.cardinality,
       relationship.certainty,
-      relationship.label ?? relationship.certainty,
+      [relationship.label ?? relationship.certainty, relationship.status].filter(Boolean).join(' · '),
     ));
   }
 

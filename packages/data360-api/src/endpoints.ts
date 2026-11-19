@@ -16,6 +16,30 @@ const API_VERSION_PATTERN = /^\d{2,3}\.\d{1,2}$/;
 /** Verified DMO page size: larger pages time out and the endpoint has no next-page URL. */
 export const DMO_PAGE_SIZE = 100;
 
+/** Verified maximum page size for the per-DMO relationship subresource. */
+export const RELATIONSHIP_PAGE_SIZE = 500;
+
+const DMO_DEVELOPER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+const DATASPACE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
+
+export function isValidDmoDeveloperName(name: string): boolean {
+  return DMO_DEVELOPER_NAME_PATTERN.test(name.trim());
+}
+
+export function isValidDataspace(dataspace?: string | null): boolean {
+  const trimmed = dataspace?.trim();
+  return !trimmed || DATASPACE_PATTERN.test(trimmed);
+}
+
+/** Guard the developer name before it becomes a path segment. */
+export function validateDmoDeveloperName(name: string): string {
+  const trimmed = name.trim();
+  if (!isValidDmoDeveloperName(trimmed)) {
+    throw new CliError('INVALID_ARGUMENT', 'The DMO developer name contains unsupported characters.');
+  }
+  return trimmed;
+}
+
 export function buildData360Path(family: ResourceFamily, apiVersion: string): string {
   if (!API_VERSION_PATTERN.test(apiVersion)) {
     throw new CliError('INVALID_ARGUMENT', 'An invalid API version was supplied by the version adapter.');
@@ -47,6 +71,31 @@ export function buildMappingPath(dmoApiName: string, apiVersion: string, dataspa
   if (dataspace?.trim()) parameters.push(`dataspace=${encodeURIComponent(dataspace.trim())}`);
   parameters.push(`dmoDeveloperName=${encodeURIComponent(name)}`);
   return `${base}?${parameters.join('&')}`;
+}
+
+/**
+ * Salesforce v68 exposes DMO relationships only as this per-DMO subresource.
+ * The queried DMO may be either side, so rows are deduplicated by the caller.
+ */
+export function buildDmoRelationshipsPath(
+  dmoApiName: string,
+  apiVersion: string,
+  dataspace?: string | null,
+  limit = RELATIONSHIP_PAGE_SIZE,
+): string {
+  const safeName = validateDmoDeveloperName(dmoApiName);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > RELATIONSHIP_PAGE_SIZE) {
+    throw new CliError('INVALID_ARGUMENT', 'An invalid relationship page size was supplied.');
+  }
+  const trimmedSpace = dataspace?.trim();
+  if (!isValidDataspace(trimmedSpace)) {
+    throw new CliError('INVALID_ARGUMENT', 'The data space contains unsupported characters.');
+  }
+  const parameters = [
+    ...(trimmedSpace ? [`dataspace=${encodeURIComponent(trimmedSpace)}`] : []),
+    `limit=${limit}`,
+  ];
+  return `${buildData360Path('dmos', apiVersion)}/${encodeURIComponent(safeName)}/relationships?${parameters.join('&')}`;
 }
 
 export function buildVersionsPath(): string {

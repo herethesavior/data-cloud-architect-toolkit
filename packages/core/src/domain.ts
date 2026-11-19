@@ -254,6 +254,10 @@ export const relationshipEdgeSchema = z.object({
   target: z.string(),
   label: z.string().nullish(),
   cardinality: z.string().nullish(),
+  /** Source status when the endpoint supplies one; never inferred by DCAT. */
+  status: z.string().nullish(),
+  /** Explicit target-side join field when the endpoint supplies one. */
+  targetField: z.string().nullish(),
   certainty: z.enum(['confirmed', 'inferred', 'unknown']),
   provenance: resourceProvenanceSchema,
 });

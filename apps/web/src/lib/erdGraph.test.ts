@@ -34,6 +34,44 @@ describe('ERD graph model', () => {
     expect(confirmed!.style?.strokeDasharray).toBeUndefined();
   });
 
+  it('uses an explicit target join field instead of reusing the source field', () => {
+    const inventory = {
+      ...demoInventory,
+      relationships: [{
+        ...demoInventory.relationships[0]!,
+        id: 'target-field-relationship',
+        targetField: 'Id',
+      }],
+    };
+    const graph = buildErdGraph(inventory, { direction: 'LR', sortMode: 'connected' });
+    const edge = graph.edges.find((candidate) => candidate.id === 'target-field-relationship');
+
+    expect(edge?.targetHandle).toBe(erdTargetHandleId('Id'));
+    expect(edge?.data?.targetField).toBe('Id');
+  });
+
+  it('does not echo the source join field as a target field when none was supplied', () => {
+    const graph = buildErdGraph(demoInventory, { direction: 'LR', sortMode: 'connected' });
+    const inferred = graph.edges.find((edge) => edge.data?.joinField === 'ContactId');
+
+    expect(inferred?.data?.targetField).toBeNull();
+    expect(inferred?.targetHandle).toBe(erdTargetHandleId());
+  });
+
+  it('preserves source relationship status on graph edges', () => {
+    const inventory = {
+      ...demoInventory,
+      relationships: [{
+        ...demoInventory.relationships[0]!,
+        id: 'status-relationship',
+        status: 'INACTIVE',
+      }],
+    };
+    const graph = buildErdGraph(inventory, { direction: 'LR', sortMode: 'connected' });
+
+    expect(graph.edges.find((edge) => edge.id === 'status-relationship')?.data?.status).toBe('INACTIVE');
+  });
+
   it('sorts objects alphabetically when requested', () => {
     const graph = buildErdGraph(demoInventory, { direction: 'TB', sortMode: 'alphabetical' });
     expect(graph.nodes[0]?.data.label).toBe('Account DMO');

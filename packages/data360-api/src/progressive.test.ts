@@ -4,6 +4,7 @@ import {
   dataStreamsJson,
   dataTransformsJson,
   demoOrgs,
+  dmoRelationshipsJson,
   dmosJson,
   dmosOffsetPage2Json,
   mappingNotFoundOutput,
@@ -12,7 +13,7 @@ import {
 } from '@dcat/test-fixtures';
 import { CliError } from '@dcat/salesforce-cli';
 import type { RestClient } from './discover.ts';
-import { buildMappingPath } from './endpoints.ts';
+import { buildDmoRelationshipsPath, buildMappingPath } from './endpoints.ts';
 import {
   advanceProgressiveDiscovery,
   createProgressiveDiscovery,
@@ -100,6 +101,7 @@ function fakeCli(
         throw new CliError('COMMAND_FAILED', 'ERROR: 500 Server Error');
       }
       const value = paths[path];
+      if (value === undefined && path.includes('/relationships?')) return '';
       if (value === undefined) throw new Error(`Unexpected REST path: ${path}`);
       return value;
     },
@@ -320,6 +322,29 @@ describe('progressive discovery', () => {
       status: 'available',
       itemCount: 2,
     });
+  });
+
+  it('loads the same per-DMO relationships as one-shot discovery', async () => {
+    const relationshipPath = buildDmoRelationshipsPath('Account_DMO__dlm', '65.0', 'default');
+    const cli = fakeCli({ [relationshipPath]: dmoRelationshipsJson });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(cli.calls).toContain(relationshipPath);
+    expect(snapshot.relationships).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: '0geDEMO000000001AAA',
+        source: 'Account_DMO__dlm',
+        target: 'Contact_DMO__dlm',
+        label: 'ContactId',
+        targetField: 'Id',
+        cardinality: 'ManyToOne',
+        status: 'INACTIVE',
+        certainty: 'confirmed',
+      }),
+    ]));
+    expect(snapshot.progress?.state).toBe('complete');
   });
 
   it('retries transient page failures with bounded attempts', async () => {

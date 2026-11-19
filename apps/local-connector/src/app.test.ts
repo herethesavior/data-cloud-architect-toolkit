@@ -42,7 +42,9 @@ function liveCliRunner(): ProcessRunner {
     ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?')
       && path.includes('dmoDeveloperName=')
       ? mappingsJson
-      : undefined);
+      : path.includes('/relationships?')
+        ? ''
+        : undefined);
   return {
     run: vi.fn(async (args: readonly string[], _options?: RunOptions) => {
       if (args[0] === '--version') {

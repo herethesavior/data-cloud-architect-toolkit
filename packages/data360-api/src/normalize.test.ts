@@ -6,6 +6,7 @@ import {
   demoInventory,
   demoTransformBundles,
   dlosJson,
+  dmoRelationshipsJson,
   dmosJson,
   mappingsJson,
 } from '@dcat/test-fixtures';
@@ -17,6 +18,7 @@ import {
   normalizeDataStreams,
   normalizeDlos,
   normalizeDmos,
+  normalizeDmoRelationships,
   normalizeMappings,
   normalizeDataTransforms,
   parseJsonResponse,
@@ -55,6 +57,32 @@ describe('Data 360 response normalization', () => {
     );
     expect(result.items).toHaveLength(1);
     expect(result.relationships).toEqual([]);
+  });
+
+  it('normalizes v68 per-DMO relationships without changing source status', () => {
+    const result = normalizeDmoRelationships(parseJsonResponse(dmoRelationshipsJson, 'Relationships'), context);
+
+    expect(result.skipped).toBe(0);
+    expect(result.items).toEqual([expect.objectContaining({
+      id: '0geDEMO000000001AAA',
+      source: 'Account_DMO__dlm',
+      target: 'Contact_DMO__dlm',
+      label: 'ContactId',
+      targetField: 'Id',
+      cardinality: 'ManyToOne',
+      status: 'INACTIVE',
+      certainty: 'confirmed',
+      provenance: expect.objectContaining({ apiVersion: '65.0', confidence: 'source' }),
+    })]);
+  });
+
+  it('skips relationship rows without both object names', () => {
+    const result = normalizeDmoRelationships({
+      relationships: [{ id: 'incomplete', sourceObject: { name: 'Account_DMO__dlm' } }],
+    }, context);
+
+    expect(result.items).toEqual([]);
+    expect(result.skipped).toBe(1);
   });
 
   it('normalizes data spaces using alternate field names', () => {

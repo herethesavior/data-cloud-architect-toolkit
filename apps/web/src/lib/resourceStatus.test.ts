@@ -39,6 +39,20 @@ describe('resource status model', () => {
     expect(stages[0]?.detail).toContain('Waiting for the connector');
   });
 
+  it('does not report relationship discovery as complete when lookup warnings exist', () => {
+    const inventory = structuredClone(demoInventory);
+    inventory.warnings = [{
+      family: 'dmos',
+      code: 'RELATIONSHIP_QUERY_LIMIT',
+      message: 'Checked the first 500 DMOs; remaining relationship lookups were not attempted.',
+      severity: 'warning',
+    }];
+    const stage = discoveryStages(inventory).find((entry) => entry.id === 'relationships');
+
+    expect(stage?.state).toBe('partial');
+    expect(stage?.detail).toContain('1 lookup gap warning');
+  });
+
   it('derives partial and blocked stages from capability results', () => {
     const inventory = inventoryWith([
       capability({ family: 'data-spaces', status: 'available' }),

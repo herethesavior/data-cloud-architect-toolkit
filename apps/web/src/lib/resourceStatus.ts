@@ -155,12 +155,14 @@ export function discoveryStages(
       };
     }
     if (stage.id === 'relationships') {
+      const gaps = inventory?.warnings.filter((warning) =>
+        warning.code.startsWith('RELATIONSHIP') && warning.severity !== 'info') ?? [];
       return {
         id: stage.id,
         label: stage.label,
-        state: inventory ? 'complete' : loading ? 'loading' : 'pending',
+        state: inventory ? gaps.length > 0 ? 'partial' : 'complete' : loading ? 'loading' : 'pending',
         detail: inventory
-          ? `${inventory.relationships.length} relationship edges in the current snapshot.`
+          ? `${inventory.relationships.length} relationship edges in the current snapshot.${gaps.length > 0 ? ` ${gaps.length} lookup gap warning(s).` : ''}`
           : 'Waiting for the inventory snapshot.',
       };
     }

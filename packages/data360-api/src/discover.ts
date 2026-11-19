@@ -12,15 +12,19 @@ import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure } from './capabilities.ts';
 import {
   buildData360Path,
+  buildDmoRelationshipsPath,
   buildFamilyPath,
   buildMappingPath,
   buildVersionsPath,
   DATA360_ENDPOINT_REGISTRY,
   DMO_PAGE_SIZE,
+  isValidDataspace,
+  isValidDmoDeveloperName,
 } from './endpoints.ts';
 import {
   deriveInferredRelationships,
   extractCollection,
+  normalizeDmoRelationships,
   normalizeDataSpaces,
   normalizeDataStreams,
   normalizeDataTransforms,
@@ -38,6 +42,7 @@ import { selectLatestApiVersion } from './versions.ts';
 // checkpoints and stops on exhaustion; this only guards against a looping token.
 export const DEFAULT_MAX_PAGES = 1_000;
 export const MAX_MAPPING_DMO_QUERIES = 500;
+export const MAX_RELATIONSHIP_DMO_QUERIES = 500;
 
 /** Minimal surface the discovery layer needs; the CLI adapter satisfies it. */
 export interface RestClient {
@@ -96,6 +101,7 @@ export async function fetchCollection(
   label: string,
   maxPages: number,
   offsetPageSize?: number,
+  allowEmptyBody = false,
 ): Promise<FetchedCollection> {
   const entries: unknown[] = [];
   const warnings: string[] = [];
@@ -104,7 +110,9 @@ export async function fetchCollection(
   let pages = 0;
 
   while (pages < maxPages) {
-    const decoded = parseJsonResponse(await cli.restGet(alias, requestPath), label);
+    const raw = await cli.restGet(alias, requestPath);
+    // Salesforce answers a DMO with no relationships as 204 No Content.
+    const decoded = allowEmptyBody && !raw.trim() ? [] : parseJsonResponse(raw, label);
     const pageEntries = extractCollection(decoded, label);
     for (const entry of pageEntries) {
       const key = JSON.stringify(entry);
@@ -437,6 +445,122 @@ async function retrieveMappingsByDmo(
   };
 }
 
+interface RelationshipQueryResult {
+  edges: RelationshipEdge[];
+  warnings: RetrievalWarning[];
+}
+
+/**
+ * v68 has only a per-DMO relationship endpoint. Query the DMOs the source marks
+ * as usable; a row's own sourceObject/targetObject decide direction, so the same
+ * edge can be returned by either endpoint and must be deduplicated.
+ */
+async function retrieveRelationshipsByDmo(
+  cli: RestClient,
+  alias: string,
+  apiVersion: string,
+  base: Omit<NormalizeContext, 'apiVersion' | 'endpoint'>,
+  candidates: MappingCandidate[],
+  maxPages: number,
+): Promise<RelationshipQueryResult> {
+  const unique = [
+    ...new Map(candidates
+      .filter((candidate) => candidate.apiName.trim().length > 0)
+      .map((candidate) => [candidate.apiName, candidate])).values(),
+  ];
+  const queried = unique.slice(0, MAX_RELATIONSHIP_DMO_QUERIES);
+  const edges: RelationshipEdge[] = [];
+  const warnings: RetrievalWarning[] = [];
+  let skipped = 0;
+  let skippedQueries = 0;
+  let attempts = 0;
+  let failures = 0;
+  let retried = 0;
+
+  for (const candidate of queried) {
+    if (!isValidDmoDeveloperName(candidate.apiName) || !isValidDataspace(candidate.dataspace)) {
+      skippedQueries += 1;
+      warnings.push({
+        family: 'dmos',
+        code: 'RELATIONSHIP_QUERY_SKIPPED',
+        message: `Relationship lookup skipped for DMO ${candidate.apiName}: its name or data space cannot be used safely in a REST path.`,
+        severity: 'warning',
+      });
+      continue;
+    }
+    const path = buildDmoRelationshipsPath(candidate.apiName, apiVersion, candidate.dataspace);
+    const context: NormalizeContext = { ...base, apiVersion, endpoint: path };
+    attempts += 1;
+    try {
+      const attempt = await withBoundedRetry(() =>
+        fetchCollection(cli, alias, path, 'relationships', maxPages, undefined, true));
+      const normalized = normalizeDmoRelationships(attempt.value.entries, context);
+      edges.push(...normalized.items);
+      skipped += normalized.skipped;
+      if (attempt.retried) retried += 1;
+      warnings.push(...attempt.value.warnings.map((message) => ({
+        family: 'dmos' as const,
+        code: message.startsWith('Pagination stopped') ? 'RELATIONSHIP_PAGINATION_LIMIT' : 'RELATIONSHIP_CONTINUATION_MISSING',
+        message: `Relationship lookup for DMO ${candidate.apiName}: ${message}`,
+        severity: 'warning' as const,
+      })));
+    } catch (error) {
+      failures += 1;
+      const message = safeErrorMessage(error);
+      const classified = classifyRestFailure(extractHttpStatus(message), message);
+      warnings.push({
+        family: 'dmos',
+        code: 'RELATIONSHIP_QUERY_FAILED',
+        message: `Relationship lookup for DMO ${candidate.apiName} failed. ${classified.message}`,
+        severity: classified.status === 'unsupported' ? 'warning' : 'error',
+      });
+    }
+  }
+
+  if (retried > 0) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIP_RETRY_SUCCEEDED',
+      message: `${retried} relationship lookup(s) succeeded after a transient retry.`,
+      severity: 'info',
+    });
+  }
+  if (skipped > 0) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIP_ITEMS_SKIPPED',
+      message: `${skipped} relationship row(s) were skipped because source or target object names were missing.`,
+      severity: 'warning',
+    });
+  }
+  if (skippedQueries > 0) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIP_QUERIES_SKIPPED',
+      message: `${skippedQueries} relationship lookup(s) were skipped because the DMO name or data space could not be used safely in a REST path.`,
+      severity: 'warning',
+    });
+  }
+  if (unique.length > queried.length) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIP_QUERY_LIMIT',
+      message: `Checked the first ${MAX_RELATIONSHIP_DMO_QUERIES} DMOs; remaining relationship lookups were not attempted.`,
+      severity: 'warning',
+    });
+  }
+  if (attempts > 0 && failures === attempts) {
+    warnings.push({
+      family: 'dmos',
+      code: 'RELATIONSHIPS_UNAVAILABLE',
+      message: 'No DMO relationship lookups succeeded; relationship edges may be incomplete.',
+      severity: 'warning',
+    });
+  }
+
+  return { edges, warnings };
+}
+
 function dedupeRelationships(edges: RelationshipEdge[]): RelationshipEdge[] {
   const seen = new Set<string>();
   return edges.filter((edge) => {
@@ -557,6 +681,9 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     : mappingCandidates.length === 0
       ? skippedMappings(version, base, dmos.capability, 'no-eligible-dmos')
       : await retrieveMappingsByDmo(cli, alias, version, base, mappingCandidates, maxPages);
+  const relationshipQueries = mappingCandidates.length === 0
+    ? { edges: [], warnings: [] }
+    : await retrieveRelationshipsByDmo(cli, alias, version, base, mappingCandidates, maxPages);
 
   capabilities.push(
     spaces.capability,
@@ -571,6 +698,7 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     ...dlos.warnings,
     ...dmos.warnings,
     ...mappings.warnings,
+    ...relationshipQueries.warnings,
     ...streams.warnings,
     ...transforms.warnings,
   );
@@ -582,6 +710,7 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
   };
   const relationships = dedupeRelationships([
     ...dmos.result.relationships,
+    ...relationshipQueries.edges,
     ...deriveInferredRelationships(dmos.result.items, dmoContext),
   ]);
 

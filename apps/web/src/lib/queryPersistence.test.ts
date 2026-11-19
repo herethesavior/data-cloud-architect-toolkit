@@ -1,7 +1,7 @@
 import { dehydrate, QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 import { orgsQueryKey } from './workspace.ts';
-import { shouldPersistQuery } from './queryPersistence.ts';
+import { orgsQueryOptions, shouldPersistQuery } from './queryPersistence.ts';
 
 describe('inventory cache persistence', () => {
   it('persists only successful org and inventory snapshots', () => {
@@ -39,5 +39,15 @@ describe('inventory cache persistence', () => {
     expect(serialized).not.toContain('health');
     expect(serialized).not.toContain('transforms');
     expect(serialized).not.toContain('placeholder');
+  });
+});
+
+describe('org list query options', () => {
+  it('disables auto-retry for the hosted org list so a late retry cannot block inventory', () => {
+    expect(orgsQueryOptions(true)).toMatchObject({ retry: false, retryOnMount: false });
+  });
+
+  it('keeps retry available for the local org list', () => {
+    expect(orgsQueryOptions(false)).not.toHaveProperty('retry');
   });
 });

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BridgeStatus, OrgSummary } from '@dcat/core';
 import { api } from '../lib/api.ts';
 import { isHosted } from '../lib/hosted.ts';
-import { persistedQueryOptions } from '../lib/queryPersistence.ts';
+import { orgsQueryOptions } from '../lib/queryPersistence.ts';
 import { invalidateBridgeState, orgsQueryKey } from '../lib/workspace.ts';
 import type { WorkspaceMode } from '../lib/workspace.ts';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates.tsx';
@@ -124,7 +124,7 @@ export function OrgConnections({
     queryKey: orgsQueryKey(mode),
     queryFn: api.orgs,
     enabled: !hosted || bridgeStatus?.mode === 'demo' || bridgeStatus?.paired === true,
-    ...persistedQueryOptions,
+    ...orgsQueryOptions(hosted),
   });
 
   const invalidateSetup = () => invalidateBridgeState(queryClient);
@@ -473,7 +473,7 @@ export function OrgConnections({
           {status && !hosted && !status.cli.installed ? (
             <div className="rounded-lg border border-line bg-surface-alt p-4 text-sm text-ink-soft">
               <p>Install Salesforce CLI, then re-check.</p>
-              <a className="mt-2 inline-flex items-center gap-1 font-medium text-brand underline underline-offset-2" href="https://developer.salesforce.com/docs/platform/salesforce-cli/guide/setup.html" target="_blank" rel="noreferrer">
+              <a className="mt-2 inline-flex items-center gap-1 font-medium text-brand underline underline-offset-2" href="https://developer.salesforce.com/docs/platform/salesforce-cli/guide/setup.html" target="_blank" rel="noopener noreferrer">
                 Installation guide <Icon name="arrowRight" size={14} />
               </a>
             </div>

@@ -42,7 +42,7 @@ export function parseJsonResponse(raw: string, label: string): unknown {
   }
 }
 
-const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions'];
+const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'relationships', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions'];
 const CONTAINER_KEYS = ['result', 'data', 'response', 'payload'];
 
 /**
@@ -377,6 +377,8 @@ export function normalizeDmos(raw: unknown, context: NormalizeContext): Normaliz
         target,
         label: firstString(relation, ['joinField', 'field', 'label', 'sourceField']),
         cardinality: firstString(relation, ['cardinality', 'relationshipType', 'type']),
+        status: firstString(relation, ['status', 'relationshipStatus']),
+        targetField: firstString(relation, ['targetField', 'targetFieldName']),
         certainty: 'confirmed',
         provenance: makeProvenance(context),
       });
@@ -384,6 +386,55 @@ export function normalizeDmos(raw: unknown, context: NormalizeContext): Normaliz
   }
 
   return { items, skipped, relationships };
+}
+
+function nestedName(value: unknown, keys: readonly string[]): string | null {
+  if (isRecord(value)) return firstString(value, keys);
+  return asString(value);
+}
+
+/**
+ * Normalize the v68 per-DMO relationship subresource. Rows are self-describing:
+ * the queried DMO can be either endpoint, so no direction is assumed here.
+ */
+export function normalizeDmoRelationships(raw: unknown, context: NormalizeContext): NormalizedCollection<RelationshipEdge> {
+  const entries = extractCollection(raw, 'Relationships');
+  const items: RelationshipEdge[] = [];
+  let skipped = 0;
+
+  for (const entry of entries) {
+    if (!isRecord(entry)) {
+      skipped += 1;
+      continue;
+    }
+    const source = nestedName(entry.sourceObject, ['name', 'apiName', 'developerName', 'objectName'])
+      ?? firstString(entry, ['sourceObjectName', 'sourceObjectApiName', 'source']);
+    const target = nestedName(entry.targetObject, ['name', 'apiName', 'developerName', 'objectName'])
+      ?? firstString(entry, ['targetObjectName', 'targetObjectApiName', 'target']);
+    if (!source || !target) {
+      skipped += 1;
+      continue;
+    }
+
+    const joinField = nestedName(entry.sourceField, ['name', 'apiName', 'developerName', 'fieldName'])
+      ?? firstString(entry, ['joinField', 'field', 'sourceFieldName']);
+    const targetField = nestedName(entry.targetField, ['name', 'apiName', 'developerName', 'fieldName'])
+      ?? firstString(entry, ['targetFieldName']);
+    const sourceId = firstString(entry, ['id', 'Id']);
+    items.push({
+      id: sourceId ?? `source:${source}:${target}:${joinField ?? firstString(entry, ['name']) ?? 'relationship'}`,
+      source,
+      target,
+      label: joinField ?? firstString(entry, ['sourceFieldLabel', 'label']),
+      cardinality: firstString(entry, ['cardinality', 'relationshipType', 'type']),
+      status: firstString(entry, ['status', 'relationshipStatus']),
+      targetField,
+      certainty: 'confirmed',
+      provenance: makeProvenance(context),
+    });
+  }
+
+  return { items, skipped };
 }
 
 /**

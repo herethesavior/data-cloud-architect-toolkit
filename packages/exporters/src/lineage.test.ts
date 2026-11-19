@@ -77,6 +77,29 @@ describe('lineage graph model', () => {
     expect(confirmed?.relationshipCertainty).toBe('confirmed');
   });
 
+  it('keeps source relationship status explicit instead of deriving it', () => {
+    const inventory = cloneDemo();
+    const relationship = inventory.relationships[0]!;
+    relationship.status = 'ACTIVE';
+    relationship.targetField = 'Id';
+    const graph = buildLineageGraph(inventory);
+    const edge = graph.edges.find((candidate) => candidate.id === `relationship:${relationship.id}`);
+
+    expect(edge?.relationshipStatus).toBe('ACTIVE');
+    expect(edge?.detail).toContain('status ACTIVE');
+    expect(edge?.fieldLinks[0]).toMatchObject({ targetField: 'Id', transformation: null });
+  });
+
+  it('does not echo the source join field as a target field when none was supplied', () => {
+    const inventory = cloneDemo();
+    const relationship = inventory.relationships[0]!;
+    relationship.targetField = null;
+    const graph = buildLineageGraph(inventory);
+    const edge = graph.edges.find((candidate) => candidate.id === `relationship:${relationship.id}`);
+
+    expect(edge?.fieldLinks).toHaveLength(0);
+  });
+
   it('shows unresolved references and orphan objects as gaps instead of dropping them', () => {
     const inventory = cloneDemo();
     inventory.dataStreams.push({

@@ -15,7 +15,7 @@ import {
   setModePreference,
   setSelectedOrg,
 } from './lib/preferences.ts';
-import { persistedQueryOptions } from './lib/queryPersistence.ts';
+import { orgsQueryOptions, persistedQueryOptions } from './lib/queryPersistence.ts';
 import { useTheme } from './lib/useTheme.ts';
 import { useInventory } from './lib/useInventory.ts';
 import type { FocusObject } from './lib/objectDetail.ts';
@@ -79,7 +79,7 @@ export function App() {
     // The mode lives in the session response. Waiting for it prevents a live
     // reload from briefly retrieving orgs under the demo key.
     enabled: sessionReady,
-    ...persistedQueryOptions,
+    ...orgsQueryOptions(hosted),
   });
 
   const [page, setPage] = useState<Page>(() => pageFromHash(window.location.hash));

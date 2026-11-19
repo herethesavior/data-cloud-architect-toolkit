@@ -38,7 +38,9 @@ function restBody(path: string): string | undefined {
     ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?')
       && path.includes('dmoDeveloperName=')
       ? mappingsJson
-      : undefined);
+      : path.includes('/relationships?')
+        ? ''
+        : undefined);
 }
 
 function createRunner(loginResult?: { stdout: string; stderr: string; exitCode: number }): ProcessRunner {

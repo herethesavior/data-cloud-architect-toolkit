@@ -91,7 +91,7 @@ function StreamDetail({ stream, inventory, onClose }: {
           </div>
 
           <p className="text-xs text-ink-soft">
-            Data space is joined from the target DLO in this snapshot. Stream metadata has no native data space field.
+            Data space comes from stream metadata when Salesforce supplies it; otherwise it is joined from the target DLO in this snapshot.
           </p>
         </div>
       ),

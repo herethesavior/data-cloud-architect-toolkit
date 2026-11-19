@@ -72,6 +72,24 @@ export const dmosJson = JSON.stringify({
   ],
 });
 
+/** Live v68 per-DMO relationship shape, including source status. */
+export const dmoRelationshipsJson = JSON.stringify({
+  currentPageUrl: '/services/data/v68.0/ssot/data-model-objects/Account_DMO__dlm/relationships?limit=500',
+  relationships: [{
+    cardinality: 'ManyToOne',
+    creationType: 'Standard',
+    id: '0geDEMO000000001AAA',
+    name: 'Account_ContactId_map_Contact_Id_N_1',
+    owner: 'DataCloud',
+    sourceField: { label: 'Contact', name: 'ContactId', type: 'MktDataModelField' },
+    sourceObject: { keyQualifierField: null, label: 'Account', name: 'Account_DMO__dlm' },
+    status: 'INACTIVE',
+    targetField: { label: 'Id', name: 'Id', type: 'MktDataModelField' },
+    targetObject: { keyQualifierField: null, label: 'Contact', name: 'Contact_DMO__dlm' },
+  }],
+  totalSize: 1,
+});
+
 export const mappingsJson = JSON.stringify({
   records: [
     {

@@ -16,6 +16,17 @@ export const persistedQueryOptions = {
   refetchOnWindowFocus: false,
 } as const;
 
+/**
+ * Before a hosted bridge pairs, `org.list` is expected to fail. Auto-retry would
+ * enqueue another relay operation on a timer, and a late retry can land between
+ * `org.connect` and the first inventory load and block the dashboard.
+ */
+export function orgsQueryOptions(hosted: boolean) {
+  return hosted
+    ? { ...persistedQueryOptions, retry: false, retryOnMount: false }
+    : persistedQueryOptions;
+}
+
 type StringStorage = {
   getItem: (key: string) => Promise<string | null | undefined>;
   setItem: (key: string, value: string) => Promise<unknown>;
