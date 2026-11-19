@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://sfdcat.pages.dev/</loc></url>
+  <url><loc>https://sfdcat.pages.dev/orgs</loc></url>
+  <url><loc>https://sfdcat.pages.dev/data-spaces</loc></url>
+  <url><loc>https://sfdcat.pages.dev/dlos</loc></url>
+  <url><loc>https://sfdcat.pages.dev/dmos</loc></url>
+  <url><loc>https://sfdcat.pages.dev/mappings</loc></url>
+  <url><loc>https://sfdcat.pages.dev/data-streams</loc></url>
+  <url><loc>https://sfdcat.pages.dev/data-transforms</loc></url>
+  <url><loc>https://sfdcat.pages.dev/erd</loc></url>
+  <url><loc>https://sfdcat.pages.dev/lineage</loc></url>
+  <url><loc>https://sfdcat.pages.dev/dictionary</loc></url>
+  <url><loc>https://sfdcat.pages.dev/settings</loc></url>
+  <url><loc>https://sfdcat.pages.dev/help</loc></url>
+  <url><loc>https://sfdcat.pages.dev/about</loc></url>
+</urlset>

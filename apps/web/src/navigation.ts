@@ -11,7 +11,8 @@ export type Page =
   | 'lineage'
   | 'dictionary'
   | 'settings'
-  | 'help';
+  | 'help'
+  | 'about';
 
 export interface NavItem {
   id: Page;
@@ -53,7 +54,10 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Support',
-    items: [{ id: 'help', label: 'Help' }],
+    items: [
+      { id: 'help', label: 'Help' },
+      { id: 'about', label: 'About DCAT' },
+    ],
   },
 ];
 
@@ -71,6 +75,7 @@ export const PAGE_TITLES: Record<Page, string> = {
   dictionary: 'Data Dictionary',
   settings: 'Settings & Diagnostics',
   help: 'Help',
+  about: 'About DCAT',
 };
 
 const PAGE_IDS = Object.keys(PAGE_TITLES) as Page[];
@@ -80,31 +85,48 @@ export function isPage(value: string): value is Page {
   return PAGE_ID_SET.has(value);
 }
 
-/** The landing view keeps a clean URL; every other view is addressable by fragment. */
-export function pageHash(page: Page): string {
-  return page === 'dashboard' ? '' : `#${page}`;
+/** Every view has a real, crawlable path. The landing view stays at the root. */
+export function pagePath(page: Page): string {
+  return page === 'dashboard' ? '/' : `/${page}`;
 }
 
 export function pageHref(page: Page): string {
-  return page === 'dashboard' ? './' : pageHash(page);
+  return pagePath(page);
 }
 
-function hashValue(hash: string): string {
-  return hash.replace(/^#\/?/, '').trim().toLowerCase();
+function normalizeSegment(value: string): string {
+  return value.replace(/^\/+/, '').replace(/\/+$/, '').trim().toLowerCase();
 }
 
-export function pageFromHash(hash: string): Page {
-  const candidate = hashValue(hash);
+export function pageFromPath(pathname: string): Page {
+  const candidate = normalizeSegment(pathname.split('?')[0]);
   return isPage(candidate) ? candidate : 'dashboard';
+}
+
+/** Accept old `#page` bookmarks once, then normalize them to real paths. */
+function legacyPageFromHash(hash: string): Page | null {
+  const candidate = hash.replace(/^#\/?/, '').trim().toLowerCase();
+  return isPage(candidate) ? candidate : null;
+}
+
+export function pageFromLocation(location: Pick<Location, 'pathname' | 'hash'>): Page {
+  const fromPath = pageFromPath(location.pathname);
+  if (fromPath !== 'dashboard' || !location.hash) return fromPath;
+  return legacyPageFromHash(location.hash) ?? 'dashboard';
+}
+
+export function isLegacyPageHash(hash: string): boolean {
+  return legacyPageFromHash(hash) !== null;
 }
 
 export function pageUrl(page: Page, currentUrl: string): string {
   const url = new URL(currentUrl);
-  url.hash = pageHash(page);
-  return `${url.pathname}${url.search}${url.hash}`;
+  url.pathname = pagePath(page);
+  url.hash = '';
+  return `${url.pathname}${url.search}`;
 }
 
-export function writePageHash(page: Page, mode: 'push' | 'replace' = 'push'): void {
+export function writePagePath(page: Page, mode: 'push' | 'replace' = 'push'): void {
   const nextUrl = pageUrl(page, window.location.href);
   const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   if (nextUrl === currentUrl) return;

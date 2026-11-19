@@ -173,7 +173,8 @@ test.beforeEach(async ({ page }) => {
 test('demo first impression shows the inventory and the CTA opens an explorer', async ({ page }) => {
   await openDemo(page);
 
-  await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute('href', '/favicon.ico');
+  await expect(page.locator('link[rel="icon"]').first()).toHaveAttribute('href', '/dcat-mark.svg');
+  await expect(page.locator('link[rel="icon"][href="/favicon.ico"]')).toHaveCount(1);
   await expect(page.locator('#desktop-sidebar img[src="/dcat-icon-192.png"]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
   await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toHaveAttribute(
@@ -206,32 +207,55 @@ test('org switcher and details page use the authenticated demo org', async ({ pa
   ).toBeVisible();
 });
 
-test('menu links use fragments and browser history restores the right view', async ({ page }) => {
+test('menu links use real paths and browser history restores the right view', async ({ page }) => {
   await openDemo(page);
   const sidebar = page.locator('#desktop-sidebar');
 
-  await expect(sidebar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', './');
+  await expect(sidebar.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/');
   const dloLink = sidebar.getByRole('link', { name: 'DLO Explorer' });
-  await expect(dloLink).toHaveAttribute('href', '#dlos');
+  await expect(dloLink).toHaveAttribute('href', '/dlos');
 
   await dloLink.click();
-  await expect.poll(() => new URL(page.url()).hash).toBe('#dlos');
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/dlos');
   await expect(page.locator('h1')).toHaveText('DLO Explorer');
 
   await page.goBack();
-  await expect.poll(() => new URL(page.url()).hash).toBe('');
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/');
   await expect(page.locator('h1')).toHaveText('Dashboard');
 
   await page.goForward();
-  await expect.poll(() => new URL(page.url()).hash).toBe('#dlos');
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/dlos');
   await expect(page.locator('h1')).toHaveText('DLO Explorer');
 
-  await page.goto('/#does-not-exist');
+  await page.goto('/does-not-exist');
   await expect(page.locator('h1')).toHaveText('Dashboard');
-  await expect.poll(() => new URL(page.url()).hash).toBe('');
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/');
 
+  // Legacy `#page` bookmarks are accepted once and normalized to a real path.
   await page.goto('/#data-streams');
   await expect(page.locator('h1')).toHaveText('Data Stream Explorer');
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/data-streams');
+});
+
+test('routes expose crawlable URLs and per-page metadata', async ({ page }) => {
+  await openDemo(page);
+
+  await expect(page).toHaveURL('http://127.0.0.1:5173/');
+  await expect(page).toHaveTitle('DCAT | Data Cloud Architect Toolkit');
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://sfdcat.pages.dev/');
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    'content',
+    /local-first, read-only workbench/,
+  );
+
+  await page.goto('/about');
+  await expect(page).toHaveTitle('About DCAT | Data Cloud Architect Toolkit');
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://sfdcat.pages.dev/about');
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
+    'content',
+    'About DCAT | Data Cloud Architect Toolkit',
+  );
+  await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', 'https://sfdcat.pages.dev/about');
 });
 
 test('reload restores cached inventory and navigation does not retrieve it again', async ({ page }) => {
@@ -1274,6 +1298,7 @@ test('every screen fits a phone viewport', async ({ page }) => {
     'Data Dictionary',
     'Settings & Diagnostics',
     'Help',
+    'About DCAT',
   ]) {
     await page.getByRole('button', { name: 'Open navigation' }).click();
     await page.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('link', { name }).click();
@@ -1283,6 +1308,36 @@ test('every screen fits a phone viewport', async ({ page }) => {
     );
     expect(overflow, `horizontal overflow on ${name}`).toBeLessThanOrEqual(1);
   }
+});
+
+test('about page shows the story and a navigable full-screen deck', async ({ page }) => {
+  await openDemo(page);
+  await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
+
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'About DCAT' }).click();
+  await expect(page.locator('h1')).toHaveText('About DCAT');
+  await expect(page.getByRole('heading', { name: 'About DCAT', level: 2 })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/about');
+  await expect(page.getByRole('navigation', { name: 'Chapters' }).getByRole('button')).toHaveCount(13);
+  await expect(page.locator('.story-flow').getByText(/Created in a personal capacity/)).toBeVisible();
+
+  await page.getByRole('navigation', { name: 'Chapters' }).getByRole('button', { name: /04 Flow/ }).click();
+  await expect.poll(() => new URL(page.url()).hash).toBe('#story-scroll-flow');
+
+  const deck = page.locator('.deck-shell');
+  await page.getByRole('button', { name: 'Present' }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+  await expect(deck.locator('.deck-counter')).toContainText('01');
+
+  await deck.getByRole('button', { name: 'Next slide' }).click();
+  await expect(deck.locator('.deck-counter')).toContainText('02');
+  await page.keyboard.press('ArrowRight');
+  await expect(deck.locator('.deck-counter')).toContainText('03');
+  await page.keyboard.press('End');
+  await expect(deck.locator('.deck-counter')).toContainText('13');
+
+  await deck.getByRole('button', { name: 'Exit presentation' }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
 });
 
 test('command palette opens with Ctrl+K and opens a DLO detail drawer', async ({ page }) => {
@@ -1458,7 +1513,7 @@ test('browser history during a live org switch keeps the selected context', asyn
   state.mode = 'live';
   await seedLiveMode(page);
   await mockConnector(page, state);
-  await page.goto('/#dlos');
+  await page.goto('/dlos');
 
   const rows = page.getByRole('table', { name: 'DLO Explorer results' });
   await expect(rows.getByText('Production Account')).toBeVisible();

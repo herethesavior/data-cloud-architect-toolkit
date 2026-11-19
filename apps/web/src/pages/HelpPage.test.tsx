@@ -72,14 +72,15 @@ describe('HelpPage', () => {
 
   it('keeps the selected topic in the URL for reload, back, and deep links', async () => {
     const user = userEvent.setup();
-    window.history.replaceState(null, '', '/?topic=glossary#help');
+    window.history.replaceState(null, '', '/help?topic=glossary');
     render(<HelpPage onNavigate={vi.fn()} />);
     expect(screen.getByRole('tab', { name: 'Glossary' })).toHaveAttribute('aria-selected', 'true');
 
     await user.click(screen.getByRole('tab', { name: 'Status & privacy' }));
+    expect(window.location.pathname).toBe('/help');
     expect(window.location.search).toBe('?topic=status');
 
-    window.history.replaceState(null, '', '/?topic=connect#help');
+    window.history.replaceState(null, '', '/help?topic=connect');
     act(() => window.dispatchEvent(new PopStateEvent('popstate')));
     expect(await screen.findByRole('tab', { name: 'Connect & refresh' })).toHaveAttribute('aria-selected', 'true');
   });
@@ -91,6 +92,9 @@ describe('HelpPage', () => {
     await user.click(screen.getByRole('tab', { name: 'About & contact' }));
     expect(await screen.findByText('Ryan Joshua Dela Cruz')).toBeInTheDocument();
     expect(screen.getByText('Technical Architect at Salesforce')).toBeInTheDocument();
+    expect(screen.getByText(/See the architecture\. Understand the connections\. Make better decisions\./)).toBeInTheDocument();
+    expect(screen.getByText(/local-first, read-only workbench designed to make Salesforce Data Cloud/)).toBeInTheDocument();
+    expect(screen.getByText(/distinguishes confirmed relationships from inferred ones/)).toBeInTheDocument();
     expect(screen.getByText(/Created in a personal capacity/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open GitHub Issues \(opens in a new tab\)/ })).toHaveAttribute(
       'href',

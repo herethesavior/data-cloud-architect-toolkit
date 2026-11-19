@@ -19,6 +19,7 @@ import {
 } from './lib/preferences.ts';
 import { orgsQueryOptions, persistedQueryOptions } from './lib/queryPersistence.ts';
 import { useTheme } from './lib/useTheme.ts';
+import { usePageMetadata } from './lib/seo.ts';
 import { useInventory } from './lib/useInventory.ts';
 import type { FocusObject } from './lib/objectDetail.ts';
 import { clearWorkspaceCaches, createWorkspaceContext, invalidateWorkspaceState, orgsQueryKey } from './lib/workspace.ts';
@@ -37,7 +38,8 @@ import { ErdExplorer } from './pages/ErdExplorer.tsx';
 import { DataLineageExplorer } from './pages/DataLineageExplorer.tsx';
 import { DataDictionary } from './pages/DataDictionary.tsx';
 import { HelpPage } from './pages/HelpPage.tsx';
-import { pageFromHash, pageHash, writePageHash } from './navigation.ts';
+import { AboutPage } from './pages/AboutPage.tsx';
+import { isLegacyPageHash, pageFromLocation, pagePath, writePagePath } from './navigation.ts';
 import type { Page } from './navigation.ts';
 
 function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: string; onRetry?: () => void }) {
@@ -84,7 +86,7 @@ export function App() {
     ...orgsQueryOptions(hosted),
   });
 
-  const [page, setPage] = useState<Page>(() => pageFromHash(window.location.hash));
+  const [page, setPage] = useState<Page>(() => pageFromLocation(window.location));
   const [selectedAlias, setSelectedAlias] = useState<string | null>(() => getSelectedOrg());
   const [hiddenAliases, setHiddenAliases] = useState<string[]>(() => getHiddenOrgs());
   const [modeNotice, setModeNotice] = useState('');
@@ -98,8 +100,10 @@ export function App() {
 
   const navigate = (nextPage: Page) => {
     setPage(nextPage);
-    writePageHash(nextPage);
+    writePagePath(nextPage);
   };
+
+  usePageMetadata(page);
 
   const modeAppliedRef = useRef<string | null>(null);
   const failedModeRef = useRef<WorkspaceMode>('demo');
@@ -337,9 +341,11 @@ export function App() {
     const syncPageFromUrl = () => {
       const hash = window.location.hash;
       if (hash.replace(/^#/, '').toLowerCase() === 'main-content') return;
-      const nextPage = pageFromHash(hash);
+      const nextPage = pageFromLocation(window.location);
       setPage(nextPage);
-      if (hash !== pageHash(nextPage)) writePageHash(nextPage, 'replace');
+      const needsCanonicalUrl =
+        window.location.pathname !== pagePath(nextPage) || (Boolean(hash) && isLegacyPageHash(hash));
+      if (needsCanonicalUrl) writePagePath(nextPage, 'replace');
     };
     syncPageFromUrl();
     window.addEventListener('popstate', syncPageFromUrl);
@@ -510,11 +516,13 @@ export function App() {
       case 'erd':
         return <ErdExplorer context={context} />;
       case 'lineage':
-        return <DataLineageExplorer context={context} />;
+        return <DataLineageExplorer context={context} onNavigate={navigate} />;
       case 'dictionary':
         return <DataDictionary context={context} />;
       case 'help':
         return <HelpPage onNavigate={navigate} />;
+      case 'about':
+        return <AboutPage onNavigate={navigate} />;
     }
   })();
 
