@@ -97,6 +97,7 @@ export function OrgConnections({
   const [setupError, setSetupError] = useState('');
   const [updateNotice, setUpdateNotice] = useState('');
   const [connectError, setConnectError] = useState('');
+  const [refreshError, setRefreshError] = useState('');
   const [connectedAlias, setConnectedAlias] = useState<string | null>(null);
   const [confirmingAlias, setConfirmingAlias] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
@@ -153,19 +154,26 @@ export function OrgConnections({
       if (bridgeStatusQuery.data?.paired) await api.unpairBridge();
       return api.relayPairing();
     },
-    onSuccess: () => {
-      setSetupError('');
-      invalidateSetup();
-    },
+    onSuccess: () => setSetupError(''),
     onError: (error: Error) => setSetupError(error.message),
+    // If unpairing succeeded but pairing failed, the cached status still says
+    // "paired". Refetch it on every outcome so recovery does not wait for a poll.
+    onSettled: () => invalidateSetup(),
   });
 
   const connectOrg = useMutation({
-    mutationFn: () => api.connectOrg(newAlias, instanceUrl, loginBrowser || undefined),
+    // The caller's mode travels with the mutation: a mode switch does not
+    // remount this page, so reading the current prop on success would write a
+    // live result into the demo cache (or the other way around).
+    mutationFn: async (mutationMode: WorkspaceMode) => ({
+      org: await api.connectOrg(newAlias, instanceUrl, loginBrowser || undefined),
+      mutationMode,
+    }),
     onMutate: () => {
       connectStarted.current = true;
     },
-    onSuccess: (org) => {
+    onSuccess: ({ org, mutationMode }) => {
+      if (mutationMode !== mode) return;
       setConnectError('');
       setConnectedAlias(org.alias);
       // Seed the shared org cache before selection so the workbench has a
@@ -187,13 +195,19 @@ export function OrgConnections({
   });
 
   const refreshOrgs = useMutation({
-    mutationFn: api.refreshOrgs,
-    onSuccess: (orgs) => {
+    mutationFn: async (mutationMode: WorkspaceMode) => ({
+      orgs: await api.refreshOrgs(),
+      mutationMode,
+    }),
+    onSuccess: ({ orgs, mutationMode }) => {
+      if (mutationMode !== mode) return;
       // This is the explicit user refresh: replace the persisted list with the
       // newly retrieved one instead of waiting for an observer-mount refetch.
+      setRefreshError('');
       queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), orgs);
       invalidateBridgeState(queryClient);
     },
+    onError: (error: Error) => setRefreshError(error.message),
   });
 
   const status = bridgeStatusQuery.data;
@@ -543,7 +557,7 @@ export function OrgConnections({
               variant="primary"
               onClick={() => {
                 if (connectStarted.current || connectOrg.isPending) return;
-                connectOrg.mutate();
+                connectOrg.mutate(mode);
               }}
               disabled={!bridgeReady || connectOrg.isPending || Boolean(aliasError || instanceError)}
               icon={<Icon name="plug" size={15} />}
@@ -594,7 +608,7 @@ export function OrgConnections({
               ) : null}
               <Button
                 variant="secondary"
-                onClick={() => refreshOrgs.mutate()}
+                onClick={() => refreshOrgs.mutate(mode)}
                 disabled={refreshOrgs.isPending || inventoryLocked}
                 icon={<Icon name="refresh" size={15} />}
               >
@@ -607,6 +621,21 @@ export function OrgConnections({
             <p className="mb-3 rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft" role="status">
               {removalNotice}
             </p>
+          ) : null}
+          {refreshError ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">
+              <span>Couldn't refresh the org list: {refreshError}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setRefreshError('');
+                  refreshOrgs.mutate(mode);
+                }}
+                className="font-semibold underline underline-offset-2"
+              >
+                Try again
+              </button>
+            </div>
           ) : null}
           {orgListChecking ? <LoadingState label="Checking for Salesforce orgs…" /> : null}
           {!orgListChecking && orgsQuery.isError ? (

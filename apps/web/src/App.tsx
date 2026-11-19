@@ -3,6 +3,7 @@ import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { buildCommandResults } from './lib/commandSearch.ts';
+import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
 import type { CommandResult } from './lib/commandSearch.ts';
 import { InventoryActionsProvider } from './lib/inventoryActions.tsx';
@@ -87,6 +88,9 @@ export function App() {
   const [hiddenAliases, setHiddenAliases] = useState<string[]>(() => getHiddenOrgs());
   const [modeNotice, setModeNotice] = useState('');
   const [modeError, setModeError] = useState('');
+  // Remount the page subtree after a data action so mounted explorers rebuild
+  // their observers against the newly fetched caches.
+  const [dataEpoch, setDataEpoch] = useState(0);
   const [focusObject, setFocusObject] = useState<FocusObject | null>(null);
 
   const navigate = (nextPage: Page) => {
@@ -137,7 +141,27 @@ export function App() {
     clearWorkspaceCaches(queryClient, activeContextId);
   };
 
-  const { mutate: mutateMode, isPending: isTogglingMode } = useMutation({
+  const stopInFlightDiscovery = () => {
+    refreshControllerRef.current?.abort();
+    refreshControllerRef.current = null;
+    resumeControllerRef.current?.abort();
+    resumeControllerRef.current = null;
+  };
+
+  // Scoped to re-fetchable data: dropping the session or diagnostics cache here
+  // would flash a boot screen over a Settings action.
+  const clearCachedMetadata = async () => {
+    stopInFlightDiscovery();
+    await clearDcatCachedMetadata(queryClient);
+    setDataEpoch((value) => value + 1);
+  };
+
+  const resetSavedLayouts = () => {
+    clearDcatSavedLayouts();
+    setDataEpoch((value) => value + 1);
+  };
+
+  const { mutate: mutateMode, mutateAsync: setModeAsync, isPending: isTogglingMode } = useMutation({
     mutationFn: api.setMode,
     onSuccess: async (result, requestedMode) => {
       try {
@@ -183,6 +207,25 @@ export function App() {
       setModeError(`Couldn't switch to ${requestedMode} mode. ${error.message}`);
     },
   });
+
+  const eraseLocalData = async () => {
+    stopInFlightDiscovery();
+    await clearDcatCachedMetadata(queryClient);
+    // The mode also lives in the server session. Reset it through the same path
+    // as the header toggle so the UI really returns to demo after local data is
+    // erased, then clear the preference it writes back to localStorage.
+    await setModeAsync('demo');
+    clearDcatLocalPreferences();
+    setHiddenAliases([]);
+    theme.reset();
+    setDataEpoch((value) => value + 1);
+  };
+
+  // Settings owns inline results for its data actions; remounting it from its
+  // own callback would discard the result the user needs to read.
+  const contentKey = page === 'settings'
+    ? 'settings'
+    : `${page === 'orgs' ? page : `${page}-${context?.contextId ?? 'none'}`}-${dataEpoch}`;
 
   const refreshInventory = useMutation({
     mutationFn: async (target: WorkspaceContext | null) => {
@@ -401,7 +444,14 @@ export function App() {
           />
         );
       case 'settings':
-        return <Settings theme={theme} />;
+        return (
+          <Settings
+            theme={theme}
+            onClearCachedMetadata={clearCachedMetadata}
+            onResetSavedLayouts={resetSavedLayouts}
+            onEraseLocalData={eraseLocalData}
+          />
+        );
       case 'data-spaces':
         return <DataSpaces context={context} />;
       case 'dlos':
@@ -464,6 +514,7 @@ export function App() {
         page={page}
         onNavigate={navigate}
         context={context}
+        mode={mode}
         onToggleMode={toggleMode}
         isTogglingMode={isTogglingMode}
         modeNotice={modeNotice}
@@ -480,7 +531,7 @@ export function App() {
       >
         {/* Explorers remount on context change to reset local filters and search.
             Org Connections keeps its two-step action state while selection moves. */}
-        <div key={page === 'orgs' ? page : `${page}-${context?.contextId ?? 'none'}`} className="page-enter">{content}</div>
+        <div key={contentKey} className="page-enter">{content}</div>
       </AppShell>
     </InventoryActionsProvider>
   );

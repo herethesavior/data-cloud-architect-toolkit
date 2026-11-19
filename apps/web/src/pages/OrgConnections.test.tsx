@@ -52,7 +52,7 @@ function renderOrgConnections(onSelect = vi.fn(), options: RenderOptions = {}) {
   }
   const onRemoveOrg = vi.fn();
   const onRestoreOrg = vi.fn();
-  render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <OrgConnections
         mode={mode}
@@ -64,7 +64,21 @@ function renderOrgConnections(onSelect = vi.fn(), options: RenderOptions = {}) {
       />
     </QueryClientProvider>,
   );
-  return { onSelect, onRemoveOrg, onRestoreOrg, queryClient };
+  const rerenderWithMode = (nextMode: 'demo' | 'live') => {
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <OrgConnections
+          mode={nextMode}
+          selectedAlias={null}
+          onSelect={onSelect}
+          hiddenAliases={options.hiddenAliases ?? []}
+          onRemoveOrg={onRemoveOrg}
+          onRestoreOrg={onRestoreOrg}
+        />
+      </QueryClientProvider>,
+    );
+  };
+  return { onSelect, onRemoveOrg, onRestoreOrg, queryClient, rerenderWithMode };
 }
 
 describe('OrgConnections connect wizard', () => {
@@ -332,5 +346,69 @@ describe('OrgConnections connect wizard', () => {
     expect(await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
     expect(screen.queryByText('demo-uat')).not.toBeInTheDocument();
     expect(screen.getByText('prod-org')).toBeInTheDocument();
+  });
+
+  it('does not write a connect result into the new mode cache after a mode switch', async () => {
+    let finish!: (org: OrgSummary) => void;
+    const pending = new Promise<OrgSummary>((resolve) => { finish = resolve; });
+    vi.spyOn(api, 'connectOrg').mockReturnValue(pending);
+    vi.mocked(api.orgs).mockResolvedValue([]);
+    const { onSelect, queryClient, rerenderWithMode } = renderOrgConnections();
+
+    const button = await screen.findByRole('button', { name: 'Connect org' });
+    await waitFor(() => expect(button).toBeEnabled());
+    await userEvent.click(button);
+    rerenderWithMode('demo');
+    finish(connectedOrg);
+    await pending;
+
+    await waitFor(() => expect(queryClient.getQueryData<OrgSummary[]>(orgsQueryKey('demo')) ?? []).toEqual([]));
+    expect(queryClient.getQueryData<OrgSummary[]>(orgsQueryKey('demo'))).not.toContainEqual(connectedOrg);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('does not write a refresh result into the new mode cache after a mode switch', async () => {
+    let finish!: (orgs: OrgSummary[]) => void;
+    const pending = new Promise<OrgSummary[]>((resolve) => { finish = resolve; });
+    vi.spyOn(api, 'refreshOrgs').mockReturnValue(pending);
+    vi.mocked(api.orgs).mockResolvedValue([]);
+    const { queryClient, rerenderWithMode } = renderOrgConnections(vi.fn(), { seedOrgs: [connectedOrg] });
+    await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh org list' }));
+    rerenderWithMode('demo');
+    await waitFor(() => expect(api.orgs).toHaveBeenCalled());
+    finish([connectedOrg]);
+    await pending;
+
+    await waitFor(() => expect(api.refreshOrgs).toHaveBeenCalledOnce());
+    expect(queryClient.getQueryData<OrgSummary[]>(orgsQueryKey('demo')) ?? []).toEqual([]);
+  });
+
+  it('surfaces a failed org refresh instead of silently keeping the old list', async () => {
+    vi.mocked(api.orgs).mockResolvedValue([connectedOrg]);
+    vi.spyOn(api, 'refreshOrgs').mockRejectedValue(new Error('Refresh failed.'));
+    renderOrgConnections();
+
+    expect(await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh org list' }));
+
+    expect(await screen.findByText(/Couldn't refresh the org list: Refresh failed./)).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
+  });
+
+  it('refreshes bridge status when a pairing reset fails after unpairing', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({ relay: 'stale' }));
+    vi.spyOn(api, 'unpairBridge').mockResolvedValue({ paired: false });
+    vi.spyOn(api, 'relayPairing').mockRejectedValue(new Error('Pairing unavailable.'));
+    const { queryClient } = renderOrgConnections(vi.fn(), { seedOrgs: [] });
+
+    expect(await screen.findByText('The bridge stopped responding.')).toBeInTheDocument();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    await userEvent.click(screen.getByRole('button', { name: 'Create new pairing code' }));
+
+    expect(await screen.findByText('Pairing unavailable.')).toBeInTheDocument();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
   });
 });

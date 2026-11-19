@@ -140,7 +140,8 @@ describe('workspace contexts', () => {
   });
 
   it('labels the active context explicitly in the header', () => {
-    expect(workspaceBadge(null)).toEqual({ label: 'LIVE · NOT CONNECTED', tone: 'neutral' });
+    expect(workspaceBadge(null, 'live')).toEqual({ label: 'LIVE · NOT CONNECTED', tone: 'neutral' });
+    expect(workspaceBadge(null, 'demo')).toEqual({ label: 'DEMO · NO ORG SELECTED', tone: 'warning' });
     expect(workspaceBadge(createWorkspaceContext('demo', demoOrg))).toEqual({
       label: 'DEMO DATA',
       tone: 'warning',

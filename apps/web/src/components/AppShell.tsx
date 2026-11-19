@@ -8,7 +8,7 @@ import { trapDialogFocus } from '../lib/focusTrap.ts';
 import { isHosted } from '../lib/hosted.ts';
 import { getSidebarCollapsed, setSidebarCollapsed } from '../lib/preferences.ts';
 import { workspaceBadge } from '../lib/workspace.ts';
-import type { WorkspaceContext } from '../lib/workspace.ts';
+import type { WorkspaceContext, WorkspaceMode } from '../lib/workspace.ts';
 import type { ThemeController } from '../lib/useTheme.ts';
 import { CommandPalette } from './CommandPalette.tsx';
 import { DcatMark } from './DcatMark.tsx';
@@ -41,6 +41,7 @@ interface AppShellProps {
   page: Page;
   onNavigate: (page: Page) => void;
   context: WorkspaceContext | null;
+  mode: WorkspaceMode;
   onToggleMode: () => void;
   isTogglingMode: boolean;
   modeNotice: string;
@@ -207,6 +208,7 @@ export function AppShell({
   page,
   onNavigate,
   context,
+  mode,
   onToggleMode,
   isTogglingMode,
   modeNotice,
@@ -229,8 +231,10 @@ export function AppShell({
   const [metadataResult, setMetadataResult] = useState<CommandResult | null>(null);
   const selectedOrg = orgs.find((org) => org.alias === selectedAlias) ?? null;
   const groupLabel = NAV_GROUPS.find((group) => group.items.some((item) => item.id === page))?.label ?? 'Workspace';
-  const badge = workspaceBadge(context);
-  const activeMode = context?.mode ?? 'live';
+  // The session mode is the source of truth even when no org is selected. A
+  // context-less demo session must never present itself as a live workspace.
+  const badge = workspaceBadge(context, mode);
+  const activeMode = mode;
 
   const navigate = (nextPage: Page) => {
     onNavigate(nextPage);
