@@ -704,28 +704,24 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
                 <p className="mt-0.5 text-sm font-medium text-brand">Technical Architect at Salesforce</p>
               </div>
             </div>
-            <p className="mt-5 max-w-3xl text-sm font-medium text-brand">
-              See the architecture. Understand the connections. Make better decisions.
-            </p>
-            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-soft">
-              <strong className="font-semibold text-ink">Data Cloud Architect Toolkit (DCAT)</strong> is a
-              local-first, read-only workbench designed to make Salesforce Data Cloud (Data 360) architectures
-              easier to explore, understand, and validate.
-            </p>
-            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-soft">
-              It brings together Data Spaces, data streams, DLOs, DMOs, mappings, and transformations into a
-              connected architectural view. With interactive data models, lineage, and metadata explorers,
-              architects can trace relationships, understand dependencies, identify gaps, and turn complex
-              implementations into clear, actionable insights.
-            </p>
-            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-ink-soft">
-              Built with security and transparency in mind, DCAT relies on Salesforce CLI for authentication,
-              distinguishes confirmed relationships from inferred ones, and keeps metadata discovery and exports
-              under the user&apos;s control.
-            </p>
             <p className="mt-4 rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
               Created in a personal capacity. DCAT is not an official Salesforce product.
             </p>
+            <div className="mt-5 flex flex-col gap-3 border-t border-line pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-ink">Looking for the product story?</p>
+                <p className="mt-1 text-xs text-ink-soft">
+                  Why DCAT exists, how discovery works, and what is planned next.
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => onNavigate('about')}
+                icon={<Icon name="arrowRight" size={15} />}
+              >
+                Read the product story
+              </Button>
+            </div>
           </Panel>
 
           <Panel>

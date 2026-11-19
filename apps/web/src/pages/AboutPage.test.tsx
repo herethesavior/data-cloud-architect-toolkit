@@ -1,13 +1,22 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AboutPage } from './AboutPage.tsx';
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  Reflect.deleteProperty(document, 'fullscreenElement');
+  Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
+  window.history.replaceState(null, '', '/');
 });
+
+function enterFullscreen(deck: HTMLElement) {
+  Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => deck });
+  act(() => document.dispatchEvent(new Event('fullscreenchange')));
+}
 
 describe('AboutPage', () => {
   it('presents the product story as readable chapters with a jump index', () => {
@@ -54,5 +63,56 @@ describe('AboutPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Read the docs' }));
     expect(onNavigate).toHaveBeenCalledWith('help');
+  });
+
+  it('advances exactly one slide per keypress and ignores repeat events', () => {
+    render(<AboutPage onNavigate={vi.fn()} />);
+    const deck = document.querySelector('.deck-shell') as HTMLElement;
+    enterFullscreen(deck);
+    const counter = document.querySelector('.deck-counter') as HTMLElement;
+    expect(counter).toHaveTextContent('01');
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', repeat: true, bubbles: true }));
+    });
+    expect(counter).toHaveTextContent('01');
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    });
+    expect(counter).toHaveTextContent('02');
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', ctrlKey: true, bubbles: true }));
+    });
+    expect(counter).toHaveTextContent('02');
+  });
+
+  it('locks page scrolling and ignores chapter hashes while presenting', () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    const previousOverflow = document.body.style.overflow;
+    render(<AboutPage onNavigate={vi.fn()} />);
+    const deck = document.querySelector('.deck-shell') as HTMLElement;
+    enterFullscreen(deck);
+
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.documentElement.style.overflow).toBe('hidden');
+
+    window.history.replaceState(null, '', '/about#story-scroll-flow');
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    Reflect.deleteProperty(document, 'fullscreenElement');
+    act(() => document.dispatchEvent(new Event('fullscreenchange')));
+    expect(document.body.style.overflow).toBe(previousOverflow);
+
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'instant', block: 'start' });
   });
 });

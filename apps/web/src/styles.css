@@ -1458,15 +1458,13 @@ html[data-theme='dark'] {
     flex-direction: column;
     background: var(--color-canvas);
     opacity: 0;
-    transform: scale(0.98);
     pointer-events: none;
-    transition: opacity var(--duration-normal) var(--ease-standard),
-      transform var(--duration-normal) var(--ease-standard);
+    overscroll-behavior: contain;
+    transition: opacity var(--duration-normal) var(--ease-standard);
   }
 
   .deck-shell:fullscreen {
     opacity: 1;
-    transform: none;
     pointer-events: auto;
   }
 
@@ -1552,8 +1550,7 @@ html[data-theme='dark'] {
   }
 
   .deck-stage {
-    position: relative;
-    display: grid;
+    display: flex;
     flex: 1;
     min-height: 0;
     overflow: hidden;
@@ -1562,31 +1559,20 @@ html[data-theme='dark'] {
 
   .deck-slide {
     display: flex;
-    grid-area: 1 / 1;
+    flex: 1;
+    min-width: 0;
     min-height: 0;
-    align-items: safe center;
+    align-items: flex-start;
     justify-content: center;
     overflow: auto;
-    opacity: 0;
-    transform: translate3d(2%, 0, 0);
-    visibility: hidden;
-    pointer-events: none;
-    transition: opacity var(--duration-normal) var(--ease-standard),
-      transform var(--duration-normal) var(--ease-standard),
-      visibility var(--duration-normal) var(--ease-standard);
-  }
-
-  .deck-slide.is-active {
-    opacity: 1;
-    transform: none;
-    visibility: visible;
-    pointer-events: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
   .deck-slide .story-chapter {
     width: 100%;
     max-width: 96rem;
-    margin: auto;
+    margin: 0 auto;
   }
 
   .deck-hint {
