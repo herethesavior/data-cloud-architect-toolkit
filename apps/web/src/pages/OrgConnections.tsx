@@ -4,7 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BridgeStatus, OrgSummary } from '@dcat/core';
 import { api } from '../lib/api.ts';
 import { isHosted } from '../lib/hosted.ts';
-import { invalidateBridgeState } from '../lib/workspace.ts';
+import { persistedQueryOptions } from '../lib/queryPersistence.ts';
+import { invalidateBridgeState, orgsQueryKey } from '../lib/workspace.ts';
+import type { WorkspaceMode } from '../lib/workspace.ts';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
@@ -30,6 +32,7 @@ function validateInstanceUrl(value: string): string | null {
 }
 
 interface OrgConnectionsProps {
+  mode: WorkspaceMode;
   selectedAlias: string | null;
   onSelect: (alias: string) => void;
   hiddenAliases: readonly string[];
@@ -79,6 +82,7 @@ function setupLabel(status: BridgeStatus | undefined, hosted: boolean, installed
 }
 
 export function OrgConnections({
+  mode,
   selectedAlias,
   onSelect,
   hiddenAliases,
@@ -111,15 +115,16 @@ export function OrgConnections({
       return 5_000;
     },
   });
-  // The App root also observes ['orgs']. In hosted live mode, only start this
-  // observer once a bridge is paired so a second org.list cannot be enqueued
-  // after a connect request and delay the first inventory load. Demo mode uses
-  // fixtures, so it never needs this guard.
+  // The App root also observes the mode-scoped org list. In hosted live mode,
+  // only start this observer once a bridge is paired so a second org.list cannot
+  // be enqueued after a connect request and delay the first inventory load.
+  // Demo mode uses fixtures, so it never needs this guard.
   const bridgeStatus = bridgeStatusQuery.data;
   const orgsQuery = useQuery({
-    queryKey: ['orgs'],
+    queryKey: orgsQueryKey(mode),
     queryFn: api.orgs,
     enabled: !hosted || bridgeStatus?.mode === 'demo' || bridgeStatus?.paired === true,
+    ...persistedQueryOptions,
   });
 
   const invalidateSetup = () => invalidateBridgeState(queryClient);
@@ -164,10 +169,10 @@ export function OrgConnections({
       setConnectError('');
       setConnectedAlias(org.alias);
       // Seed the shared org cache before selection so the workbench has a
-      // context immediately. Do not invalidate ['orgs'] here: an invalidated
-      // observer can refetch on a later focus/mount and put a blocking
-      // `org.list` between the connect request and the first inventory load.
-      queryClient.setQueryData<OrgSummary[]>(['orgs'], (current = []) => [
+      // context immediately. Do not invalidate the org list here: an invalidated
+      // observer can refetch on a later mount and put a blocking `org.list`
+      // between the connect request and the first inventory load.
+      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), (current = []) => [
         org,
         ...current.filter((entry) => entry.alias !== org.alias),
       ]);
@@ -183,7 +188,12 @@ export function OrgConnections({
 
   const refreshOrgs = useMutation({
     mutationFn: api.refreshOrgs,
-    onSuccess: () => invalidateBridgeState(queryClient),
+    onSuccess: (orgs) => {
+      // This is the explicit user refresh: replace the persisted list with the
+      // newly retrieved one instead of waiting for an observer-mount refetch.
+      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), orgs);
+      invalidateBridgeState(queryClient);
+    },
   });
 
   const status = bridgeStatusQuery.data;

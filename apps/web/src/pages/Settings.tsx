@@ -22,6 +22,7 @@ const privacyItems: { icon: IconName; text: string }[] = [
   { icon: 'shield', text: 'No customer records are queried. Only metadata and schema information are retrieved.' },
   { icon: 'database', text: 'The browser runs no CLI commands; the local bridge executes only allowlisted typed operations.' },
   { icon: 'check', text: 'Demo fixtures are clearly labelled and never mixed with live org results.' },
+  { icon: 'database', text: 'Loaded metadata can be cached in this browser, but tokens and pairing codes are never persisted.' },
 ];
 
 export function Settings({ theme }: { theme: ThemeController }) {

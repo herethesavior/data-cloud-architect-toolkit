@@ -91,7 +91,7 @@ The pairing code is one-time and short-lived. **Step 1** also contains the bridg
 
 ## Safety boundaries
 
-- Salesforce CLI owns authentication. DCAT never asks for or stores usernames, passwords, tokens, SFDX auth URLs, or client secrets.
+- Salesforce CLI owns authentication. DCAT never asks for or stores usernames, passwords, tokens, SFDX auth URLs, or client secrets. The browser's inventory cache holds metadata snapshots only.
 - The browser never runs `sf`. Hosted mode uses an outbound bridge that polls the Worker; it needs no open inbound port or tunnel.
 - The relay accepts only six typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `transform.get`, and `mode.set`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
 - Process output is redacted before it is returned to the browser. Bridge storage contains only the relay URL, agent token, and version, written with mode `600`; it never reads the CLI credential store.
@@ -148,7 +148,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 - **Search:** press `Ctrl/Cmd+K` to search the current context's Data Spaces, DLOs, DMOs, streams, mappings, and transforms. Results open the matching explorer or a read-only detail dialog.
 - **Themes:** follow the device preference or choose **Light**, **Dark**, or **System** in Settings. The choice is saved as `dcat.theme`.
 - **Detail drawers:** open from object rows. They have breadcrumbs, tabs, copy actions, no dimming scrim, a width cap of 640px, and scrolling inside the viewport.
-- **Freshness:** a compact chip beside each explorer's filters shows **Updated …** with an exact-time tooltip and a stale dot when the live snapshot is cached. The icon-only refresh action is token-protected and only available with a selected org.
+- **Freshness:** a compact chip beside each explorer's filters shows **Updated …** with an exact-time tooltip. Loaded org lists and inventories are restored from this browser after a reload, so navigation does not retrieve them again. A stale dot appears for live snapshots older than 15 minutes; use the token-protected refresh action to retrieve a new snapshot.
 - **No org selected:** inventory views show **Select an org** as the primary action and **Use demo mode** as the live-mode fallback.
 - **Exports:** available from each explorer's **Export** menu. Live exports first show a short notice that the file contains org metadata. All exports stay local. The ERD Explorer adds a portable Mermaid `.mmd` export.
 - **ERD Explorer:** pan, zoom, drag objects, fit or reset the view, toggle the grid and minimap, and use full screen. Auto-layout can arrange objects left-to-right or top-to-bottom and sort them by connections or alphabetically. Object search and detail panels support focusing one object or relationship. Certainty distinguishes source-confirmed links from inferred or unknown links. Layout and viewport preferences are stored per workspace context in this browser only.
@@ -179,10 +179,10 @@ The demo inventory is fully labelled and intentionally healthy. It contains eigh
 4. Successful families still populate the inventory when other families fail. Discovery Health and **Needs attention** explain the gaps and stay inside the viewport.
 5. Transient failures get one retry. Forbidden and unsupported families are never retried.
 6. Pagination tokens are followed. If the page limit is reached, results are marked **partial**.
-7. Inventory is cached in memory for 60 seconds per org. The UI refresh action bypasses the cache with a token-protected request.
+7. Loaded org lists and inventory snapshots are saved in this browser's IndexedDB cache (metadata only) for up to 7 days and restored after a reload. Navigation reads that snapshot; only the UI refresh action retrieves a new one with a token-protected request.
 8. Transform detail is lazy and read-only: opening a transform calls only three allowlisted GET candidates. Each section reports its own status instead of appearing empty.
 
-Workspace contexts (`demo:${alias}` or `live:${alias}:${orgId}`) namespace inventory, transform, and ERD caches. Switching mode or org cancels in-flight requests and clears the old context before the new one renders, so demo metadata cannot appear under a live label and one org's data cannot appear under another.
+Workspace contexts (`demo:${alias}` or `live:${alias}:${orgId}`) namespace inventory, transform, and ERD caches. The org list is also scoped by mode before it is persisted. Switching mode or org cancels in-flight requests and clears the old context before the new one renders, so demo metadata cannot appear under a live label and one org's data cannot appear under another.
 
 ## Configuration
 

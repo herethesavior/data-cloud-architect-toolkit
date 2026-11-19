@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { buildCommandResults } from './lib/commandSearch.ts';
@@ -15,10 +15,11 @@ import {
   setModePreference,
   setSelectedOrg,
 } from './lib/preferences.ts';
+import { persistedQueryOptions } from './lib/queryPersistence.ts';
 import { useTheme } from './lib/useTheme.ts';
 import { useInventory } from './lib/useInventory.ts';
 import type { FocusObject } from './lib/objectDetail.ts';
-import { clearWorkspaceCaches, createWorkspaceContext, invalidateWorkspaceState } from './lib/workspace.ts';
+import { clearWorkspaceCaches, createWorkspaceContext, invalidateWorkspaceState, orgsQueryKey } from './lib/workspace.ts';
 import type { WorkspaceContext, WorkspaceMode } from './lib/workspace.ts';
 import { AppShell } from './components/AppShell.tsx';
 import { ErrorState, LoadingState } from './components/DataStates.tsx';
@@ -64,12 +65,21 @@ function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: strin
 
 export function App() {
   const queryClient = useQueryClient();
+  const isRestoring = useIsRestoring();
   const hosted = isHosted();
   const sessionQuery = useQuery({ queryKey: ['session'], queryFn: getSession, staleTime: Number.POSITIVE_INFINITY });
+  const mode: WorkspaceMode = sessionQuery.data?.mode ?? 'demo';
   // The Worker creates its session cookie on /api/session. Hosted queries wait
   // for that response so parallel first-load requests cannot create competing cookies.
   const sessionReady = Boolean(sessionQuery.data);
-  const orgsQuery = useQuery({ queryKey: ['orgs'], queryFn: api.orgs, enabled: !hosted || sessionReady });
+  const orgsQuery = useQuery({
+    queryKey: orgsQueryKey(mode),
+    queryFn: api.orgs,
+    // The mode lives in the session response. Waiting for it prevents a live
+    // reload from briefly retrieving orgs under the demo key.
+    enabled: sessionReady,
+    ...persistedQueryOptions,
+  });
 
   const [page, setPage] = useState<Page>(() => pageFromHash(window.location.hash));
   const [selectedAlias, setSelectedAlias] = useState<string | null>(() => getSelectedOrg());
@@ -87,7 +97,6 @@ export function App() {
   const failedModeRef = useRef<WorkspaceMode>('demo');
   const theme = useTheme();
 
-  const mode: WorkspaceMode = sessionQuery.data?.mode ?? 'demo';
   const visibleOrgs = useMemo(
     () => (orgsQuery.data ?? []).filter((org) =>
       (mode !== 'live' || org.source !== 'demo-fixture') && !hiddenAliases.includes(org.alias)),
@@ -139,18 +148,23 @@ export function App() {
           setCachedSession(nextSession);
           queryClient.setQueryData<SessionInfo>(['session'], nextSession);
         }
-        // Cancel an in-flight demo org fetch before replacing the cache. Without
-        // this, a late response could repopulate demo orgs under a Live label.
-        await queryClient.cancelQueries({ queryKey: ['orgs'] });
+        // Cancel an in-flight org fetch before replacing the cache. Without
+        // this, a late response could repopulate one mode's orgs under the other
+        // mode's label. Removing the old mode also drops its persisted snapshot.
+        const previousMode = session?.mode ?? mode;
+        await queryClient.cancelQueries({ queryKey: orgsQueryKey(previousMode) });
+        queryClient.removeQueries({ queryKey: orgsQueryKey(previousMode) });
         resetWorkspaceState(null);
-        queryClient.setQueryData<OrgSummary[]>(['orgs'], []);
+        queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(result.mode), []);
         setFocusObject(null);
         setModePreference(requestedMode);
         setSelectedAlias(null);
         setSelectedOrg(null);
         // The connector exposes a different org list in each mode. Refresh it so
         // a mode switch cannot leave the UI stuck on the previous mode's orgs.
+        // The new key is not observed yet, so invalidation alone cannot fetch it.
         invalidateWorkspaceState(queryClient);
+        void queryClient.refetchQueries({ queryKey: orgsQueryKey(result.mode) });
         setModeError('');
         setModeNotice(requestedMode === 'demo'
           ? 'Now using demo mode — sample metadata only.'
@@ -285,12 +299,16 @@ export function App() {
   }, [sessionQuery.data, mutateMode]);
 
   useEffect(() => {
+    // Restored orgs arrive asynchronously, and the mode needed to read them
+    // comes from the session. Acting on an empty list in that gap would clear
+    // the saved alias and discard the snapshot being restored.
+    if (isRestoring || !sessionReady) return;
     if (selectedAlias && visibleOrgs.some((org) => org.alias === selectedAlias)) return;
     const first = visibleOrgs[0] ?? null;
     resetWorkspaceState(createWorkspaceContext(mode, first)?.contextId ?? null);
     setSelectedAlias(first?.alias ?? null);
     setSelectedOrg(first?.alias ?? null);
-  }, [visibleOrgs, selectedAlias, mode, queryClient]);
+  }, [isRestoring, sessionReady, visibleOrgs, selectedAlias, mode, queryClient]);
 
   if (sessionQuery.isPending) return <BootScreen hosted={hosted} />;
   if (sessionQuery.isError) {
@@ -308,7 +326,7 @@ export function App() {
   const selectOrg = (alias: string) => {
     // Read the cache directly: a just-connected org may be present before the
     // observing query has re-rendered, and inventory must start in this tick.
-    const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(['orgs']) ?? [];
+    const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(orgsQueryKey(mode)) ?? [];
     const next = createWorkspaceContext(mode, cachedOrgs.find((org) => org.alias === alias) ?? null);
     resetWorkspaceState(next?.contextId ?? null);
     setFocusObject(null);
@@ -373,6 +391,7 @@ export function App() {
       case 'orgs':
         return (
           <OrgConnections
+            mode={mode}
             selectedAlias={selectedAlias}
             onSelect={selectOrg}
             hiddenAliases={hiddenAliases}

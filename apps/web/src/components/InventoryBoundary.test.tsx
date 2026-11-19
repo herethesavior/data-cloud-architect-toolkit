@@ -54,8 +54,9 @@ function snapshotFor(state: DiscoveryProgress['state']): InventorySnapshot {
   };
 }
 
-function renderExplorer(snapshot: InventorySnapshot, resumeDiscovery = vi.fn()) {
+function renderExplorer(snapshot: InventorySnapshot, resumeDiscovery = vi.fn(), seedCache = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (seedCache) queryClient.setQueryData(['inventory', context.contextId], snapshot);
   vi.spyOn(api, 'inventory').mockResolvedValue(snapshot);
   render(
     <QueryClientProvider client={queryClient}>
@@ -103,5 +104,14 @@ describe('InventoryBoundary progressive state', () => {
     expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole('button', { name: /Resume loading/ }));
     expect(resumeDiscovery).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a persisted snapshot immediately and marks an old live snapshot stale', () => {
+    renderExplorer(snapshotFor('complete'), vi.fn(), true);
+
+    expect(screen.getByTestId('inventory-freshness')).toHaveTextContent(/^Updated /);
+    expect(screen.getByLabelText('Cached snapshot')).toBeInTheDocument();
+    expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
+    expect(api.inventory).not.toHaveBeenCalled();
   });
 });
