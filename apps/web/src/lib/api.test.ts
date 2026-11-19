@@ -249,6 +249,25 @@ describe('web API session handling', () => {
     await expect(pending).rejects.toMatchObject({ code: 'ABORTED' });
   });
 
+  it('starts a fresh progressive session after an expired-session response', async () => {
+    let starts = 0;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/orgs/prod-org/inventory/session') {
+        starts += 1;
+        if (starts === 1) {
+          return jsonResponse({ error: { code: 'SESSION_EXPIRED', message: 'Session expired.' } }, 502);
+        }
+        return jsonResponse({ sessionId: 'fresh-session', snapshot: demoInventory });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.inventory('prod-org')).resolves.toMatchObject({ apiVersion: demoInventory.apiVersion });
+    expect(starts).toBe(2);
+  });
+
   it('applies resume only to the first status poll', async () => {
     vi.useFakeTimers();
     const running = {

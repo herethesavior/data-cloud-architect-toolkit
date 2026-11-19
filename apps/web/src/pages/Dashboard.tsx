@@ -15,7 +15,7 @@ import type { BadgeTone } from '../components/ui/index.ts';
 import { discoverySummary, safeDateText } from '../lib/inventory.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
 import {
-  actionableWarnings,
+  attentionItems,
   data360NotEnabled,
   discoveryStages,
   resourceStatusMessage,
@@ -77,7 +77,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
         const stages = discoveryStages(inventory);
         const retryableCount = retryableFamilyCount(inventory);
         const data360Unavailable = data360NotEnabled(inventory);
-        const attentionWarnings = actionableWarnings(inventory);
+        const attentionWarnings = attentionItems(inventory);
 
         const download = (format: 'csv' | 'json' | 'markdown') => {
           if (format === 'csv') {

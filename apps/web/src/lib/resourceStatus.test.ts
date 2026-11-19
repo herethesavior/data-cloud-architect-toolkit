@@ -3,12 +3,14 @@ import type { ApiCapability, InventorySnapshot } from '@dcat/core';
 import { demoInventory } from '@dcat/test-fixtures';
 import {
   actionableWarnings,
+  attentionItems,
   data360NotEnabled,
   discoveryStages,
   findCapability,
   hasDegradedResources,
   isUnsupportedWarning,
   resourceStatusMessage,
+  resumableProgressFamilies,
   retryableFamilyCount,
 } from './resourceStatus.ts';
 
@@ -64,6 +66,54 @@ describe('resource status model', () => {
     expect(retryableFamilyCount(inventory)).toBe(1);
     expect(resourceStatusMessage(inventory.capabilities[0]!)).toContain('Gateway timeout');
     expect(resourceStatusMessage(inventory.capabilities[1]!)).toContain('Access denied');
+  });
+
+  it('includes capability failures in Needs attention even without warnings', () => {
+    const inventory = inventoryWith([
+      capability({ family: 'dlos', status: 'error', message: 'Gateway timeout' }),
+      capability({ family: 'dmos', status: 'partial', itemCount: 2, message: '2 of 5 loaded' }),
+    ]);
+    inventory.warnings = [];
+
+    expect(attentionItems(inventory)).toEqual([
+      expect.objectContaining({ family: 'dlos', code: 'ERROR', severity: 'error' }),
+      expect.objectContaining({ family: 'dmos', code: 'PARTIAL', severity: 'warning' }),
+    ]);
+  });
+
+  it('does not list the diagnostic version probe in Needs attention', () => {
+    const inventory = inventoryWith([
+      capability({ family: 'api-versions', status: 'error', message: 'Version probe failed.' }),
+    ]);
+    inventory.warnings = [
+      { family: 'api-versions', code: 'ERROR', message: 'Version probe failed.', severity: 'error' },
+    ];
+
+    expect(attentionItems(inventory)).toEqual([]);
+  });
+
+  it('does not offer resume for forbidden or unsupported families', () => {
+    const inventory = structuredClone(demoInventory);
+    inventory.progress = {
+      sessionId: 'session-1',
+      generation: 'gen-1',
+      state: 'failed',
+      loaded: 0,
+      total: null,
+      message: 'Some families stopped after a page failure.',
+      families: [
+        {
+          family: 'dlos', status: 'failed', loaded: 0, total: null,
+          pagesFetched: 1, hasMore: false, error: 'Access denied', errorStatus: 'forbidden',
+        },
+        {
+          family: 'dmos', status: 'failed', loaded: 0, total: null,
+          pagesFetched: 1, hasMore: false, error: 'Gateway timeout', errorStatus: 'error',
+        },
+      ],
+    };
+
+    expect(resumableProgressFamilies(inventory)).toBe(1);
   });
 
   it('does not treat an empty available family as a failure', () => {
@@ -124,6 +174,18 @@ describe('unavailable Data 360 resources', () => {
     expect(retryableFamilyCount(inventory)).toBe(0);
     expect(resourceStatusMessage(inventory.capabilities[0]!)).toBe('Data 360 is not enabled for this user or org.');
     expect(discoveryStages(inventory).some((stage) => stage.state === 'blocked')).toBe(false);
+  });
+
+  it('recognizes a failed API-version probe as Data 360 disablement', () => {
+    const inventory = disabledInventory();
+    inventory.capabilities.push({
+      ...capability({ family: 'data-transforms' }),
+      family: 'api-versions',
+      status: 'unsupported',
+      apiVersion: null,
+    });
+
+    expect(data360NotEnabled(inventory)).toBe(true);
   });
 
   it('keeps real warnings actionable when only one family is unsupported', () => {

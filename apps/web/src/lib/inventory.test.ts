@@ -3,6 +3,7 @@ import { demoInventory } from '@dcat/test-fixtures';
 import {
   buildDictionaryRows,
   countInDataSpace,
+  countStreamsInDataSpace,
   discoverySummary,
   filterByQuery,
   formatUpdatedAt,
@@ -25,6 +26,20 @@ describe('inventory helpers', () => {
   it('counts objects assigned to a data space', () => {
     expect(countInDataSpace(demoInventory.dlos, 'sales_space')).toBe(3);
     expect(countInDataSpace(demoInventory.dmos, 'default')).toBe(4);
+  });
+
+  it('matches data spaces without case sensitivity and counts streams directly or by target DLO', () => {
+    const inventory = structuredClone(demoInventory);
+    const firstStream = demoInventory.dataStreams[0]!;
+    const firstDlo = demoInventory.dlos[0]!;
+    expect(countInDataSpace([{ dataSpace: ' DEFAULT ' }], 'default')).toBe(1);
+
+    inventory.dataStreams = [
+      { ...firstStream, apiName: 'Direct_Space_Stream', dataSpace: 'DEFAULT', targetDlo: null },
+      { ...firstStream, apiName: 'Joined_Space_Stream', dataSpace: null, targetDlo: firstDlo.apiName },
+    ];
+    expect(countStreamsInDataSpace(inventory, 'default')).toBe(2);
+    expect(countStreamsInDataSpace(inventory, 'sales_space')).toBe(0);
   });
 
   it('keeps demo capability counts aligned with the inventory arrays', () => {
@@ -76,6 +91,41 @@ describe('inventory helpers', () => {
       score: 100,
       label: 'Complete',
     });
+  });
+
+  it('scores user-facing resource families consistently on progressive snapshots', () => {
+    const inventory = {
+      ...structuredClone(demoInventory),
+      capabilities: [
+        ...demoInventory.capabilities,
+        {
+          family: 'api-versions' as const,
+          status: 'error' as const,
+          endpoint: 'services/data/',
+          apiVersion: null,
+          itemCount: null,
+          durationMs: null,
+          message: 'Version probe failed.',
+        },
+      ],
+      warnings: [
+        { family: 'api-versions', code: 'ERROR', message: 'Version probe failed.', severity: 'error' as const },
+      ],
+    };
+
+    expect(discoverySummary(inventory)).toMatchObject({ total: 6, issues: 0, score: 100, label: 'Complete' });
+  });
+
+  it('counts each affected family once in discovery issues', () => {
+    const inventory = structuredClone(demoInventory);
+    inventory.capabilities[0] = { ...inventory.capabilities[0]!, status: 'error' };
+    inventory.warnings = [
+      { family: 'data-spaces', code: 'ERROR', message: 'First failure', severity: 'error' },
+      { family: 'data-spaces', code: 'RETRY_LIMIT', message: 'Second failure', severity: 'warning' },
+      { family: 'dlos', code: 'PAGINATION_LIMIT', message: 'Partial page', severity: 'warning' },
+    ];
+
+    expect(discoverySummary(inventory).issues).toBe(2);
   });
 
   it('does not count Data 360 disablement as a retryable issue', () => {

@@ -5,6 +5,7 @@ export const CLI_ERROR_CODES = [
   'COMMAND_FAILED',
   'UNEXPECTED_RESPONSE',
   'INVALID_ARGUMENT',
+  'SESSION_EXPIRED',
 ] as const;
 
 export type CliErrorCode = (typeof CLI_ERROR_CODES)[number];

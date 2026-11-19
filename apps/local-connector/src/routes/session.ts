@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppState } from '../state.ts';
+import { clearDiscoverySessions } from '../discovery-sessions.ts';
 import { requireSessionToken } from '../security.ts';
 
 const modeBodySchema = z.object({ mode: z.enum(['live', 'demo']) });
@@ -13,6 +14,7 @@ export function registerSessionRoutes(app: FastifyInstance, state: AppState): vo
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: 'INVALID_ARGUMENT', message: 'Unknown mode.' } });
     }
+    clearDiscoverySessions(state);
     state.mode = parsed.data.mode;
     state.orgsCache = null;
     state.inventoryCache = null;

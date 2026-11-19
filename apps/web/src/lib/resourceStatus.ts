@@ -16,6 +16,12 @@ export interface ResourceStage {
   detail: string;
 }
 
+const RESOURCE_FAMILY_NAMES: ReadonlySet<string> = new Set<string>(RESOURCE_FAMILIES);
+
+function isResourceFamily(family: string): boolean {
+  return RESOURCE_FAMILY_NAMES.has(family);
+}
+
 const STAGE_FAMILIES: { id: string; label: string; families: ResourceFamily[] }[] = [
   { id: 'identity', label: 'Verifying org access', families: [] },
   { id: 'spaces', label: 'Discovering Data Spaces and objects', families: ['data-spaces', 'dlos', 'dmos'] },
@@ -49,11 +55,46 @@ export function actionableWarnings(inventory: InventorySnapshot): RetrievalWarni
     warning.severity !== 'info' && !isUnsupportedWarning(warning));
 }
 
+export interface AttentionItem {
+  family: string;
+  code: string;
+  message: string;
+  severity: 'warning' | 'error';
+}
+
+/**
+ * Health and Needs attention must agree. Capability failures are therefore
+ * included even when a discovery path did not also emit a warning for them.
+ */
+export function attentionItems(inventory: InventorySnapshot): AttentionItem[] {
+  const items: AttentionItem[] = actionableWarnings(inventory)
+    .filter((warning) => isResourceFamily(warning.family))
+    .map((warning) => ({
+      family: warning.family,
+      code: warning.code,
+      message: warning.message,
+      severity: warning.severity === 'error' ? 'error' : 'warning',
+    }));
+  for (const capability of inventory.capabilities) {
+    if (!isResourceFamily(capability.family)) continue;
+    if (capability.status !== 'error' && capability.status !== 'forbidden' && capability.status !== 'partial') continue;
+    if (items.some((item) => item.family === capability.family)) continue;
+    items.push({
+      family: capability.family,
+      code: capability.status.toUpperCase(),
+      message: resourceStatusMessage(capability),
+      severity: capability.status === 'partial' ? 'warning' : 'error',
+    });
+  }
+  return items;
+}
+
 export function data360NotEnabled(inventory: InventorySnapshot): boolean {
-  const families = inventory.capabilities.filter((capability) =>
-    (RESOURCE_FAMILIES as readonly string[]).includes(capability.family),
-  );
-  return families.length > 0 && families.every((capability) => capability.status === 'unsupported');
+  const families = inventory.capabilities.filter((capability) => isResourceFamily(capability.family));
+  const version = inventory.capabilities.find((capability) => capability.family === 'api-versions');
+  const versionUnavailable = version?.status === 'unsupported' || version?.status === 'forbidden';
+  if (versionUnavailable && families.length === 0) return true;
+  return families.length > 0 && (versionUnavailable || families.every((capability) => capability.status === 'unsupported'));
 }
 
 /** Explains the actual retrieval outcome; an empty list is never treated as failure. */
@@ -161,4 +202,12 @@ export function hasDegradedResources(inventory: InventorySnapshot): boolean {
 
 export function retryableFamilyCount(inventory: InventorySnapshot): number {
   return inventory.capabilities.filter((capability) => capability.status === 'error').length;
+}
+
+/** Resume clears transient failures only; forbidden/unsupported are org facts. */
+export function resumableProgressFamilies(inventory: InventorySnapshot): number {
+  return inventory.progress?.families.filter((family) =>
+    family.status === 'failed'
+    && (family.errorStatus === undefined || family.errorStatus === 'error'),
+  ).length ?? 0;
 }

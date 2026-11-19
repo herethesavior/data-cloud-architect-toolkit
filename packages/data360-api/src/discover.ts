@@ -33,7 +33,7 @@ export const MAX_MAPPING_DMO_QUERIES = 500;
 
 /** Minimal surface the discovery layer needs; the CLI adapter satisfies it. */
 export interface RestClient {
-  restGet(alias: string, path: string): Promise<string>;
+  restGet(alias: string, path: string, options?: { signal?: AbortSignal }): Promise<string>;
 }
 
 export interface DiscoverOptions {

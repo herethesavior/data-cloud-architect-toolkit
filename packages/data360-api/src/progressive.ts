@@ -17,7 +17,7 @@ import { safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure } from './capabilities.ts';
 import type { RestClient } from './discover.ts';
 import { extractHttpStatus, isTransientRestFailure, validateInventorySnapshot } from './discover.ts';
-import { buildData360Path, buildMappingPath, buildVersionsPath } from './endpoints.ts';
+import { buildData360Path, buildMappingPath, buildVersionsPath, DATA360_ENDPOINT_REGISTRY } from './endpoints.ts';
 import {
   deriveInferredRelationships,
   extractCollection,
@@ -64,6 +64,7 @@ interface CursorState {
   total: number | null;
   done: boolean;
   failed: boolean;
+  degraded: boolean;
   error: string | null;
   errorStatus: RetrievalStatus;
   retried: number;
@@ -94,6 +95,7 @@ export interface ProgressiveDiscoveryState {
   cli: RestClient;
   sessionId: string;
   generation: string;
+  signal?: AbortSignal;
   alias: string;
   org: OrgSummary;
   apiVersion: string | null;
@@ -117,6 +119,7 @@ export interface ProgressiveDiscoveryOptions {
   org: OrgSummary;
   sessionId?: string;
   generation?: string;
+  signal?: AbortSignal;
   maxPages?: number;
   maxMappingQueries?: number;
   retry?: Partial<PageRetryOptions>;
@@ -181,6 +184,7 @@ function makeCursor(basePath: string): CursorState {
     total: null,
     done: false,
     failed: false,
+    degraded: false,
     error: null,
     errorStatus: 'error',
     retried: 0,
@@ -202,11 +206,29 @@ function makeMappingTask(dmoName: string, apiVersion: string): MappingTask {
   return { ...makeCursor(buildMappingPath(dmoName, apiVersion)), dmoName };
 }
 
-function contextFor(state: ProgressiveDiscoveryState, family: ResourceFamily): NormalizeContext {
+/** Versionless paths for catalog entries that never issued a request. */
+function unavailablePath(family: ResourceFamily): string {
+  return `services/data${DATA360_ENDPOINT_REGISTRY[family]}`;
+}
+
+function unavailableFamily(family: NonMappingFamily): FamilyState {
+  return {
+    ...makeCursor(unavailablePath(family)),
+    family,
+    items: [],
+    relationships: [],
+  };
+}
+
+function contextFor(
+  state: ProgressiveDiscoveryState,
+  family: ResourceFamily,
+  retrievedAt = state.generatedAt,
+): NormalizeContext {
   const endpoint = family === 'mappings'
     ? state.mappings.basePath
     : state.families[family].basePath;
-  return { ...state.base, apiVersion: state.apiVersion ?? '', endpoint };
+  return { ...state.base, apiVersion: state.apiVersion ?? '', endpoint, retrievedAt };
 }
 
 function identityFor(family: ResourceFamily, item: unknown): string {
@@ -265,6 +287,7 @@ function stopWithWarning(
   message: string,
 ): void {
   cursor.done = true;
+  cursor.degraded = true;
   pushWarning(state, family, code, message, 'warning');
 }
 
@@ -323,13 +346,13 @@ async function requestPage<T>(
 
   try {
     const attempt = await withPageRetry(async () => {
-      const raw = await state.cli.restGet(state.alias, cursor.path);
+      const raw = await state.cli.restGet(state.alias, cursor.path, { signal: state.signal });
       return parseJsonResponse(raw, label);
     }, state.options.retry);
 
     const decoded = attempt.value;
     const entries = extractCollection(decoded, label);
-    const normalized = normalize(entries, contextFor(state, family));
+    const normalized = normalize(entries, contextFor(state, family, new Date().toISOString()));
     mergeNormalized(state, family, cursor, normalized);
     if (family === 'dmos') {
       const relationships = (normalized as NormalizedCollection<unknown> as NormalizedDmos).relationships ?? [];
@@ -430,8 +453,8 @@ function statusForFamily(state: ProgressiveDiscoveryState, family: ResourceFamil
         : failed.every((task) => task.errorStatus === 'forbidden') ? 'forbidden'
           : 'error';
     }
-    if (active || failed.length > 0 || state.mappings.limitHit) return 'partial';
-    if (tasks.length === 0) return state.families.dmos.done ? 'available' : 'not-started';
+    if (active || failed.length > 0 || state.mappings.limitHit || state.mappings.degraded) return 'partial';
+    if (tasks.length === 0) return 'not-started';
     return 'available';
   }
 
@@ -439,6 +462,7 @@ function statusForFamily(state: ProgressiveDiscoveryState, family: ResourceFamil
   if (cursor.failed) {
     return cursor.items.length > 0 ? 'partial' : cursor.errorStatus;
   }
+  if (cursor.degraded) return 'partial';
   return cursor.done ? 'available' : 'partial';
 }
 
@@ -470,6 +494,15 @@ function recompute(state: ProgressiveDiscoveryState): void {
     const loaded = family === 'mappings'
       ? state.mappings.items.length
       : state.families[family].items.length;
+    const cursorState = family === 'mappings'
+      ? state.mappings
+      : state.families[family];
+    const skippedMappings = family === 'mappings'
+      && state.families.dmos.done
+      && state.mappings.tasks.length === 0;
+    const degradedMessage = status === 'partial' && cursorState.degraded
+      ? `${loaded} item(s) loaded; some results may be missing.`
+      : null;
     const capability: ApiCapability = {
       family,
       status,
@@ -477,9 +510,9 @@ function recompute(state: ProgressiveDiscoveryState): void {
         ? state.mappings.basePath
         : state.families[family].basePath,
       apiVersion: state.apiVersion,
-      message: family === 'mappings' && state.families.dmos.done && state.mappings.tasks.length === 0
+      message: skippedMappings
         ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
-        : messageForStatus(status, loaded),
+        : degradedMessage ?? messageForStatus(status, loaded),
       durationMs: null,
       itemCount: loaded,
     };
@@ -509,6 +542,7 @@ function recompute(state: ProgressiveDiscoveryState): void {
     ...state.base,
     apiVersion: state.apiVersion,
     endpoint: state.families.dmos.basePath,
+    retrievedAt: state.generatedAt,
   };
   state.relationships = dedupeEdges([
     ...state.families.dmos.relationships,
@@ -535,9 +569,15 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
   const hasMore = family === 'mappings'
     ? state.mappings.tasks.some((task) => !task.done && !task.failed)
     : !cursor.done && !cursor.failed;
+  const failedTask = family === 'mappings'
+    ? state.mappings.tasks.find((task) => task.failed)
+    : null;
   const error = family === 'mappings'
-    ? state.mappings.tasks.find((task) => task.failed)?.error ?? null
+    ? failedTask?.error ?? null
     : state.families[family].error;
+  const errorStatus = family === 'mappings'
+    ? failedTask?.errorStatus ?? (state.mappings.failed ? state.mappings.errorStatus : null)
+    : state.families[family].failed ? state.families[family].errorStatus : null;
 
   return {
     family,
@@ -549,6 +589,7 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
     pagesFetched: pages,
     hasMore,
     error,
+    errorStatus,
   };
 }
 
@@ -556,9 +597,13 @@ export function discoveryProgress(state: ProgressiveDiscoveryState): DiscoveryPr
   const families = RESOURCE_FAMILIES.map((family) => familyProgress(state, family));
   const active = anyActive(state);
   const failed = families.some((entry) => entry.status === 'failed' || Boolean(entry.error));
+  const degraded = families.some((entry) => entry.status === 'partial');
+  // A partial family with no active cursor is terminal: the browser must stop
+  // polling even though the capability truthfully reports missing results.
+  const terminal = families.every((entry) => !entry.hasMore && entry.status !== 'running');
   const sessionState: DiscoverySessionState = active ? 'running'
     : failed ? 'failed'
-      : families.every((entry) => entry.status === 'complete') ? 'complete'
+      : terminal ? 'complete'
         : 'partial';
   const allTotalsKnown = families.every((entry) => entry.total !== null);
   return {
@@ -570,7 +615,9 @@ export function discoveryProgress(state: ProgressiveDiscoveryState): DiscoveryPr
     families,
     message: sessionState === 'failed'
       ? 'Some families stopped after a page failure. Earlier results are still available.'
-      : active ? 'Loading metadata in small batches.' : 'All discovered metadata is loaded.',
+      : active ? 'Loading metadata in small batches.'
+        : degraded ? 'Inventory loaded with gaps. Earlier results were kept.'
+          : 'All discovered metadata is loaded.',
   };
 }
 
@@ -593,7 +640,11 @@ export function progressiveSnapshot(state: ProgressiveDiscoveryState): Inventory
   });
 }
 
-function unavailableState(options: ProgressiveDiscoveryOptions, apiVersion: null, message: string): ProgressiveDiscoveryState {
+function unavailableState(
+  options: ProgressiveDiscoveryOptions,
+  message: string,
+  status: RetrievalStatus,
+): ProgressiveDiscoveryState {
   const generatedAt = new Date().toISOString();
   const sessionId = options.sessionId ?? `session-${Date.now().toString(36)}`;
   const generation = options.generation ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -601,9 +652,10 @@ function unavailableState(options: ProgressiveDiscoveryOptions, apiVersion: null
     cli: options.cli,
     sessionId,
     generation,
+    signal: options.signal,
     alias: options.alias,
     org: options.org,
-    apiVersion,
+    apiVersion: null,
     generatedAt,
     base: {
       orgId: options.org.orgId ?? options.org.alias,
@@ -616,14 +668,14 @@ function unavailableState(options: ProgressiveDiscoveryOptions, apiVersion: null
       retry: retryOptions(options.retry),
     },
     families: {
-      'data-spaces': makeFamily('data-spaces', '0'),
-      dlos: makeFamily('dlos', '0'),
-      dmos: makeFamily('dmos', '0'),
-      'data-streams': makeFamily('data-streams', '0'),
-      'data-transforms': makeFamily('data-transforms', '0'),
+      'data-spaces': unavailableFamily('data-spaces'),
+      dlos: unavailableFamily('dlos'),
+      dmos: unavailableFamily('dmos'),
+      'data-streams': unavailableFamily('data-streams'),
+      'data-transforms': unavailableFamily('data-transforms'),
     },
     mappings: {
-      ...makeCursor(buildData360Path('mappings', '0')),
+      ...makeCursor(unavailablePath('mappings')),
       family: 'mappings',
       items: [],
       tasks: [],
@@ -631,10 +683,13 @@ function unavailableState(options: ProgressiveDiscoveryOptions, apiVersion: null
       failedQueries: 0,
       limitHit: false,
       done: true,
+      failed: true,
+      error: message,
+      errorStatus: status,
     },
     capabilities: [{
       family: 'api-versions',
-      status: 'error',
+      status,
       endpoint: buildVersionsPath(),
       apiVersion: null,
       message,
@@ -645,22 +700,27 @@ function unavailableState(options: ProgressiveDiscoveryOptions, apiVersion: null
       family: 'api-versions',
       code: 'API_VERSION_UNAVAILABLE',
       message,
-      severity: 'error',
+      severity: status === 'unsupported' ? 'warning' : 'error',
     }],
     relationships: [],
   };
   for (const family of RESOURCE_FAMILIES) {
     state.capabilities.push({
       family,
-      status: 'error',
-      endpoint: family === 'mappings'
-        ? buildData360Path('mappings', '0')
-        : state.families[family as NonMappingFamily].basePath,
+      status,
+      endpoint: unavailablePath(family),
       apiVersion: null,
       message: 'API version could not be discovered; no metadata was requested.',
       durationMs: null,
       itemCount: null,
     });
+  }
+  for (const family of NON_MAPPING_FAMILIES) {
+    const cursor = state.families[family];
+    cursor.done = true;
+    cursor.failed = true;
+    cursor.error = message;
+    cursor.errorStatus = status;
   }
   return state;
 }
@@ -681,13 +741,14 @@ export async function createProgressiveDiscovery(
   } catch (error) {
     const message = safeErrorMessage(error);
     const classified = classifyRestFailure(extractHttpStatus(message), message);
-    return unavailableState({ ...options, sessionId, generation }, null, classified.message);
+    return unavailableState({ ...options, sessionId, generation }, classified.message, classified.status);
   }
 
   const state: ProgressiveDiscoveryState = {
     cli: options.cli,
     sessionId,
     generation,
+    signal: options.signal,
     alias: options.alias,
     org: options.org,
     apiVersion,
@@ -739,7 +800,7 @@ export async function createProgressiveDiscovery(
 export async function advanceProgressiveDiscovery(
   state: ProgressiveDiscoveryState,
 ): Promise<{ active: boolean; changed: boolean }> {
-  if (!state.apiVersion) return { active: false, changed: false };
+  if (!state.apiVersion || state.signal?.aborted) return { active: false, changed: false };
 
   const active = NON_MAPPING_FAMILIES.filter((family) => {
     const cursor = state.families[family];
@@ -753,39 +814,50 @@ export async function advanceProgressiveDiscovery(
     .slice(0, MAPPING_CONCURRENCY);
   const mappingResults = await Promise.all(tasks.map((task) => fetchMappingTaskPage(state, task)));
 
+  const changed = results.some(Boolean) || mappingResults.some(Boolean);
+  // Freshness follows the most recently loaded page, not the session start.
+  if (changed) state.generatedAt = new Date().toISOString();
   recompute(state);
   return {
     active: anyActive(state),
-    changed: results.some(Boolean) || mappingResults.some(Boolean),
+    changed,
   };
 }
 
-/** Clear a failed family or mapping DMO and let the background worker continue. */
+/** Clear a transiently failed family and let the background worker continue. */
 export function resumeProgressiveDiscovery(
   state: ProgressiveDiscoveryState,
   family?: ResourceFamily,
 ): void {
+  const clearedFamilies = new Set<string>();
   for (const name of NON_MAPPING_FAMILIES) {
     if (family && family !== name) continue;
     const cursor = state.families[name];
-    if (!cursor.failed) continue;
+    // Forbidden and unsupported gaps are property of the org, not a retryable
+    // failure. Clearing them would hide a real capability hole.
+    if (!cursor.failed || cursor.errorStatus !== 'error') continue;
     cursor.failed = false;
     cursor.error = null;
     cursor.errorStatus = 'error';
+    clearedFamilies.add(name);
   }
   if (!family || family === 'mappings') {
     for (const task of state.mappings.tasks) {
-      if (!task.failed) continue;
+      if (!task.failed || task.errorStatus !== 'error') continue;
       task.failed = false;
       task.error = null;
       task.errorStatus = 'error';
+      clearedFamilies.add('mappings');
+    }
+    if (state.mappings.failed && state.mappings.errorStatus === 'error') {
+      state.mappings.failed = false;
+      state.mappings.error = null;
+      clearedFamilies.add('mappings');
     }
   }
-  state.mappings.failed = false;
-  state.mappings.error = null;
-  const retryableCodes = new Set(['ERROR', 'FORBIDDEN', 'RETRY_LIMIT', 'MAPPING_QUERY_FAILED']);
+  const retryableCodes = new Set(['ERROR', 'RETRY_LIMIT', 'MAPPING_QUERY_FAILED']);
   state.warnings = state.warnings.filter((warning) =>
-    !retryableCodes.has(warning.code) || (family !== undefined && warning.family !== family));
+    !clearedFamilies.has(warning.family) || !retryableCodes.has(warning.code));
   recompute(state);
 }
 

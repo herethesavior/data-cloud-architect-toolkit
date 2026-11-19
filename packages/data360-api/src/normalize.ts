@@ -111,6 +111,45 @@ function firstBoolean(record: JsonRecord, keys: readonly string[]): boolean | nu
   return null;
 }
 
+/** Follow a small, fixed object path without inventing values from unrelated fields. */
+function nestedString(record: JsonRecord, path: readonly string[]): string | null {
+  let current: unknown = record;
+  for (let index = 0; index < path.length; index += 1) {
+    const key = path[index]!;
+    if (Array.isArray(current)) {
+      for (const entry of current) {
+        if (isRecord(entry)) {
+          const found = nestedString(entry, path.slice(index));
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+    if (!isRecord(current)) return null;
+    current = current[key];
+  }
+  return asString(current);
+}
+
+/**
+ * Salesforce Data 360 returns data spaces as `dataSpaceInfo`, sometimes as a
+ * single object and sometimes as a one-item array. Read the developer name
+ * first so it matches the Data Space card join key.
+ */
+function dataSpaceName(value: unknown): string | null {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = dataSpaceName(entry);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (isRecord(value)) {
+    return firstString(value, ['name', 'apiName', 'developerName', 'spaceName', 'label', 'id']);
+  }
+  return asString(value);
+}
+
 function asNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -195,6 +234,7 @@ export function makeProvenance(context: NormalizeContext, confidence: ResourcePr
 function fieldSource(entry: JsonRecord): unknown {
   if (entry.fields !== undefined) return entry.fields;
   if (entry.fieldDefinitions !== undefined) return entry.fieldDefinitions;
+  if (entry.dataLakeFieldInfoRepresentation !== undefined) return entry.dataLakeFieldInfoRepresentation;
   if (isRecord(entry.schema)) return entry.schema.fields ?? entry.schema.fieldDefinitions;
   if (isRecord(entry.attributes)) return entry.attributes.fields;
   return undefined;
@@ -240,12 +280,14 @@ export function normalizeDataSpaces(raw: unknown, context: NormalizeContext): No
       skipped += 1;
       continue;
     }
+    const explicitDefault = firstBoolean(entry, ['isDefault', 'default', 'isDefaultSpace']);
+    const spaceType = firstString(entry, ['dataSpaceType', 'spaceType', 'type']);
     items.push({
       id: firstString(entry, ['id', 'spaceId', 'Id']),
       apiName,
       label: firstString(entry, ['label', 'displayName', 'Label', 'name']),
       description: firstString(entry, ['description', 'desc', 'Description']),
-      isDefault: firstBoolean(entry, ['isDefault', 'default', 'isDefaultSpace']),
+      isDefault: explicitDefault ?? (spaceType ? /^default$/i.test(spaceType) : null),
       provenance: makeProvenance(context),
     });
   }
@@ -272,7 +314,8 @@ export function normalizeDlos(raw: unknown, context: NormalizeContext): Normaliz
       apiName,
       label: firstString(entry, ['label', 'displayName', 'Label']),
       category: firstString(entry, ['category', 'objectCategory', 'Category']),
-      dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace']),
+      dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace'])
+        ?? dataSpaceName(entry.dataSpaceInfo),
       source: firstString(entry, ['source', 'sourceName', 'sourceObject', 'connector']),
       fields: normalizeFields(fieldSource(entry), context),
       provenance: makeProvenance(context),
@@ -302,7 +345,8 @@ export function normalizeDmos(raw: unknown, context: NormalizeContext): Normaliz
       apiName,
       label: firstString(entry, ['label', 'displayName', 'Label']),
       category: firstString(entry, ['category', 'objectCategory', 'Category']),
-      dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace']),
+      dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace'])
+        ?? dataSpaceName(entry.dataSpaceInfo),
       isCustom: firstBoolean(entry, ['isCustom', 'custom', 'isCustomObject']),
       fields: normalizeFields(fieldSource(entry), context),
       provenance: makeProvenance(context),
@@ -405,13 +449,24 @@ export function normalizeDataStreams(raw: unknown, context: NormalizeContext): N
       skipped += 1;
       continue;
     }
+    const dloInfo = isRecord(entry.dataLakeObjectInfo) ? entry.dataLakeObjectInfo : null;
     items.push({
       apiName,
       label: firstString(entry, ['label', 'displayName', 'Label']),
-      sourceConnector: firstString(entry, ['sourceConnector', 'connector', 'sourceName', 'source']),
-      targetDlo: firstString(entry, ['targetDlo', 'targetDloName', 'targetObject', 'dlo', 'target']),
-      status: firstString(entry, ['status', 'streamStatus', 'ingestionStatus', 'Status']),
-      refreshMetadata: firstString(entry, ['refreshMetadata', 'refreshRate', 'lastRefreshed', 'lastRun']),
+      sourceConnector: firstString(entry, ['sourceConnector', 'connector', 'sourceName', 'source'])
+        ?? nestedString(entry, ['connectorInfo', 'connectorDetails', 'type'])
+        ?? firstString(entry, ['dataSource']),
+      // Live streams embed the DLO under `dataLakeObjectInfo`; that name is the
+      // only reliable join key for Data Space card counts.
+      targetDlo: firstString(entry, ['targetDlo', 'targetDloName', 'targetObject', 'dlo', 'target'])
+        ?? (dloInfo ? firstString(dloInfo, ['name', 'apiName', 'developerName', 'objectName']) : null),
+      dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace'])
+        ?? dataSpaceName(entry.dataSpaceInfo)
+        ?? (dloInfo ? dataSpaceName(dloInfo.dataSpaceInfo) : null),
+      status: firstString(entry, ['status', 'streamStatus', 'ingestionStatus', 'Status'])
+        ?? firstString(entry, ['lastRunStatus']),
+      refreshMetadata: firstString(entry, ['refreshMetadata', 'refreshRate', 'lastRefreshed', 'lastRun'])
+        ?? firstString(entry, ['lastRefreshDate']),
       provenance: makeProvenance(context),
     });
   }

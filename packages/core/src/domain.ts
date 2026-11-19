@@ -170,6 +170,8 @@ export const dataStreamSchema = z.object({
   label: z.string().nullish(),
   sourceConnector: z.string().nullish(),
   targetDlo: z.string().nullish(),
+  /** Directly attributed when Salesforce returns `dataSpaceInfo`; otherwise joined from the target DLO. */
+  dataSpace: z.string().nullish(),
   status: z.string().nullish(),
   refreshMetadata: z.string().nullish(),
   provenance: resourceProvenanceSchema,
@@ -289,6 +291,8 @@ export const familyProgressSchema = z.object({
   pagesFetched: z.number().int().nonnegative(),
   hasMore: z.boolean(),
   error: z.string().nullish(),
+  /** Classification behind `error`; retry UI must not offer forbidden/unsupported families. */
+  errorStatus: retrievalStatusSchema.nullish(),
 });
 
 export type FamilyProgress = z.infer<typeof familyProgressSchema>;
