@@ -5,7 +5,7 @@ import type { BridgeStatus, OrgSummary } from '@dcat/core';
 import { api } from '../lib/api.ts';
 import { isHosted } from '../lib/hosted.ts';
 import { orgsQueryOptions } from '../lib/queryPersistence.ts';
-import { invalidateBridgeState, orgsQueryKey } from '../lib/workspace.ts';
+import { invalidateBridgeState, invalidateDiagnosticsState, orgsQueryKey } from '../lib/workspace.ts';
 import type { WorkspaceMode } from '../lib/workspace.ts';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -135,7 +135,7 @@ export function OrgConnections({
     mutationFn: api.refreshCli,
     onSuccess: () => {
       setSetupError('');
-      invalidateSetup();
+      invalidateDiagnosticsState(queryClient);
     },
     onError: (error: Error) => setSetupError(error.message),
   });

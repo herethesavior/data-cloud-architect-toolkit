@@ -146,7 +146,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
             <ExportNotice mode={mode} />
             {exportMessage ? <p className="text-xs text-ink-soft" role="status">{exportMessage}</p> : null}
             <section className="panel hero-glow overflow-hidden">
-              <div className="grid gap-7 p-6 sm:p-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-center lg:gap-10 lg:p-9">
+              <div className="grid gap-6 p-5 sm:p-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center lg:gap-8 lg:p-7">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={mode === 'demo' ? 'warning' : 'success'} dot>
@@ -154,13 +154,14 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                     </Badge>
                     {freshness}
                   </div>
-                  <h2 className="mt-4 max-w-2xl text-3xl leading-[1.15] font-semibold tracking-[-0.02em] text-ink sm:text-[2.5rem]">
-                    Your Data 360 model, clearly mapped.
+                  <h2 className="mt-4 max-w-2xl text-[2rem] leading-[1.12] font-semibold tracking-[-0.02em] text-balance text-ink sm:text-[2.75rem]">
+                    Your Data 360 model,{' '}
+                    <span className="hero-title-accent">clearly mapped.</span>
                   </h2>
-                  <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-ink-soft">
+                  <p className="mt-3 max-w-xl text-[15px] leading-[1.6] text-pretty text-ink-soft">
                     Trace data spaces through lake objects, model objects, and mappings — with provenance on every finding.
                   </p>
-                  <div className="mt-6 flex flex-wrap gap-2.5">
+                  <div className="mt-5 flex flex-wrap gap-2.5">
                     <Button
                       variant="primary"
                       onClick={() => onNavigate('dlos')}
@@ -173,7 +174,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                     </Button>
                     <ExportMenu items={exportItems} />
                   </div>
-                  <p className="mt-4 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-faint">
+                  <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-faint">
                     <span>Read-only metadata</span>
                     <span aria-hidden="true">·</span>
                     <span>No credentials in the browser</span>
@@ -182,7 +183,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                   </p>
                 </div>
 
-                <div className="hero-map rounded-xl border border-line p-5 shadow-panel">
+                <div className="hero-map rounded-xl border border-line p-4 shadow-panel">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="label-xs">Inventory path</p>
@@ -190,7 +191,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                     </div>
                     <Icon name="graph" size={18} className="text-brand" />
                   </div>
-                  <ol aria-label="Inventory path from data spaces to transforms" className="mt-4 space-y-0">
+                  <ol aria-label="Inventory path from data spaces to transforms" className="mt-3 space-y-0">
                     {flowSteps.map((step, index) => (
                       <li key={step.label}>
                         <div className="flow-step">
@@ -201,12 +202,12 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                           <span className="text-sm font-semibold tabular-nums text-ink">{step.value}</span>
                         </div>
                         {index < flowSteps.length - 1 ? (
-                          <div aria-hidden="true" className="ml-7 h-3 border-l border-dashed border-line-strong" />
+                          <div aria-hidden="true" className="ml-7 h-2 border-l border-dashed border-line-strong" />
                         ) : null}
                       </li>
                     ))}
                   </ol>
-                  <p className="mt-4 border-t border-line pt-3 text-xs text-ink-soft">
+                  <p className="mt-3 border-t border-line pt-2 text-xs text-ink-soft">
                     Generated {safeDateText(inventory.generatedAt, 'time unavailable')} · API v{inventory.apiVersion ?? '—'}
                   </p>
                 </div>

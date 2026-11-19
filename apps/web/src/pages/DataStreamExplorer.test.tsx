@@ -74,6 +74,8 @@ describe('Data Stream Explorer', () => {
     expect(within(dialog).getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
     expect(within(dialog).getByRole('tab', { name: 'Target DLO' })).toBeInTheDocument();
     expect(within(dialog).getByRole('tab', { name: 'Raw Metadata' })).toBeInTheDocument();
+    expect(within(dialog).getByText('Salesforce CRM')).toBeInTheDocument();
+    expect(within(dialog).getByText('Demo Salesforce Org')).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole('tab', { name: 'Target DLO' }));
     expect(within(dialog).getByText('Known in inventory')).toBeInTheDocument();

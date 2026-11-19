@@ -272,7 +272,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
               },
               {
                 id: 'streams',
-                label: `Streams / Transforms (${selectedLinks.streams.length})`,
+                label: `Streams (${selectedLinks.streams.length})`,
                 content: (
                   <div className="space-y-3">
                     {selectedLinks.streams.length === 0 ? (

@@ -1,4 +1,5 @@
 import type { DataLakeObject, DataModelObject, DataStream, InventorySnapshot, RelationshipEdge } from '@dcat/core';
+import { sameName } from './inventory.ts';
 
 export type ExplorerObject = DataLakeObject | DataModelObject;
 export type ExplorerKind = 'dlo' | 'dmo';
@@ -20,12 +21,12 @@ export function objectLinks(inventory: InventorySnapshot, object: ExplorerObject
   const apiName = object.apiName;
   return {
     mappings: inventory.mappings.filter(
-      (mapping) => mapping.sourceObject === apiName || mapping.targetObject === apiName,
+      (mapping) => sameName(mapping.sourceObject, apiName) || sameName(mapping.targetObject, apiName),
     ),
     relationships: inventory.relationships.filter(
-      (edge) => edge.source === apiName || edge.target === apiName,
+      (edge) => sameName(edge.source, apiName) || sameName(edge.target, apiName),
     ),
-    streams: inventory.dataStreams.filter((stream) => stream.targetDlo === apiName),
+    streams: inventory.dataStreams.filter((stream) => sameName(stream.targetDlo, apiName)),
   };
 }
 

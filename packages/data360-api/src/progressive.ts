@@ -15,6 +15,7 @@ import type {
 import { RESOURCE_FAMILIES } from '@dcat/core';
 import { safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure } from './capabilities.ts';
+import { enrichStreamConnectors, STREAM_ENRICHMENT_WARNING_FAMILY } from './connectors.ts';
 import type { RestClient } from './discover.ts';
 import {
   extractHttpStatus,
@@ -59,6 +60,7 @@ const NON_MAPPING_FAMILIES = [
   'data-transforms',
 ] as const;
 type NonMappingFamily = (typeof NON_MAPPING_FAMILIES)[number];
+type WarningFamily = ResourceFamily | 'api-versions' | typeof STREAM_ENRICHMENT_WARNING_FAMILY;
 
 /** One CLI call can safely carry a path of this length; cursors are opaque. */
 const MAX_REST_PATH_LENGTH = 480;
@@ -139,6 +141,7 @@ export interface ProgressiveDiscoveryState {
     retry: PageRetryOptions;
   };
   families: Record<NonMappingFamily, FamilyState>;
+  streamEnrichment: { attempted: boolean };
   mappings: MappingState;
   relationshipQueries: RelationshipQueryState;
   capabilities: ApiCapability[];
@@ -196,7 +199,7 @@ export async function withPageRetry<T>(
 
 function pushWarning(
   state: ProgressiveDiscoveryState,
-  family: ResourceFamily | 'api-versions',
+  family: WarningFamily,
   code: string,
   message: string,
   severity: RetrievalWarning['severity'],
@@ -839,6 +842,7 @@ function unavailableState(
       'data-streams': unavailableFamily('data-streams'),
       'data-transforms': unavailableFamily('data-transforms'),
     },
+    streamEnrichment: { attempted: true },
     mappings: {
       ...makeCursor(unavailablePath('mappings')),
       family: 'mappings',
@@ -948,6 +952,7 @@ export async function createProgressiveDiscovery(
       'data-streams': makeFamily('data-streams', apiVersion),
       'data-transforms': makeFamily('data-transforms', apiVersion),
     },
+    streamEnrichment: { attempted: false },
     mappings: {
       ...makeCursor(buildData360Path('mappings', apiVersion)),
       family: 'mappings',
@@ -999,7 +1004,33 @@ export async function advanceProgressiveDiscovery(
     .slice(0, RELATIONSHIP_CONCURRENCY);
   const relationshipResults = await Promise.all(relationshipTasks.map((task) => fetchRelationshipTaskPage(state, task)));
 
-  const changed = results.some(Boolean) || mappingResults.some(Boolean) || relationshipResults.some(Boolean);
+  let enrichmentChanged = false;
+  // Wait for the stream family to finish so every page is enriched in one lookup.
+  const streamCursor = state.families['data-streams'];
+  if (!state.streamEnrichment.attempted && streamCursor.done && streamCursor.items.length > 0) {
+    state.streamEnrichment.attempted = true;
+    const enriched = await enrichStreamConnectors({
+      cli: state.cli,
+      alias: state.alias,
+      apiVersion: state.apiVersion,
+      streams: state.families['data-streams'].items as InventorySnapshot['dataStreams'],
+      retrievedAt: state.generatedAt,
+    });
+    state.families['data-streams'].items = enriched.streams;
+    enrichmentChanged = enriched.streams.length > 0;
+    for (const warning of enriched.warnings) {
+      pushWarning(
+        state,
+        STREAM_ENRICHMENT_WARNING_FAMILY,
+        warning.code,
+        warning.message,
+        warning.severity,
+      );
+    }
+  }
+
+  const changed = results.some(Boolean) || mappingResults.some(Boolean)
+    || relationshipResults.some(Boolean) || enrichmentChanged;
   // Freshness follows the most recently loaded page, not the session start.
   if (changed) state.generatedAt = new Date().toISOString();
   recompute(state);
@@ -1055,14 +1086,21 @@ export function resumeProgressiveDiscovery(
     }
     state.relationshipQueries.failedQueries = state.relationshipQueries.tasks.filter((task) => task.failed).length;
   }
+  if (clearedFamilies.has('data-streams')) {
+    state.streamEnrichment.attempted = false;
+  }
   const retryableCodes = new Set([
     'ERROR',
     'RETRY_LIMIT',
     'MAPPING_QUERY_FAILED',
     'RELATIONSHIP_QUERY_FAILED',
   ]);
-  state.warnings = state.warnings.filter((warning) =>
-    !clearedFamilies.has(warning.family) || !retryableCodes.has(warning.code));
+  state.warnings = state.warnings.filter((warning) => {
+    if (warning.family === STREAM_ENRICHMENT_WARNING_FAMILY && clearedFamilies.has('data-streams')) {
+      return false;
+    }
+    return !clearedFamilies.has(warning.family) || !retryableCodes.has(warning.code);
+  });
   recompute(state);
 }
 

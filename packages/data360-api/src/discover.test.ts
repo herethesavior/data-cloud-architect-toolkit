@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CliError } from '@dcat/salesforce-cli';
 import {
+  connectorCatalogJson,
+  connectorConnectionsJson,
   dataSpacesJson,
   dataStreamsJson,
   dataTransformsJson,
@@ -21,7 +23,12 @@ import {
 import { classifyRestFailure } from './capabilities.ts';
 import { discoverInventory, extractHttpStatus } from './discover.ts';
 import type { RestClient } from './discover.ts';
-import { buildDmoRelationshipsPath, buildMappingPath } from './endpoints.ts';
+import {
+  buildConnectorCatalogPath,
+  buildConnectorConnectionsPath,
+  buildDmoRelationshipsPath,
+  buildMappingPath,
+} from './endpoints.ts';
 
 const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
@@ -50,6 +57,8 @@ function fakeCli(overrides: Record<string, string | Error | Array<string | Error
       buildMappingPath(name, '65.0', dmoSpaces[name]), mappingsJson,
     ])),
     [`${base}/data-streams`]: dataStreamsJson,
+    [buildConnectorCatalogPath('65.0')]: connectorCatalogJson,
+    [buildConnectorConnectionsPath('65.0', 'SalesforceDotCom')]: connectorConnectionsJson,
     [`${base}/data-transforms`]: dataTransformsJson,
     ...overrides,
   };
@@ -102,6 +111,18 @@ describe('live Data 360 discovery', () => {
     expect(inventory.dmos).toHaveLength(3);
     expect(inventory.mappings).toHaveLength(2);
     expect(inventory.dataStreams).toHaveLength(1);
+    expect(inventory.dataStreams[0]).toMatchObject({
+      sourceConnector: 'SalesforceDotCom',
+      sourceConnectorLabel: 'Salesforce CRM',
+      sourceConnectionName: 'SalesforceDotCom_Home',
+      sourceConnectionLabel: 'EPIC OrgFarm',
+      sourceConnectionStatus: 'Connected',
+      sourceDataSource: 'Salesforce_Home',
+    });
+    expect(inventory.dataStreams[0]?.connectorLookup?.endpoints).toEqual([
+      buildConnectorCatalogPath('65.0'),
+      buildConnectorConnectionsPath('65.0', 'SalesforceDotCom'),
+    ]);
     expect(inventory.dataTransforms).toHaveLength(1);
     expect(inventory.capabilities.map((capability) => capability.status)).toEqual(Array(7).fill('available'));
     expect(inventory.warnings).toHaveLength(0);
@@ -284,6 +305,22 @@ describe('live Data 360 discovery', () => {
       expect.objectContaining({ family: 'dmos', severity: 'error' }),
     ]));
     expect(inventory.relationships.some((edge) => edge.certainty === 'confirmed')).toBe(false);
+  });
+
+  it('keeps raw connector codes when connector lookups fail', async () => {
+    const cli = fakeCli({
+      [buildConnectorCatalogPath('65.0')]: new CliError('COMMAND_FAILED', 'Status: 500 Server Error'),
+      [buildConnectorConnectionsPath('65.0', 'SalesforceDotCom')]: new CliError('COMMAND_FAILED', 'Status: 500 Server Error'),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+
+    expect(inventory.dataStreams[0]).toMatchObject({
+      sourceConnector: 'SalesforceDotCom',
+      sourceConnectorLabel: null,
+      sourceConnectionLabel: null,
+    });
+    expect(inventory.capabilities).toHaveLength(7);
+    expect(inventory.warnings.filter((warning) => warning.family === 'stream-enrichment')).toHaveLength(2);
   });
 
   it('treats a 404 as unsupported rather than an empty dataset', async () => {

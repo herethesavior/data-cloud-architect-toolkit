@@ -168,10 +168,29 @@ export const dataMappingSchema = z.object({
 
 export type DataMapping = z.infer<typeof dataMappingSchema>;
 
+/** Best-effort provenance for connector catalog and connection lookups. */
+export const connectorLookupSchema = z.object({
+  endpoints: z.array(z.string()),
+  apiVersion: z.string(),
+  retrievedAt: z.string(),
+});
+
+export type ConnectorLookup = z.infer<typeof connectorLookupSchema>;
+
 export const dataStreamSchema = z.object({
   apiName: z.string(),
   label: z.string().nullish(),
+  /** Raw connector code from stream metadata, preserved for stable joins and exports. */
   sourceConnector: z.string().nullish(),
+  /** Human-readable connector type resolved from the Data 360 connector catalog. */
+  sourceConnectorLabel: z.string().nullish(),
+  /** Connection name embedded in the stream, before any catalog lookup. */
+  sourceConnectionName: z.string().nullish(),
+  /** Configured connection label resolved from /ssot/connections. */
+  sourceConnectionLabel: z.string().nullish(),
+  sourceConnectionStatus: z.string().nullish(),
+  sourceDataSource: z.string().nullish(),
+  connectorLookup: connectorLookupSchema.nullish(),
   targetDlo: z.string().nullish(),
   /** Directly attributed when Salesforce returns `dataSpaceInfo`; otherwise joined from the target DLO. */
   dataSpace: z.string().nullish(),

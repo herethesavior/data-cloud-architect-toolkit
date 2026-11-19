@@ -185,6 +185,7 @@ test('demo first impression shows the inventory and the CTA opens an explorer', 
   await expect(page.getByText('Sample inventory')).toBeVisible();
   await expect(page.locator('header').getByText(/SF CLI (ready|missing|checking)/)).toHaveCount(0);
   await expect(page.getByText('Your Data 360 model, clearly mapped.')).toBeVisible();
+  await expect(page.locator('.hero-title-accent')).toHaveText('clearly mapped.');
   await expect(page.getByText('Data Lake Objects')).toBeVisible();
   await expect(page.getByText('Complete · 100%')).toBeVisible();
   await expect(page.getByText('Inventory loaded with gaps')).toHaveCount(0);
@@ -931,6 +932,9 @@ test('data stream explorer shows grounded source-to-target detail and visible ex
   await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Target DLO' })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Raw Metadata' })).toBeVisible();
+  await expect(drawer.getByText('Salesforce CRM', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('Demo Salesforce Org', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('Connected · SalesforceDotCom_Home', { exact: true })).toBeVisible();
 
   await drawer.getByRole('tab', { name: 'Target DLO' }).click();
   await expect(drawer.getByText('Known in inventory')).toBeVisible();
@@ -1030,6 +1034,44 @@ test('ERD Explorer shows the richer demo model and filters grounded edges', asyn
   await expect(page.getByRole('button', { name: 'Confirmed', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('3 visible edges', { exact: true })).toBeVisible();
   await expect(page.locator('.react-flow__edge')).toHaveCount(3);
+});
+
+test('ERD canvas catches up when progressive discovery adds objects after mount', async ({ page }) => {
+  const state = createConnectorState();
+  await mockConnector(page, state);
+  let sessionCalls = 0;
+  const progress = {
+    sessionId: 'progressive-session',
+    generation: 'gen-1',
+    state: 'running' as const,
+    loaded: 1,
+    total: 2,
+    families: [],
+    message: 'Loading model objects in small batches.',
+  };
+  await page.route('**/api/orgs/demo-uat/inventory/session**', (route: Route) => {
+    sessionCalls += 1;
+    const partial = {
+      ...structuredClone(demoInventory),
+      dmos: demoInventory.dmos.slice(0, 1),
+      mappings: [],
+      relationships: [],
+      progress,
+    };
+    const complete = {
+      ...structuredClone(demoInventory),
+      progress: { ...progress, state: 'complete' as const, loaded: 2 },
+    };
+    return route.fulfill({
+      json: { sessionId: 'progressive-session', snapshot: sessionCalls === 1 ? partial : complete },
+    });
+  });
+
+  await page.goto('/erd');
+
+  await expect(page.locator('.react-flow__node-erdObject')).toHaveCount(8);
+  await expect(page.getByText('8 objects', { exact: true })).toBeVisible();
+  expect(sessionCalls).toBeGreaterThanOrEqual(2);
 });
 
 test('Data Lineage Explorer joins all metadata families and persists grounded filters', async ({ page }) => {
@@ -1457,6 +1499,7 @@ test('command palette opens stream results in the Data Stream Explorer', async (
   await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Target DLO' })).toBeVisible();
   await expect(drawer.getByText('Salesforce CRM', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('Demo Salesforce Org', { exact: true })).toBeVisible();
 
   await drawer.getByRole('tab', { name: 'Raw Metadata' }).click();
   await expect(drawer.getByText(/"apiName": "Accounts_Stream"/)).toBeVisible();

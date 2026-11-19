@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
-import type { OrgSummary } from '@dcat/core';
+import type { InventorySnapshot, OrgSummary } from '@dcat/core';
 import { NAV_GROUPS, PAGE_TITLES, pageHref } from '../navigation.ts';
 import type { Page } from '../navigation.ts';
+import { buildCommandResults } from '../lib/commandSearch.ts';
 import type { CommandResult } from '../lib/commandSearch.ts';
 import { trapDialogFocus } from '../lib/focusTrap.ts';
 import { isHosted } from '../lib/hosted.ts';
@@ -55,7 +56,7 @@ interface AppShellProps {
   onGoToOrgs: () => void;
   theme: ThemeController;
   localDataEpoch?: number;
-  searchResults: CommandResult[];
+  inventory: InventorySnapshot | null;
   onSelectSearchResult: (result: CommandResult) => void;
   children: ReactNode;
 }
@@ -223,7 +224,7 @@ export function AppShell({
   onGoToOrgs,
   theme,
   localDataEpoch = 0,
-  searchResults,
+  inventory,
   onSelectSearchResult,
   children,
 }: AppShellProps) {
@@ -232,6 +233,12 @@ export function AppShell({
   const [sidebarCollapsed, setCollapsed] = useState(getSidebarCollapsed);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [metadataResult, setMetadataResult] = useState<CommandResult | null>(null);
+  // Building the index walks every object in the inventory. Do that only while
+  // search is actually open; the cached snapshot is still available on open.
+  const commandResults = useMemo(
+    () => paletteOpen ? buildCommandResults(inventory) : [],
+    [paletteOpen, inventory],
+  );
   const previousDataEpochRef = useRef(localDataEpoch);
   const selectedOrg = orgs.find((org) => org.alias === selectedAlias) ?? null;
   const groupLabel = NAV_GROUPS.find((group) => group.items.some((item) => item.id === page))?.label ?? 'Workspace';
@@ -461,7 +468,7 @@ export function AppShell({
         ) : null}
         {paletteOpen ? (
           <CommandPalette
-            results={searchResults}
+            results={commandResults}
             contextLabel={badge.label}
             mode={activeMode}
             onClose={() => setPaletteOpen(false)}

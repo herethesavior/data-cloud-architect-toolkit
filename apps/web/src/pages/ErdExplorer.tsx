@@ -100,11 +100,12 @@ function ErdExplorerView({ context, inventory, freshness }: ErdViewProps) {
     filterErdEdges(initialGraph.edges, initial.filter),
   );
 
+  // The first graph seeds React Flow state, but progressive snapshots keep
+  // arriving after mount. Always rebuild from the current inventory so the canvas
+  // cannot fall behind exports or the rest of the inventory views.
   const graph = useMemo(
-    () => direction === initial.direction && sortMode === initial.sortMode
-      ? initialGraph
-      : buildErdGraph(inventory, { direction, sortMode }),
-    [direction, initial, initialGraph, inventory, sortMode],
+    () => buildErdGraph(inventory, { direction, sortMode }),
+    [inventory, direction, sortMode],
   );
 
   const preferencesRef = useRef({ filter, direction, sortMode, grid, minimap });

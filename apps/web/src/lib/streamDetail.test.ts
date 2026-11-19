@@ -23,6 +23,14 @@ describe('stream detail helpers', () => {
     expect(streamDataSpace(demoInventory, { ...accounts, targetDlo: null })).toBeNull();
   });
 
+  it('resolves targets when the stream and DLO casing differs', () => {
+    const variant = { ...accounts, targetDlo: accounts.targetDlo?.toUpperCase() ?? null };
+    expect(streamTargetKnown(demoInventory, variant)).toBe(true);
+    expect(streamDataSpace(demoInventory, variant)).toBe(
+      demoInventory.dlos.find((dlo) => dlo.apiName === accounts.targetDlo)?.dataSpace,
+    );
+  });
+
   it('shows invalid and missing dates without inventing a timestamp', () => {
     expect(streamDateText(null)).toBe('Not provided');
     expect(streamDateText('not-a-date')).toBe('not-a-date');
@@ -40,6 +48,7 @@ describe('stream detail helpers', () => {
   it('keeps blank values out of search and distinguishes colliding API names', () => {
     expect(streamSearchValues(demoInventory, accounts)).toContain('Accounts Stream');
     expect(streamSearchValues(demoInventory, accounts)).toContain('Salesforce CRM');
+    expect(streamSearchValues(demoInventory, accounts)).toContain('Demo Salesforce Org');
     expect(streamSearchValues(demoInventory, { ...accounts, label: null })).not.toContain('');
 
     expect(streamValue('', 'fallback')).toBe('fallback');

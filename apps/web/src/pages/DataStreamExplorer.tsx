@@ -10,7 +10,7 @@ import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from '../components/ui/index.ts';
 import type { DataTableColumn, TabItem } from '../components/ui/index.ts';
-import { filterByQuery } from '../lib/inventory.ts';
+import { filterByQuery, sameName } from '../lib/inventory.ts';
 import type { FocusObject } from '../lib/objectDetail.ts';
 import { findCapability, resourceStatusMessage } from '../lib/resourceStatus.ts';
 import {
@@ -31,7 +31,12 @@ interface DataStreamExplorerProps {
   onFocusHandled?: () => void;
 }
 
-function OverviewField({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function OverviewField({ label, value, hint, mono = false }: {
+  label: string;
+  value: string;
+  hint?: string;
+  mono?: boolean;
+}) {
   return (
     <div className="min-w-0 rounded-lg bg-surface-alt p-3">
       <p className="label-xs">{label}</p>
@@ -41,6 +46,7 @@ function OverviewField({ label, value, mono = false }: { label: string; value: s
       >
         {value}
       </p>
+      {hint ? <p className="mt-1 text-xs text-ink-faint">{hint}</p> : null}
     </div>
   );
 }
@@ -50,14 +56,28 @@ function StreamDetail({ stream, inventory, onClose }: {
   inventory: InventorySnapshot;
   onClose: () => void;
 }) {
-  const target = inventory.dlos.find((dlo) => dlo.apiName === stream.targetDlo) ?? null;
+  const target = inventory.dlos.find((dlo) => sameName(dlo.apiName, stream.targetDlo)) ?? null;
   const dataSpace = streamDataSpace(inventory, stream);
   const targetKnown = streamTargetKnown(inventory, stream);
   const mappings = stream.targetDlo
     ? inventory.mappings.filter((mapping) =>
-        mapping.sourceObject === stream.targetDlo || mapping.targetObject === stream.targetDlo)
+        sameName(mapping.sourceObject, stream.targetDlo) || sameName(mapping.targetObject, stream.targetDlo))
     : [];
   const rawMetadata = JSON.stringify(stream, null, 2);
+  const sourceLabel = streamValue(stream.sourceConnectorLabel ?? stream.sourceConnector, 'Not provided');
+  const sourceHint = stream.sourceConnector && stream.sourceConnector !== sourceLabel
+    ? `Connector type: ${stream.sourceConnector}`
+    : undefined;
+  const connectionValue = streamValue(
+    stream.sourceConnectionLabel ?? stream.sourceConnectionName ?? stream.sourceDataSource,
+    'Not available from this snapshot',
+  );
+  const connectionHint = [
+    stream.sourceConnectionStatus,
+    stream.sourceConnectionName && stream.sourceConnectionName !== connectionValue
+      ? stream.sourceConnectionName
+      : null,
+  ].filter(Boolean).join(' · ') || undefined;
 
   const tabs: TabItem[] = [
     {
@@ -66,7 +86,12 @@ function StreamDetail({ stream, inventory, onClose }: {
       content: (
         <div className="space-y-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <OverviewField label="Source connector" value={streamValue(stream.sourceConnector, 'Not provided')} />
+            <OverviewField label="Source connector" value={sourceLabel} hint={sourceHint} />
+            <OverviewField
+              label="Configured connection"
+              value={connectionValue}
+              hint={connectionHint}
+            />
             <OverviewField label="Stream status" value={streamValue(stream.status, 'Status unknown')} />
             <OverviewField label="Refresh metadata" value={streamValue(stream.refreshMetadata, 'Not provided')} />
             <OverviewField label="Target DLO" value={streamValue(stream.targetDlo, 'Not named by source metadata')} mono />
@@ -86,6 +111,12 @@ function StreamDetail({ stream, inventory, onClose }: {
               </div>
               <div className="flex justify-between gap-3"><dt>API version</dt><dd>{stream.provenance.apiVersion}</dd></div>
               <div className="flex justify-between gap-3"><dt>Confidence</dt><dd>{stream.provenance.confidence}</dd></div>
+              {stream.connectorLookup ? (
+                <div className="flex justify-between gap-3">
+                  <dt>Connector lookup</dt>
+                  <dd>{stream.connectorLookup.endpoints.length} endpoint(s) · v{stream.connectorLookup.apiVersion}</dd>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-3"><dt>Retrieved</dt><dd>{streamDateText(stream.provenance.retrievedAt)}</dd></div>
             </dl>
           </div>
@@ -221,6 +252,8 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
                 'API name',
                 'Label',
                 'Source connector',
+                'Source connector label',
+                'Configured connection',
                 'Target DLO',
                 'Data space',
                 'Status',
@@ -233,6 +266,8 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
                 stream.apiName,
                 stream.label,
                 stream.sourceConnector,
+                stream.sourceConnectorLabel,
+                stream.sourceConnectionLabel ?? stream.sourceConnectionName ?? stream.sourceDataSource,
                 stream.targetDlo,
                 streamDataSpace(inventory, stream),
                 stream.status,

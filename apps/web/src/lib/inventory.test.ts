@@ -9,6 +9,7 @@ import {
   formatUpdatedAt,
   isInventoryStale,
   matchesQuery,
+  sameName,
 } from './inventory.ts';
 
 describe('inventory helpers', () => {
@@ -26,6 +27,13 @@ describe('inventory helpers', () => {
   it('counts objects assigned to a data space', () => {
     expect(countInDataSpace(demoInventory.dlos, 'sales_space')).toBe(3);
     expect(countInDataSpace(demoInventory.dmos, 'default')).toBe(4);
+  });
+
+  it('joins metadata names without case sensitivity', () => {
+    expect(sameName(' Account_DLO__dll ', 'account_dlo__DLL')).toBe(true);
+    expect(sameName('Account_DLO__dll', 'Other_DLO__dll')).toBe(false);
+    expect(sameName(null, 'Account_DLO__dll')).toBe(false);
+    expect(sameName('', '')).toBe(false);
   });
 
   it('matches data spaces without case sensitivity and counts streams directly or by target DLO', () => {

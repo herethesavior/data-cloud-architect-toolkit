@@ -10,6 +10,7 @@ import type {
 import { RESOURCE_FAMILIES, inventorySnapshotSchema } from '@dcat/core';
 import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure } from './capabilities.ts';
+import { enrichStreamConnectors } from './connectors.ts';
 import {
   buildData360Path,
   buildDmoRelationshipsPath,
@@ -685,6 +686,14 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     ? { edges: [], warnings: [] }
     : await retrieveRelationshipsByDmo(cli, alias, version, base, mappingCandidates, maxPages);
 
+  const enrichedStreams = await enrichStreamConnectors({
+    cli,
+    alias,
+    apiVersion: version,
+    streams: streams.result.items,
+    retrievedAt: generatedAt,
+  });
+
   capabilities.push(
     spaces.capability,
     dlos.capability,
@@ -694,6 +703,7 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     transforms.capability,
   );
   warnings.push(
+    ...enrichedStreams.warnings,
     ...spaces.warnings,
     ...dlos.warnings,
     ...dmos.warnings,
@@ -724,7 +734,7 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     dlos: dlos.result.items,
     dmos: dmos.result.items,
     mappings: mappings.result.items,
-    dataStreams: streams.result.items,
+    dataStreams: enrichedStreams.streams,
     dataTransforms: transforms.result.items,
     relationships,
     warnings,

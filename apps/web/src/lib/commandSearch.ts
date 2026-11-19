@@ -1,6 +1,7 @@
 import type { InventorySnapshot } from '@dcat/core';
 import type { IconName } from '../components/Icon.tsx';
 import { matchesQuery } from './inventory.ts';
+import { streamSearchValues } from './streamDetail.ts';
 
 export type CommandResultKind = 'data-space' | 'dlo' | 'dmo' | 'stream' | 'mapping' | 'transform';
 
@@ -13,6 +14,7 @@ export interface CommandResult {
   dataSpace: string | null;
   icon: IconName;
   raw: unknown;
+  searchText?: string;
 }
 
 export const COMMAND_RESULT_LIMIT = 20;
@@ -60,6 +62,7 @@ export function buildCommandResults(inventory: InventorySnapshot | null): Comman
       dataSpace: null,
       icon: 'plug',
       raw: stream,
+      searchText: streamSearchValues(inventory, stream).join(' '),
     })),
     ...inventory.mappings.map<CommandResult>((mapping) => ({
       id: `mapping:${mapping.apiName ?? `${mapping.sourceObject}-${mapping.targetObject}`}`,
@@ -87,7 +90,13 @@ export function buildCommandResults(inventory: InventorySnapshot | null): Comman
 export function filterCommandResults(results: CommandResult[], query: string): CommandResult[] {
   if (!query.trim()) return results.slice(0, COMMAND_RESULT_LIMIT);
   return results
-    .filter((result) => matchesQuery(query, [result.typeLabel, result.label, result.apiName, result.dataSpace ?? '']))
+    .filter((result) => matchesQuery(query, [
+      result.typeLabel,
+      result.label,
+      result.apiName,
+      result.dataSpace ?? '',
+      result.searchText ?? '',
+    ]))
     .slice(0, COMMAND_RESULT_LIMIT);
 }
 
@@ -115,8 +124,15 @@ export function commandResultDetails(result: CommandResult): CommandResultDetail
     if (description) details.push({ label: 'Description', value: description });
     details.push({ label: 'Default space', value: raw.isDefault === true ? 'Yes' : 'No' });
   } else if (result.kind === 'stream') {
+    const rawType = text(raw.sourceConnector);
+    const sourceLabel = text(raw.sourceConnectorLabel) ?? rawType;
+    if (sourceLabel) details.push({ label: 'Source connector', value: sourceLabel });
+    if (sourceLabel && rawType && sourceLabel !== rawType) {
+      details.push({ label: 'Connector type', value: rawType });
+    }
+    const connection = text(raw.sourceConnectionLabel) ?? text(raw.sourceConnectionName) ?? text(raw.sourceDataSource);
+    if (connection) details.push({ label: 'Configured connection', value: connection });
     for (const [label, key] of [
-      ['Source connector', 'sourceConnector'],
       ['Target DLO', 'targetDlo'],
       ['Status', 'status'],
       ['Refresh', 'refreshMetadata'],
