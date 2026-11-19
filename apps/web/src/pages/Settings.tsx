@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.ts';
 import { isHosted } from '../lib/hosted.ts';
 import type { WorkspaceMode } from '../lib/workspace.ts';
-import { invalidateBridgeState } from '../lib/workspace.ts';
+import { invalidateDiagnosticsState } from '../lib/workspace.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
 import { ErrorState, LoadingState } from '../components/DataStates.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -58,7 +58,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
     mutationFn: api.refreshCli,
     onSuccess: () => {
       setRefreshError('');
-      invalidateBridgeState(queryClient);
+      invalidateDiagnosticsState(queryClient);
     },
     onError: (error: Error) => setRefreshError(error.message),
   });

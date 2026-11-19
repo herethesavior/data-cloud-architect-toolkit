@@ -1,5 +1,5 @@
 import type { DataStream, InventorySnapshot } from '@dcat/core';
-import { safeDateText } from './inventory.ts';
+import { sameName, safeDateText } from './inventory.ts';
 
 export type StreamStatusTone = 'neutral' | 'success' | 'warning' | 'danger';
 
@@ -21,13 +21,13 @@ export function streamDataSpace(inventory: InventorySnapshot, stream: DataStream
   const direct = stream.dataSpace?.trim();
   if (direct) return direct;
   if (!stream.targetDlo) return null;
-  return inventory.dlos.find((dlo) => dlo.apiName.toLowerCase() === stream.targetDlo?.toLowerCase())
+  return inventory.dlos.find((dlo) => sameName(dlo.apiName, stream.targetDlo))
     ?.dataSpace ?? null;
 }
 
 export function streamTargetKnown(inventory: InventorySnapshot, stream: DataStream): boolean {
   return Boolean(stream.targetDlo && inventory.dlos.some(
-    (dlo) => dlo.apiName.toLowerCase() === stream.targetDlo?.toLowerCase(),
+    (dlo) => sameName(dlo.apiName, stream.targetDlo),
   ));
 }
 

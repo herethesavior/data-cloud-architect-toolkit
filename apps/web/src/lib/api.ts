@@ -347,6 +347,15 @@ async function legacyInventory(
       });
 }
 
+/** Only explicit capability gaps may fall back; transport and relay failures must surface. */
+function isUnsupportedProgressiveError(error: unknown, hostedLive: boolean): boolean {
+  if (!(error instanceof ApiError)) return false;
+  const message = error.message.toLowerCase();
+  if (error.code === 'INVALID_ARGUMENT') return message.includes('unsupported bridge operation');
+  if (!hostedLive && error.code === 'NOT_FOUND') return message.includes('unknown api route');
+  return false;
+}
+
 /** Start once, then poll the connector's accumulated snapshot until it settles. */
 async function progressiveInventory(
   alias: string,
@@ -432,10 +441,9 @@ export const api = {
         return progressiveInventory(alias, { ...options, sessionId: undefined, force: true }, hostedLive);
       }
       // An older local bridge or connector may not expose the progressive
-      // operations yet. Preserve the previous all-at-once behavior in that case.
-      const unsupported = error instanceof ApiError
-        && (error.code === 'INVALID_ARGUMENT' || error.code === 'REQUEST_FAILED' || error.code === 'NOT_FOUND');
-      if (!unsupported) throw error;
+      // operations yet. Preserve the previous all-at-once behavior only for that
+      // explicit capability gap, never for a failed request or relay mismatch.
+      if (!isUnsupportedProgressiveError(error, hostedLive)) throw error;
       const snapshot = snapshotWithOrg(await legacyInventory(alias, options, hostedLive));
       options.onSnapshot?.(snapshot);
       return snapshot;

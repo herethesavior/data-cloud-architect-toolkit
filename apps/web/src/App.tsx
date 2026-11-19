@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
-import { buildCommandResults } from './lib/commandSearch.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
 import { resetNoticeDismissals } from './lib/noticeDismissal.ts';
@@ -98,11 +97,13 @@ export function App() {
   const [preferencesEpoch, setPreferencesEpoch] = useState(0);
   const [focusObject, setFocusObject] = useState<FocusObject | null>(null);
 
-  const navigate = (nextPage: Page) => {
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const navigate = useCallback((nextPage: Page) => {
     // Help tabs use ?topic= while the user stays on Help. Leaving that query
     // on other paths makes a later Help visit reopen an old tab, so drop it
     // only when actually changing pages.
-    if (nextPage !== page) {
+    if (nextPage !== pageRef.current) {
       const url = new URL(window.location.href);
       if (url.searchParams.has('topic')) {
         url.searchParams.delete('topic');
@@ -111,7 +112,7 @@ export function App() {
     }
     setPage(nextPage);
     writePagePath(nextPage);
-  };
+  }, []);
 
   usePageMetadata(page);
 
@@ -125,14 +126,16 @@ export function App() {
     [orgsQuery.data, mode, hiddenAliases],
   );
   const selectedOrg = visibleOrgs.find((org) => org.alias === selectedAlias) ?? null;
-  const context = createWorkspaceContext(mode, selectedOrg);
+  const context = useMemo(() => createWorkspaceContext(mode, selectedOrg), [mode, selectedOrg]);
   const inventoryQuery = useInventory(context);
-  const searchResults = useMemo(() => buildCommandResults(inventoryQuery.data ?? null), [inventoryQuery.data]);
-  let orgList: OrgListState = { status: 'idle' };
-  if (orgsQuery.isFetching) orgList = { status: 'checking' };
-  else if (orgsQuery.isError) {
-    orgList = { status: 'error', message: orgsQuery.error.message, retry: () => void orgsQuery.refetch() };
-  }
+  const retryOrgs = useCallback(() => void orgsQuery.refetch(), [orgsQuery.refetch]);
+  const orgList = useMemo<OrgListState>(() => {
+    if (orgsQuery.isFetching) return { status: 'checking' };
+    if (orgsQuery.isError) {
+      return { status: 'error', message: orgsQuery.error.message, retry: retryOrgs };
+    }
+    return { status: 'idle' };
+  }, [orgsQuery.isFetching, orgsQuery.isError, orgsQuery.error, retryOrgs]);
 
   const activeContextIdRef = useRef<string | null>(context?.contextId ?? null);
   activeContextIdRef.current = context?.contextId ?? null;
@@ -151,6 +154,26 @@ export function App() {
     refreshControllerRef.current?.abort();
     refreshControllerRef.current = null;
   };
+
+  // Context consumers should rerender for state changes, not because the root
+  // created ten fresh callbacks on every progressive inventory snapshot.
+  const actionsContextRef = useRef(context);
+  const actionsInventoryRef = useRef(inventoryQuery.data);
+  const toggleModeRef = useRef<() => void>(() => undefined);
+  const retryModeRef = useRef<() => void>(() => undefined);
+  const cancelRefreshRef = useRef(cancelRefresh);
+  const refreshInventoryRef = useRef<() => void>(() => undefined);
+  const resumeInventoryRef = useRef<(family?: ResourceFamily) => void>(() => undefined);
+  actionsContextRef.current = context;
+  actionsInventoryRef.current = inventoryQuery.data;
+  cancelRefreshRef.current = cancelRefresh;
+
+  const goToOrgs = useCallback(() => navigate('orgs'), [navigate]);
+  const onToggleMode = useCallback(() => toggleModeRef.current(), []);
+  const onRetryMode = useCallback(() => retryModeRef.current(), []);
+  const onCancelRefresh = useCallback(() => cancelRefreshRef.current(), []);
+  const onRefreshInventory = useCallback(() => refreshInventoryRef.current(), []);
+  const onResumeDiscovery = useCallback((family?: ResourceFamily) => resumeInventoryRef.current(family), []);
 
   // Stop an in-flight refresh in the same tick as a context change. The query
   // cache clear alone cannot cancel a manually invoked inventory request, and a
@@ -334,6 +357,43 @@ export function App() {
     },
   });
 
+  refreshInventoryRef.current = () => refreshInventory.mutate(actionsContextRef.current);
+  resumeInventoryRef.current = (family) => {
+    const sessionId = actionsInventoryRef.current?.progress?.sessionId;
+    if (!sessionId) return;
+    resumeInventory.mutate({ target: actionsContextRef.current, sessionId, family });
+  };
+
+  const inventoryActionsValue = useMemo(() => ({
+    context,
+    mode,
+    orgList,
+    onGoToOrgs: goToOrgs,
+    onToggleMode,
+    isTogglingMode,
+    refreshInventory: onRefreshInventory,
+    cancelRefresh: onCancelRefresh,
+    isRefreshingInventory: refreshInventory.isPending,
+    refreshError: refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
+      ? ''
+      : refreshInventory.error?.message ?? '',
+    resumeDiscovery: onResumeDiscovery,
+    isResumingDiscovery: resumeInventory.isPending,
+  }), [
+    context,
+    mode,
+    orgList,
+    goToOrgs,
+    onToggleMode,
+    isTogglingMode,
+    onRefreshInventory,
+    onCancelRefresh,
+    refreshInventory.isPending,
+    refreshInventory.error,
+    onResumeDiscovery,
+    resumeInventory.isPending,
+  ]);
+
   useEffect(() => {
     const nextContextId = context?.contextId ?? null;
     if (refreshContextRef.current !== nextContextId) {
@@ -468,6 +528,8 @@ export function App() {
     setModeError('');
     mutateMode(failedModeRef.current);
   };
+  toggleModeRef.current = toggleMode;
+  retryModeRef.current = retryMode;
 
   const selectSearchResult = (result: CommandResult) => {
     if (result.kind === 'stream') {
@@ -548,45 +610,24 @@ export function App() {
   })();
 
   return (
-    <InventoryActionsProvider
-      value={{
-        context,
-        mode,
-        orgList,
-        onGoToOrgs: () => navigate('orgs'),
-        onToggleMode: toggleMode,
-        isTogglingMode,
-        refreshInventory: () => refreshInventory.mutate(context),
-        cancelRefresh,
-        isRefreshingInventory: refreshInventory.isPending,
-        refreshError: refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
-          ? ''
-          : refreshInventory.error?.message ?? '',
-        resumeDiscovery: (family) => {
-          const sessionId = inventoryQuery.data?.progress?.sessionId;
-          if (!sessionId) return;
-          resumeInventory.mutate({ target: context, sessionId, family });
-        },
-        isResumingDiscovery: resumeInventory.isPending,
-      }}
-    >
+    <InventoryActionsProvider value={inventoryActionsValue}>
       <AppShell
         page={page}
         onNavigate={navigate}
         context={context}
         mode={mode}
-        onToggleMode={toggleMode}
+        onToggleMode={onToggleMode}
         isTogglingMode={isTogglingMode}
         modeNotice={modeNotice}
         modeError={modeError}
-        onRetryMode={retryMode}
+        onRetryMode={onRetryMode}
         orgs={visibleOrgs}
         orgsLoading={orgsQuery.isFetching}
         selectedAlias={selectedAlias}
         onSelectOrg={selectOrg}
-        onGoToOrgs={() => navigate('orgs')}
+        onGoToOrgs={goToOrgs}
         theme={theme}
-        searchResults={searchResults}
+        inventory={inventoryQuery.data ?? null}
         onSelectSearchResult={selectSearchResult}
         localDataEpoch={preferencesEpoch}
       >

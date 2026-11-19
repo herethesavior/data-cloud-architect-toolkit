@@ -59,6 +59,12 @@ export function clearWorkspaceCaches(queryClient: QueryClient, activeContextId: 
   queryClient.removeQueries({ predicate: (query) => shouldDiscardQuery(query.queryKey, activeContextId) });
 }
 
+/** Read-only CLI/status probes refresh diagnostics without re-querying inventory. */
+export function invalidateDiagnosticsState(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: ['bridge-status'] });
+  void queryClient.invalidateQueries({ queryKey: ['health'] });
+}
+
 /**
  * Bridge changes affect setup, diagnostics, and cached inventory, but must not
  * re-enqueue `org.list`: a pairing refresh could then slip between `org.connect`
@@ -66,8 +72,7 @@ export function clearWorkspaceCaches(queryClient: QueryClient, activeContextId: 
  * views are marked stale and refetch when opened.
  */
 export function invalidateBridgeState(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: ['bridge-status'] });
-  void queryClient.invalidateQueries({ queryKey: ['health'] });
+  invalidateDiagnosticsState(queryClient);
   void queryClient.invalidateQueries({
     predicate: (query) => isContextScopedQuery(query.queryKey),
   });

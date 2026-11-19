@@ -5,7 +5,7 @@ import {
   exportInventoryJson,
   exportInventoryMarkdown,
 } from '@dcat/exporters';
-import { countInDataSpace, countStreamsInDataSpace, filterByQuery } from '../lib/inventory.ts';
+import { countInDataSpace, countStreamsInDataSpace, filterByQuery, sameName } from '../lib/inventory.ts';
 import { ExportMenu } from '../components/ExportMenu.tsx';
 import type { ExportMenuItem } from '../components/ExportMenu.tsx';
 import { ExportNotice } from '../components/ExportNotice.tsx';
@@ -107,8 +107,8 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
                 {spaces.map((space) => {
                   const counts = countsFor(space.apiName);
                   const linkedObjects = [
-                    ...inventory.dlos.filter((object) => object.dataSpace === space.apiName).map((object) => object.label ?? object.apiName),
-                    ...inventory.dmos.filter((object) => object.dataSpace === space.apiName).map((object) => object.label ?? object.apiName),
+                    ...inventory.dlos.filter((object) => sameName(object.dataSpace, space.apiName)).map((object) => object.label ?? object.apiName),
+                    ...inventory.dmos.filter((object) => sameName(object.dataSpace, space.apiName)).map((object) => object.label ?? object.apiName),
                   ];
 
                   return (

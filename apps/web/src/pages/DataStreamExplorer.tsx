@@ -10,7 +10,7 @@ import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from '../components/ui/index.ts';
 import type { DataTableColumn, TabItem } from '../components/ui/index.ts';
-import { filterByQuery } from '../lib/inventory.ts';
+import { filterByQuery, sameName } from '../lib/inventory.ts';
 import type { FocusObject } from '../lib/objectDetail.ts';
 import { findCapability, resourceStatusMessage } from '../lib/resourceStatus.ts';
 import {
@@ -50,12 +50,12 @@ function StreamDetail({ stream, inventory, onClose }: {
   inventory: InventorySnapshot;
   onClose: () => void;
 }) {
-  const target = inventory.dlos.find((dlo) => dlo.apiName === stream.targetDlo) ?? null;
+  const target = inventory.dlos.find((dlo) => sameName(dlo.apiName, stream.targetDlo)) ?? null;
   const dataSpace = streamDataSpace(inventory, stream);
   const targetKnown = streamTargetKnown(inventory, stream);
   const mappings = stream.targetDlo
     ? inventory.mappings.filter((mapping) =>
-        mapping.sourceObject === stream.targetDlo || mapping.targetObject === stream.targetDlo)
+        sameName(mapping.sourceObject, stream.targetDlo) || sameName(mapping.targetObject, stream.targetDlo))
     : [];
   const rawMetadata = JSON.stringify(stream, null, 2);
 

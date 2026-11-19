@@ -268,6 +268,55 @@ describe('web API session handling', () => {
     expect(starts).toBe(2);
   });
 
+  it('falls back for an explicitly unsupported local inventory operation', async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/orgs/prod-org/inventory/session') {
+        return jsonResponse({ error: { code: 'INVALID_ARGUMENT', message: 'Unsupported bridge operation.' } }, 400);
+      }
+      if (path === '/api/orgs/prod-org/inventory') return jsonResponse(demoInventory);
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.inventory('prod-org')).resolves.toMatchObject({ apiVersion: demoInventory.apiVersion });
+    expect(fetchMock).toHaveBeenCalledWith('/api/orgs/prod-org/inventory', expect.any(Object));
+  });
+
+  it('does not hide a failed local discovery request behind the legacy inventory route', async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/orgs/prod-org/inventory/session') {
+        return jsonResponse({ error: { code: 'REQUEST_FAILED', message: 'CLI probe failed.' } }, 502);
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.inventory('prod-org')).rejects.toMatchObject({ code: 'REQUEST_FAILED' });
+    expect(fetchMock.mock.calls.map(([path]) => path)).not.toContain('/api/orgs/prod-org/inventory');
+  });
+
+  it('does not treat a hosted relay mismatch as a legacy capability gap', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests') return jsonResponse({ id: 'req-1' });
+      if (path === '/api/relay/requests/req-1') {
+        return jsonResponse({
+          id: 'req-1',
+          status: 'failed',
+          error: { code: 'NOT_FOUND', message: 'The bridge response does not match a pending request.' },
+        });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.inventory('prod-org')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(fetchMock.mock.calls.filter(([path]) => path === '/api/relay/requests')).toHaveLength(1);
+  });
+
   it('applies resume only to the first status poll', async () => {
     vi.useFakeTimers();
     const running = {

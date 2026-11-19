@@ -25,6 +25,29 @@ describe('object detail helpers', () => {
     expect(dmoLinks.streams).toHaveLength(0);
   });
 
+  it('joins links when Salesforce metadata uses different casing', () => {
+    const inventory = structuredClone(demoInventory);
+    inventory.mappings = inventory.mappings.map((mapping) => ({
+      ...mapping,
+      sourceObject: mapping.sourceObject.toLowerCase(),
+    }));
+    inventory.relationships = inventory.relationships.map((edge) => ({
+      ...edge,
+      target: edge.target.toLowerCase(),
+    }));
+    inventory.dataStreams = inventory.dataStreams.map((stream) => ({
+      ...stream,
+      targetDlo: stream.targetDlo?.toUpperCase() ?? null,
+    }));
+
+    const links = objectLinks(inventory, accountDlo);
+    expect(links.mappings).toHaveLength(1);
+    expect(links.streams.map((stream) => stream.apiName)).toEqual(['Accounts_Stream']);
+
+    const dmoLinks = objectLinks(inventory, accountDmo);
+    expect(dmoLinks.relationships).toHaveLength(4);
+  });
+
   it('builds a markdown summary without inventing transform links or leaking session data', () => {
     const markdown = objectMarkdown(accountDlo, 'dlo', objectLinks(demoInventory, accountDlo));
     expect(markdown).toContain('# Account DLO');

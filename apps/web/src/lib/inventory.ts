@@ -73,22 +73,23 @@ export function filterByQuery<T>(items: T[], query: string, selectors: (item: T)
   return items.filter((item) => matchesQuery(query, selectors(item)));
 }
 
-function sameSpace(left: string | null | undefined, right: string | null | undefined): boolean {
+/** Salesforce metadata names are case-insensitive joins, even when casing differs between families. */
+export function sameName(left: string | null | undefined, right: string | null | undefined): boolean {
   if (!left || !right) return false;
   return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 export function countInDataSpace(items: { dataSpace?: string | null }[], dataSpace: string): number {
-  return items.filter((item) => sameSpace(item.dataSpace, dataSpace)).length;
+  return items.filter((item) => sameName(item.dataSpace, dataSpace)).length;
 }
 
 /** Streams are attributed directly when possible, otherwise through their target DLO. */
 export function countStreamsInDataSpace(inventory: InventorySnapshot, dataSpace: string): number {
   return inventory.dataStreams.filter((stream) => {
-    if (sameSpace(stream.dataSpace, dataSpace)) return true;
+    if (sameName(stream.dataSpace, dataSpace)) return true;
     if (!stream.targetDlo) return false;
-    const dlo = inventory.dlos.find((item) => sameSpace(item.apiName, stream.targetDlo));
-    return sameSpace(dlo?.dataSpace, dataSpace);
+    const dlo = inventory.dlos.find((item) => sameName(item.apiName, stream.targetDlo));
+    return sameName(dlo?.dataSpace, dataSpace);
   }).length;
 }
 
