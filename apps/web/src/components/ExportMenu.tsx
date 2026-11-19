@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { Icon } from './Icon.tsx';
 import type { IconName } from './Icon.tsx';
 import { Button } from './ui/index.ts';
+import { markExport } from '../lib/noticeDismissal.ts';
 
 export interface ExportMenuItem {
   id: string;
@@ -191,6 +192,7 @@ export function ExportMenu({ items, label = 'Export', disabled = false, classNam
                   role="menuitem"
                   tabIndex={index === activeIndex ? 0 : -1}
                   onClick={() => {
+                    markExport();
                     item.onSelect();
                     close(true);
                   }}

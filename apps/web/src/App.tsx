@@ -5,6 +5,7 @@ import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { buildCommandResults } from './lib/commandSearch.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
+import { resetNoticeDismissals } from './lib/noticeDismissal.ts';
 import type { CommandResult } from './lib/commandSearch.ts';
 import { InventoryActionsProvider } from './lib/inventoryActions.tsx';
 import type { OrgListState } from './lib/inventoryActions.tsx';
@@ -230,6 +231,7 @@ export function App() {
       await setModeAsync('demo');
       await clearDcatCachedMetadata(queryClient);
       clearDcatLocalPreferences();
+      resetNoticeDismissals();
       setHiddenAliases([]);
       theme.reset();
       modeAppliedRef.current = null;
