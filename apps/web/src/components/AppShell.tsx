@@ -335,7 +335,7 @@ export function AppShell({
                 type="button"
                 onClick={() => setMenuOpen(true)}
                 aria-label="Open navigation"
-                className="grid size-9 place-items-center rounded-lg border border-line text-ink-soft hover:bg-surface-alt lg:hidden"
+                className="grid size-9 place-items-center rounded-lg border border-line-strong text-ink-soft hover:bg-surface-alt lg:hidden"
               >
                 <Icon name="menu" />
               </button>
@@ -346,7 +346,7 @@ export function AppShell({
                 aria-expanded={!sidebarCollapsed}
                 aria-controls="desktop-sidebar"
                 title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                className="hidden size-9 place-items-center rounded-lg border border-line text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink lg:grid"
+                className="hidden size-9 place-items-center rounded-lg border border-line-strong text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink lg:grid"
               >
                 <Icon name="panelLeft" size={18} />
               </button>

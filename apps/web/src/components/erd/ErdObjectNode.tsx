@@ -52,7 +52,7 @@ export function ErdObjectNodeComponent({ data, selected }: NodeProps<ErdObjectNo
         <span className="erd-node-dot" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold leading-tight text-ink" title={data.label}>{data.label}</p>
-          <p className="mono mt-0.5 truncate text-[10px] leading-tight text-ink-faint" title={data.apiName}>{data.apiName}</p>
+          <p className="mono mt-0.5 truncate text-[11px] leading-tight text-ink-faint" title={data.apiName}>{data.apiName}</p>
         </div>
         <span
           className="erd-node-count"
@@ -74,9 +74,9 @@ export function ErdObjectNodeComponent({ data, selected }: NodeProps<ErdObjectNo
                 className="erd-handle"
                 aria-label={`Incoming relationships on ${field.apiName}`}
               />
-              <span className="mono min-w-0 flex-1 truncate text-[10px] text-ink-soft">{field.apiName}</span>
+              <span className="mono min-w-0 flex-1 truncate text-[11px] text-ink-soft">{field.apiName}</span>
               {key ? <span className={`erd-key erd-key-${key.replace('/', '-').toLowerCase()}`}>{key}</span> : null}
-              <span className="max-w-[70px] truncate text-[9px] text-ink-faint">{field.dataType}</span>
+              <span className="max-w-[70px] truncate text-[10px] text-ink-faint">{field.dataType}</span>
               <Handle
                 id={erdSourceHandleId(field.apiName)}
                 type="source"

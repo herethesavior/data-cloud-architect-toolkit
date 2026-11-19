@@ -40,7 +40,6 @@ import type { ExportMenuItem } from '../components/ExportMenu.tsx';
 import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
-import { ResourceStatusNotice } from '../components/ResourceStatusPanel.tsx';
 import { Badge, Panel, SectionHeading } from '../components/ui/index.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
 import {
@@ -437,7 +436,6 @@ function DataLineageExplorerView({ context, inventory, freshness }: LineageViewP
   return (
     <>
       <ExportNotice mode={context?.mode ?? 'demo'} />
-      <ResourceStatusNotice inventory={inventory} />
       <PageIntro
         title="Data Lineage Explorer"
         description="Trace data from source systems through streams, DLOs, mappings and transforms to the DMOs that teams consume. Links come from snapshot metadata; missing references stay visible as gaps."
@@ -680,7 +678,7 @@ function DataLineageExplorerView({ context, inventory, freshness }: LineageViewP
                 type="button"
                 onClick={() => focusEdge(edge.id)}
                 className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                  selectedEdgeId === edge.id ? 'border-brand bg-brand-soft' : 'border-line bg-surface-alt hover:border-line-strong'
+                  selectedEdgeId === edge.id ? 'border-brand bg-brand-soft' : 'border-line-strong bg-surface-alt hover:border-brand'
                 }`}
               >
                 <div className="flex flex-wrap items-center gap-2">
@@ -813,7 +811,7 @@ function DataLineageExplorerView({ context, inventory, freshness }: LineageViewP
                   onClick={() => {
                     if (gap.focusNodeId) focusNode(gap.focusNodeId);
                   }}
-                  className="w-full rounded-lg border border-line bg-surface-alt px-3 py-2 text-left transition-colors hover:border-line-strong"
+                  className="w-full rounded-lg border border-line-strong bg-surface-alt px-3 py-2 text-left transition-colors hover:border-brand"
                 >
                   <div className="flex items-center gap-2">
                     <Badge tone={gap.severity === 'warning' ? 'danger' : 'neutral'} dot>{gap.severity}</Badge>
