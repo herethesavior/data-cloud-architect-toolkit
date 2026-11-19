@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { CliError } from '@dcat/salesforce-cli';
 import {
+  buildDmoPath,
+  buildFamilyPath,
   buildMappingPath,
   buildTransformDetailPath,
   buildTransformRunHistoryPath,
@@ -61,13 +63,27 @@ describe('allowlisted transform paths', () => {
     expect(() => buildTransformSubresourcePath('Account_Transform', 'delete' as never, '65.0')).toThrow(CliError);
   });
 
+  it('builds explicit offset pages for DMOs and plain paths for other families', () => {
+    expect(buildFamilyPath('dmos', '65.0')).toBe(
+      'services/data/v65.0/ssot/data-model-objects?limit=100&offset=0',
+    );
+    expect(buildDmoPath('65.0', 100)).toBe(
+      'services/data/v65.0/ssot/data-model-objects?limit=100&offset=100',
+    );
+    expect(buildFamilyPath('dlos', '65.0')).toBe(
+      'services/data/v65.0/ssot/data-lake-objects',
+    );
+    expect(() => buildDmoPath('65.0', -1)).toThrow(CliError);
+  });
+
   it('builds the required, encoded DMO filter for mapping lookups', () => {
     expect(buildMappingPath('Account_DMO__dlm', '65.0')).toBe(
       'services/data/v65.0/ssot/data-model-object-mappings?dmoDeveloperName=Account_DMO__dlm',
     );
-    expect(buildMappingPath('Customer & Partner__dlm', '65.0')).toBe(
-      'services/data/v65.0/ssot/data-model-object-mappings?dmoDeveloperName=Customer%20%26%20Partner__dlm',
+    expect(buildMappingPath('Customer & Partner__dlm', '65.0', 'sales & service')).toBe(
+      'services/data/v65.0/ssot/data-model-object-mappings?dataspace=sales%20%26%20service&dmoDeveloperName=Customer%20%26%20Partner__dlm',
     );
+    expect(() => buildMappingPath('  ', '65.0')).toThrow(/DMO developer name is required/);
     expect(() => buildMappingPath('Account_DMO__dlm', 'latest')).toThrow(CliError);
   });
 });

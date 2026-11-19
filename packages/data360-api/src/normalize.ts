@@ -341,13 +341,20 @@ export function normalizeDmos(raw: unknown, context: NormalizeContext): Normaliz
       skipped += 1;
       continue;
     }
+    const creationType = firstString(entry, ['creationType', 'objectCreationType']);
     items.push({
       apiName,
       label: firstString(entry, ['label', 'displayName', 'Label']),
       category: firstString(entry, ['category', 'objectCategory', 'Category']),
       dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace'])
         ?? dataSpaceName(entry.dataSpaceInfo),
-      isCustom: firstBoolean(entry, ['isCustom', 'custom', 'isCustomObject']),
+      isCustom: firstBoolean(entry, ['isCustom', 'custom', 'isCustomObject'])
+        ?? (creationType ? /^custom$/i.test(creationType) : null),
+      isEnabled: firstBoolean(entry, ['isEnabled', 'enabled']),
+      hasExternalDataLakeObjectMappings: firstBoolean(entry, [
+        'hasExternalDataLakeObjectMappings',
+        'hasDataLakeObjectMappings',
+      ]),
       fields: normalizeFields(fieldSource(entry), context),
       provenance: makeProvenance(context),
     });
@@ -377,6 +384,20 @@ export function normalizeDmos(raw: unknown, context: NormalizeContext): Normaliz
   }
 
   return { items, skipped, relationships };
+}
+
+/**
+ * Salesforce returns many disabled standard DMOs with no object-source-target
+ * maps. Only look up mappings for DMOs the source explicitly marks as usable;
+ * when a payload lacks that metadata, keep the conservative all-DMO behavior.
+ */
+export function mappingCandidateDmos(dmos: DataModelObject[]): DataModelObject[] {
+  const isEligible = (dmo: DataModelObject): boolean =>
+    dmo.isEnabled === true || dmo.isCustom === true || dmo.hasExternalDataLakeObjectMappings === true;
+  const isClassified = (dmo: DataModelObject): boolean =>
+    dmo.isEnabled !== null && dmo.isEnabled !== undefined || isEligible(dmo);
+  if (!dmos.every(isClassified)) return dmos;
+  return dmos.filter(isEligible);
 }
 
 export function normalizeMappings(raw: unknown, context: NormalizeContext): NormalizedCollection<DataMapping> {

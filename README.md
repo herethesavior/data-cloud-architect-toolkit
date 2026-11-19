@@ -176,11 +176,11 @@ The demo inventory is fully labelled and intentionally healthy. It contains eigh
 ## How live discovery works
 
 1. DCAT reads the latest supported Salesforce API version. If that fails, it requests no metadata.
-2. It probes Data Spaces, DLOs, DMOs, mappings, streams, and transforms independently.
-3. A `403` is shown as **forbidden**, `404` or an unsupported endpoint as **unsupported**, and malformed responses as **error**. These are never shown as empty results.
+2. It probes Data Spaces, DLOs, DMOs, streams, and transforms independently. Mappings are queried per DMO developer name, limited to DMOs the source marks enabled, custom, or externally mapped.
+3. A `403` is shown as **forbidden** and an endpoint-level `404` or unsupported endpoint as **unsupported**. A mapping-specific `NOT_FOUND` means that DMO has no mappings and is recorded as no result; malformed responses remain **errors**.
 4. Successful families still populate the inventory when other families fail. Discovery Health and **Needs attention** explain the gaps and stay inside the viewport.
 5. Transient failures get one retry. Forbidden and unsupported families are never retried.
-6. Pagination tokens are followed. If the page limit is reached, results are marked **partial**.
+6. Pagination follows Salesforce `nextPageUrl` values. DMO responses have no continuation cursor, so DCAT reads 100-row offset pages until a short page. With a known Data Space, mapping lookups also send the `dataspace` filter. If the page limit is reached, results are marked **partial**.
 7. Loaded org lists and inventory snapshots are saved in this browser's IndexedDB cache (metadata only) for up to 7 days and restored after a reload. Navigation reads that snapshot; only the UI refresh action retrieves a new one with a token-protected request.
 8. Transform detail is lazy and read-only: opening a transform calls only three allowlisted GET candidates. Each section reports its own status instead of appearing empty.
 

@@ -294,6 +294,52 @@ test('live reload restores the live context without demo crossover', async ({ pa
   expect(calls.inventory).toBe(inventoryCallsAfterLoad);
 });
 
+test('live Data Spaces counts use nested live attribution without false discovery errors', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  const org = state.orgs[0]!;
+  const source = demoInventory;
+  state.inventories[org.alias] = {
+    ...structuredClone(source),
+    org,
+    mode: 'live',
+    dataSpaces: [{ ...source.dataSpaces[0]!, apiName: 'default', label: 'default', isDefault: true }],
+    dlos: [
+      { ...source.dlos[0]!, apiName: 'Account_Home__dll', dataSpace: 'default' },
+      { ...source.dlos[1]!, apiName: 'Order_Home__dll', dataSpace: 'sales_space' },
+    ],
+    dmos: [
+      { ...source.dmos[0]!, apiName: 'ssot__Account__dlm', dataSpace: 'default' },
+      { ...source.dmos[1]!, apiName: 'ssot__Order__dlm', dataSpace: 'default' },
+    ],
+    dataStreams: [
+      { ...source.dataStreams[0]!, apiName: 'Account_Home', targetDlo: 'Account_Home__dll' },
+      { ...source.dataStreams[0]!, apiName: 'Order_Home', targetDlo: 'Order_Home__dll' },
+    ],
+    warnings: [],
+  };
+
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.goto('/');
+
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+  for (const message of [
+    'The dmos response did not contain a recognizable collection.',
+    'DMO or Source Object (CRM) developer Name is missing',
+  ]) {
+    await expect(page.getByText(message)).toHaveCount(0);
+  }
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Spaces' }).click();
+  const card = page.locator('#main-content section.panel').filter({
+    has: page.getByRole('heading', { name: 'default' }),
+  }).first();
+  await expect(card.getByText('DLOs').locator('..')).toContainText('1');
+  await expect(card.getByText('DMOs').locator('..')).toContainText('2');
+  await expect(card.getByText('Streams').locator('..')).toContainText('1');
+});
+
 test('persisted cache never contains a session token', async ({ page }) => {
   await mockConnector(page, createConnectorState());
   await page.goto('/');

@@ -30,7 +30,7 @@ function liveCliRunner(): ProcessRunner {
     '/services/data/': versionsJson,
     '/services/data/v65.0/ssot/data-spaces': dataSpacesJson,
     '/services/data/v65.0/ssot/data-lake-objects': dlosJson,
-    '/services/data/v65.0/ssot/data-model-objects': dmosJson,
+    '/services/data/v65.0/ssot/data-model-objects?limit=100&offset=0': dmosJson,
     '/services/data/v65.0/ssot/data-model-object-mappings': mappingsJson,
     '/services/data/v65.0/ssot/data-streams': dataStreamsJson,
     '/services/data/v65.0/ssot/data-transforms': dataTransformsJson,
@@ -39,7 +39,8 @@ function liveCliRunner(): ProcessRunner {
     '/services/data/v65.0/ssot/data-transforms/Account_Transform/schedule': transformScheduleJson,
   };
   const restBody = (path: string): string | undefined => restBodies[path]
-    ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?dmoDeveloperName=')
+    ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?')
+      && path.includes('dmoDeveloperName=')
       ? mappingsJson
       : undefined);
   return {

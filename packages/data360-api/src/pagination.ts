@@ -20,6 +20,7 @@ export interface Continuation {
 const TOKEN_KEYS = [
   'nextToken',
   'nextPageToken',
+  'nextPageUrl',
   'continuationToken',
   'paginationToken',
   'pageToken',
@@ -56,6 +57,7 @@ const NESTED_KEYS = [
 const PARAM_BY_KEY: Record<string, string> = {
   nextToken: 'nextToken',
   nextPageToken: 'nextPageToken',
+  nextPageUrl: 'nextToken',
   continuationToken: 'continuationToken',
   paginationToken: 'paginationToken',
   pageToken: 'pageToken',
@@ -243,6 +245,42 @@ export function extractContinuation(value: unknown): Continuation {
   }
 
   return { ...empty, hasMore: sawMore, uncertain: sawMore };
+}
+
+function pathOffset(path: string): number | null {
+  try {
+    const value = new URL(path, 'https://dcat.local').searchParams.get('offset');
+    if (value === null || !/^\d+$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Offset endpoints such as DMOs expose no next-page URL. A full page means
+ * another page may exist; a short page is the end unless a total says otherwise.
+ */
+export function offsetContinuation(
+  decoded: unknown,
+  requestPath: string,
+  pageSize: number,
+  pageItemCount: number,
+): Continuation {
+  const total = extractTotal(decoded);
+  const offset = pathOffset(requestPath) ?? 0;
+  const loaded = offset + pageItemCount;
+  const hasMore = pageItemCount > 0
+    && (pageItemCount >= pageSize || (total !== null && loaded < total));
+  return {
+    cursor: hasMore ? String(loaded) : null,
+    param: 'offset',
+    nextPath: null,
+    total,
+    hasMore,
+    uncertain: false,
+  };
 }
 
 /** Append or replace a cursor on an already allowlisted Data 360 REST path. */

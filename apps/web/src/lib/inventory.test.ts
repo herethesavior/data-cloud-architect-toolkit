@@ -42,6 +42,28 @@ describe('inventory helpers', () => {
     expect(countStreamsInDataSpace(inventory, 'sales_space')).toBe(0);
   });
 
+  it('counts live-shaped data spaces from nested DLO attribution and DLO-joined streams', () => {
+    const inventory = structuredClone(demoInventory);
+    inventory.dataSpaces = [{ ...inventory.dataSpaces[0]!, apiName: 'default', isDefault: true }];
+    inventory.dlos = [
+      { ...inventory.dlos[0]!, apiName: 'Account_Home__dll', dataSpace: 'default' },
+      { ...inventory.dlos[1]!, apiName: 'Order_Home__dll', dataSpace: 'sales_space' },
+    ];
+    inventory.dmos = [
+      { ...inventory.dmos[0]!, apiName: 'ssot__Account__dlm', dataSpace: 'default' },
+      { ...inventory.dmos[1]!, apiName: 'ssot__Order__dlm', dataSpace: 'default' },
+    ];
+    inventory.dataStreams = [
+      { ...inventory.dataStreams[0]!, apiName: 'Account_Home', targetDlo: 'Account_Home__dll' },
+      { ...inventory.dataStreams[0]!, apiName: 'Order_Home', targetDlo: 'Order_Home__dll' },
+    ];
+
+    expect(countInDataSpace(inventory.dlos, 'default')).toBe(1);
+    expect(countInDataSpace(inventory.dmos, 'default')).toBe(2);
+    expect(countStreamsInDataSpace(inventory, 'default')).toBe(1);
+    expect(countStreamsInDataSpace(inventory, 'sales_space')).toBe(1);
+  });
+
   it('keeps demo capability counts aligned with the inventory arrays', () => {
     const counts = new Map([
       ['data-spaces', demoInventory.dataSpaces.length],

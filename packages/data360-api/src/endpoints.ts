@@ -13,6 +13,9 @@ export const DATA360_ENDPOINT_REGISTRY: Record<ResourceFamily, string> = {
 
 const API_VERSION_PATTERN = /^\d{2,3}\.\d{1,2}$/;
 
+/** Verified DMO page size: larger pages time out and the endpoint has no next-page URL. */
+export const DMO_PAGE_SIZE = 100;
+
 export function buildData360Path(family: ResourceFamily, apiVersion: string): string {
   if (!API_VERSION_PATTERN.test(apiVersion)) {
     throw new CliError('INVALID_ARGUMENT', 'An invalid API version was supplied by the version adapter.');
@@ -20,10 +23,30 @@ export function buildData360Path(family: ResourceFamily, apiVersion: string): st
   return `services/data/v${apiVersion}${DATA360_ENDPOINT_REGISTRY[family]}`;
 }
 
-/** Salesforce requires a DMO developer name filter for mapping lookups. */
-export function buildMappingPath(dmoApiName: string, apiVersion: string): string {
+/** Initial request path for a family. DMOs need explicit offset pagination. */
+export function buildFamilyPath(family: ResourceFamily, apiVersion: string): string {
+  const base = buildData360Path(family, apiVersion);
+  return family === 'dmos' ? `${base}?limit=${DMO_PAGE_SIZE}&offset=0` : base;
+}
+
+export function buildDmoPath(apiVersion: string, offset: number): string {
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new CliError('INVALID_ARGUMENT', 'An invalid DMO offset was supplied.');
+  }
+  return `${buildData360Path('dmos', apiVersion)}?limit=${DMO_PAGE_SIZE}&offset=${offset}`;
+}
+
+/** Salesforce rejects unfiltered mapping lookups, so an empty name is never sent. */
+export function buildMappingPath(dmoApiName: string, apiVersion: string, dataspace?: string | null): string {
+  const name = dmoApiName.trim();
+  if (!name) {
+    throw new CliError('INVALID_ARGUMENT', 'A DMO developer name is required for mapping lookup.');
+  }
   const base = buildData360Path('mappings', apiVersion);
-  return `${base}?dmoDeveloperName=${encodeURIComponent(dmoApiName)}`;
+  const parameters: string[] = [];
+  if (dataspace?.trim()) parameters.push(`dataspace=${encodeURIComponent(dataspace.trim())}`);
+  parameters.push(`dmoDeveloperName=${encodeURIComponent(name)}`);
+  return `${base}?${parameters.join('&')}`;
 }
 
 export function buildVersionsPath(): string {

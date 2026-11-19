@@ -16,11 +16,24 @@ import { RESOURCE_FAMILIES } from '@dcat/core';
 import { safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure } from './capabilities.ts';
 import type { RestClient } from './discover.ts';
-import { extractHttpStatus, isTransientRestFailure, validateInventorySnapshot } from './discover.ts';
-import { buildData360Path, buildMappingPath, buildVersionsPath, DATA360_ENDPOINT_REGISTRY } from './endpoints.ts';
+import {
+  extractHttpStatus,
+  isMappingAbsence,
+  isTransientRestFailure,
+  validateInventorySnapshot,
+} from './discover.ts';
+import {
+  buildData360Path,
+  buildFamilyPath,
+  buildMappingPath,
+  buildVersionsPath,
+  DATA360_ENDPOINT_REGISTRY,
+  DMO_PAGE_SIZE,
+} from './endpoints.ts';
 import {
   deriveInferredRelationships,
   extractCollection,
+  mappingCandidateDmos,
   normalizeDataSpaces,
   normalizeDataStreams,
   normalizeDataTransforms,
@@ -30,7 +43,7 @@ import {
   parseJsonResponse,
 } from './normalize.ts';
 import type { NormalizeContext, NormalizedCollection, NormalizedDmos } from './normalize.ts';
-import { buildNextPath, extractContinuation } from './pagination.ts';
+import { buildNextPath, extractContinuation, offsetContinuation } from './pagination.ts';
 import { selectLatestApiVersion } from './versions.ts';
 
 const NON_MAPPING_FAMILIES = [
@@ -195,15 +208,15 @@ function makeCursor(basePath: string): CursorState {
 
 function makeFamily(family: NonMappingFamily, apiVersion: string): FamilyState {
   return {
-    ...makeCursor(buildData360Path(family, apiVersion)),
+    ...makeCursor(buildFamilyPath(family, apiVersion)),
     family,
     items: [],
     relationships: [],
   };
 }
 
-function makeMappingTask(dmoName: string, apiVersion: string): MappingTask {
-  return { ...makeCursor(buildMappingPath(dmoName, apiVersion)), dmoName };
+function makeMappingTask(dmoName: string, apiVersion: string, dataspace: string | null): MappingTask {
+  return { ...makeCursor(buildMappingPath(dmoName, apiVersion, dataspace)), dmoName };
 }
 
 /** Versionless paths for catalog entries that never issued a request. */
@@ -254,10 +267,13 @@ function mergeNormalized<T>(
   normalized: NormalizedCollection<T>,
 ): void {
   const items = family === 'mappings' ? state.mappings.items : state.families[family as NonMappingFamily].items;
+  // Mapping pages come from several DMO tasks, so dedupe against the shared
+  // mapping state rather than each task's local page keys.
+  const seenKeys = family === 'mappings' ? state.mappings.seenKeys : cursor.seenKeys;
   for (const item of normalized.items) {
     const key = identityFor(family, item);
-    if (cursor.seenKeys.includes(key)) continue;
-    cursor.seenKeys.push(key);
+    if (seenKeys.includes(key)) continue;
+    seenKeys.push(key);
     items.push(item);
   }
   cursor.skipped += normalized.skipped;
@@ -368,9 +384,16 @@ async function requestPage<T>(
       pushWarning(state, family, 'RETRY_SUCCEEDED',
         `Retrieved a page after ${attempt.attempts} attempts following a transient failure.`, 'info');
     }
-    applyContinuation(state, family, cursor, extractContinuation(decoded));
+    const continuation = family === 'dmos'
+      ? offsetContinuation(decoded, cursor.path, DMO_PAGE_SIZE, entries.length)
+      : extractContinuation(decoded);
+    applyContinuation(state, family, cursor, continuation);
     return cursor.pageIndex > before || cursor.done !== false;
   } catch (error) {
+    if (family === 'mappings' && isMappingAbsence(error)) {
+      cursor.done = true;
+      return true;
+    }
     markFailure(state, family, cursor, error);
     return true;
   }
@@ -394,9 +417,16 @@ async function fetchFamilyPage(state: ProgressiveDiscoveryState, family: NonMapp
   return requestPage(state, family, cursor, family, normalizer);
 }
 
+function defaultDataspace(state: ProgressiveDiscoveryState): string | null {
+  const spaces = state.families['data-spaces'].items as Array<{ apiName?: string; isDefault?: boolean | null }>;
+  return spaces.find((space) => space.isDefault)?.apiName ?? spaces[0]?.apiName ?? null;
+}
+
 function syncMappingTasks(state: ProgressiveDiscoveryState): void {
   const dmos = state.families.dmos.items as DataModelObject[];
-  for (const dmo of dmos) {
+  const candidates = mappingCandidateDmos(dmos);
+  const fallback = defaultDataspace(state);
+  for (const dmo of candidates) {
     const name = dmo.apiName?.trim();
     if (!name || state.mappings.queuedDmos.includes(name)) continue;
     if (state.mappings.tasks.length >= state.options.maxMappingQueries) {
@@ -409,12 +439,15 @@ function syncMappingTasks(state: ProgressiveDiscoveryState): void {
       break;
     }
     state.mappings.queuedDmos.push(name);
-    state.mappings.tasks.push(makeMappingTask(name, state.apiVersion ?? ''));
+    state.mappings.tasks.push(makeMappingTask(name, state.apiVersion ?? '', dmo.dataSpace ?? fallback));
   }
 
-  if (state.families.dmos.done && dmos.length === 0 && state.mappings.tasks.length === 0) {
+  if (state.families.dmos.done && state.mappings.tasks.length === 0) {
     pushWarning(state, 'mappings', 'MAPPINGS_SKIPPED',
-      'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.', 'info');
+      dmos.length === 0
+        ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
+        : 'Skipped: no enabled or custom DMOs were found; mapping lookup requires an eligible DMO developer name.',
+      'info');
   }
 }
 

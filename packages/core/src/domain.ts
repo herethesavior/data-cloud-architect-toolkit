@@ -143,6 +143,9 @@ export const dataModelObjectSchema = z.object({
   category: z.string().nullish(),
   dataSpace: z.string().nullish(),
   isCustom: z.boolean().nullish(),
+  /** Source `isEnabled` flag; used to avoid mapping lookups for unused standard DMOs. */
+  isEnabled: z.boolean().nullish(),
+  hasExternalDataLakeObjectMappings: z.boolean().nullish(),
   fields: z.array(dataFieldSchema),
   provenance: resourceProvenanceSchema,
 });

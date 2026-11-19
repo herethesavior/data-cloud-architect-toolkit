@@ -24,7 +24,7 @@ const restBodies: Record<string, string> = {
   '/services/data/': versionsJson,
   '/services/data/v65.0/ssot/data-spaces': dataSpacesJson,
   '/services/data/v65.0/ssot/data-lake-objects': dlosJson,
-  '/services/data/v65.0/ssot/data-model-objects': dmosJson,
+  '/services/data/v65.0/ssot/data-model-objects?limit=100&offset=0': dmosJson,
   '/services/data/v65.0/ssot/data-model-object-mappings': mappingsJson,
   '/services/data/v65.0/ssot/data-streams': dataStreamsJson,
   '/services/data/v65.0/ssot/data-transforms': dataTransformsJson,
@@ -35,7 +35,8 @@ const restBodies: Record<string, string> = {
 
 function restBody(path: string): string | undefined {
   return restBodies[path]
-    ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?dmoDeveloperName=')
+    ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?')
+      && path.includes('dmoDeveloperName=')
       ? mappingsJson
       : undefined);
 }

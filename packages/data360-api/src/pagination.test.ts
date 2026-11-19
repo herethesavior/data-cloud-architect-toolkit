@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNextPath, extractContinuation, extractTotal } from './pagination.ts';
+import { buildNextPath, extractContinuation, extractTotal, offsetContinuation } from './pagination.ts';
 
 describe('opaque continuation handling', () => {
   it('recognizes documented and nested token shapes without guessing a parameter', () => {
@@ -27,6 +27,27 @@ describe('opaque continuation handling', () => {
     expect(continuation.nextPath).toBe('services/data/v65.0/query/01gABC?locator=abc%2B123');
     expect(buildNextPath('services/data/v65.0/ssot/data-lake-objects', continuation))
       .toBe('services/data/v65.0/query/01gABC?locator=abc%2B123');
+  });
+
+  it('follows Salesforce nextPageUrl responses for DLOs and streams', () => {
+    const continuation = extractContinuation({
+      totalSize: 23,
+      nextPageUrl: '/services/data/v68.0/ssot/data-lake-objects?limit=20&offset=20',
+    });
+    expect(continuation.nextPath).toBe('services/data/v68.0/ssot/data-lake-objects?limit=20&offset=20');
+    expect(buildNextPath('services/data/v68.0/ssot/data-lake-objects', continuation))
+      .toBe('services/data/v68.0/ssot/data-lake-objects?limit=20&offset=20');
+  });
+
+  it('continues full DMO offset pages and stops on a short page', () => {
+    const path = 'services/data/v68.0/ssot/data-model-objects?limit=100&offset=0';
+    const full = offsetContinuation({ dataModelObject: new Array(100).fill({ name: 'DMO' }) }, path, 100, 100);
+    expect(full.hasMore).toBe(true);
+    expect(buildNextPath(path, full)).toBe('services/data/v68.0/ssot/data-model-objects?limit=100&offset=100');
+
+    const short = offsetContinuation({ dataModelObject: [{ name: 'DMO' }] }, path, 100, 46);
+    expect(short.hasMore).toBe(false);
+    expect(buildNextPath(path, short)).toBe(path);
   });
 
   it('reads totals from common envelopes and stops on explicit completion', () => {

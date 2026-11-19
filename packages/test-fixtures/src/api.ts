@@ -177,7 +177,14 @@ export const paginatedDlosPage2Json = JSON.stringify({
   records: [{ apiName: 'Page2_DLO__dll', fields: [] }],
 });
 
+export const dmosOffsetPage2Json = JSON.stringify({
+  dataModelObject: [{ name: 'Page2_DMO__dlm', dataSpaceName: 'default', isEnabled: true, fields: [] }],
+});
+
 export const malformedApiJson = 'this is not json';
+
+/** Salesforce answer for a valid DMO developer name that has no object-source-target maps. */
+export const mappingNotFoundOutput = 'Salesforce CLI command failed: NOT_FOUND: Object Source Target Map not found for the given Target Object Dev Name : Account_DMO__dlm  ,';
 
 export const forbiddenRestOutput = 'ERROR running api request rest: status code 403 Forbidden';
 
