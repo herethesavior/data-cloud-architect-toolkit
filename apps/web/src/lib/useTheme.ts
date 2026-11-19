@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { applyTheme, getThemePreference, resolveTheme, setThemePreference } from './preferences.ts';
+import { applyTheme, clearThemePreference, getThemePreference, resolveTheme, setThemePreference } from './preferences.ts';
 import type { ResolvedTheme, ThemePreference } from './preferences.ts';
 
 export interface ThemeController {
@@ -7,6 +7,7 @@ export interface ThemeController {
   resolved: ResolvedTheme;
   choose: (theme: ThemePreference) => void;
   toggle: () => void;
+  reset: () => void;
 }
 
 /** Owns the theme preference, applies it to the document, and follows system changes. */
@@ -21,10 +22,17 @@ export function useTheme(): ThemeController {
     setPreference(theme);
   };
 
+  const reset = () => {
+    clearThemePreference();
+    setPreference('system');
+    setResolved(resolveTheme('system'));
+  };
+
   return {
     preference,
     resolved,
     choose,
     toggle: () => choose(resolved === 'dark' ? 'light' : 'dark'),
+    reset,
   };
 }

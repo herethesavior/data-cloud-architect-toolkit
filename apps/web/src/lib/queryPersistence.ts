@@ -1,4 +1,5 @@
 import type { Query } from '@tanstack/react-query';
+import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { del, get, set } from 'idb-keyval';
 import type { WorkspaceMode } from './workspace.ts';
 import { isWorkspaceContextId } from './workspace.ts';
@@ -40,6 +41,22 @@ export function createPersistedCacheStorage(): StringStorage {
     setItem: (key, value) => set(key, value),
     removeItem: (key) => del(key),
   };
+}
+
+/** Shared with the app root so Settings can remove the same IndexedDB entry. */
+export const dcatPersister = createAsyncStoragePersister({
+  key: PERSISTED_CACHE_KEY,
+  storage: createPersistedCacheStorage(),
+  // Keep the window where a fresh reload could miss the latest snapshot small.
+  throttleTime: 100,
+});
+
+export async function clearPersistedCache(): Promise<void> {
+  try {
+    await dcatPersister.removeClient();
+  } catch {
+    // IndexedDB may be unavailable; there is nothing persisted to remove.
+  }
 }
 
 function isOrgQueryKey(key: readonly unknown[]): key is readonly ['orgs', WorkspaceMode] {

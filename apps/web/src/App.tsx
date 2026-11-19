@@ -3,7 +3,9 @@ import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { buildCommandResults } from './lib/commandSearch.ts';
+import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
+import { resetNoticeDismissals } from './lib/noticeDismissal.ts';
 import type { CommandResult } from './lib/commandSearch.ts';
 import { InventoryActionsProvider } from './lib/inventoryActions.tsx';
 import type { OrgListState } from './lib/inventoryActions.tsx';
@@ -87,6 +89,11 @@ export function App() {
   const [hiddenAliases, setHiddenAliases] = useState<string[]>(() => getHiddenOrgs());
   const [modeNotice, setModeNotice] = useState('');
   const [modeError, setModeError] = useState('');
+  // Remount the page subtree after a data action so mounted explorers rebuild
+  // their observers against the newly fetched caches.
+  const [dataEpoch, setDataEpoch] = useState(0);
+  // Only a full erase changes this; a cache clear must not reset the sidebar.
+  const [preferencesEpoch, setPreferencesEpoch] = useState(0);
   const [focusObject, setFocusObject] = useState<FocusObject | null>(null);
 
   const navigate = (nextPage: Page) => {
@@ -119,6 +126,12 @@ export function App() {
   const resumeControllerRef = useRef<AbortController | null>(null);
   const refreshContextRef = useRef<string | null>(context?.contextId ?? null);
   const modePendingRef = useRef(false);
+  // Automatic writes resume only after an explicit post-erase choice. Otherwise
+  // effects would immediately re-save the mode and org the erase just removed.
+  const persistPreferencesRef = useRef(true);
+  // Block the mode-restore effect while the erase is mid-flight: it would see a
+  // demo session and the not-yet-erased live preference and switch back to live.
+  const eraseInProgressRef = useRef(false);
 
   const cancelRefresh = () => {
     refreshControllerRef.current?.abort();
@@ -137,7 +150,31 @@ export function App() {
     clearWorkspaceCaches(queryClient, activeContextId);
   };
 
-  const { mutate: mutateMode, isPending: isTogglingMode } = useMutation({
+  const stopInFlightDiscovery = () => {
+    refreshControllerRef.current?.abort();
+    refreshControllerRef.current = null;
+    resumeControllerRef.current?.abort();
+    resumeControllerRef.current = null;
+  };
+
+  const resumePreferencePersistence = () => {
+    persistPreferencesRef.current = true;
+  };
+
+  // Scoped to re-fetchable data: dropping the session or diagnostics cache here
+  // would flash a boot screen over a Settings action.
+  const clearCachedMetadata = async () => {
+    stopInFlightDiscovery();
+    await clearDcatCachedMetadata(queryClient);
+    setDataEpoch((value) => value + 1);
+  };
+
+  const resetSavedLayouts = () => {
+    clearDcatSavedLayouts();
+    setDataEpoch((value) => value + 1);
+  };
+
+  const { mutate: mutateMode, mutateAsync: setModeAsync, isPending: isTogglingMode } = useMutation({
     mutationFn: api.setMode,
     onSuccess: async (result, requestedMode) => {
       try {
@@ -158,9 +195,9 @@ export function App() {
         resetWorkspaceState(null);
         queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(result.mode), []);
         setFocusObject(null);
-        setModePreference(requestedMode);
+        if (persistPreferencesRef.current) setModePreference(requestedMode);
         setSelectedAlias(null);
-        setSelectedOrg(null);
+        if (persistPreferencesRef.current) setSelectedOrg(null);
         // The connector exposes a different org list in each mode. Refresh it so
         // a mode switch cannot leave the UI stuck on the previous mode's orgs.
         // The new key is not observed yet, so invalidation alone cannot fetch it.
@@ -183,6 +220,38 @@ export function App() {
       setModeError(`Couldn't switch to ${requestedMode} mode. ${error.message}`);
     },
   });
+
+  const eraseLocalData = async () => {
+    stopInFlightDiscovery();
+    persistPreferencesRef.current = false;
+    eraseInProgressRef.current = true;
+    try {
+      // Reset the server session first. If the connector is offline, nothing in
+      // this browser has been erased yet and the user can safely retry.
+      await setModeAsync('demo');
+      await clearDcatCachedMetadata(queryClient);
+      clearDcatLocalPreferences();
+      resetNoticeDismissals();
+      setHiddenAliases([]);
+      theme.reset();
+      modeAppliedRef.current = null;
+      modePendingRef.current = false;
+      setDataEpoch((value) => value + 1);
+      setPreferencesEpoch((value) => value + 1);
+    } catch (error) {
+      // A failed erase must leave the app in its normal persistence mode.
+      persistPreferencesRef.current = true;
+      throw error;
+    } finally {
+      eraseInProgressRef.current = false;
+    }
+  };
+
+  // Settings owns inline results for its data actions; remounting it from its
+  // own callback would discard the result the user needs to read.
+  const contentKey = page === 'settings'
+    ? 'settings'
+    : `${page === 'orgs' ? page : `${page}-${context?.contextId ?? 'none'}`}-${dataEpoch}`;
 
   const refreshInventory = useMutation({
     mutationFn: async (target: WorkspaceContext | null) => {
@@ -283,11 +352,11 @@ export function App() {
 
   useEffect(() => {
     const session = sessionQuery.data;
-    if (!session) return;
+    if (!session || eraseInProgressRef.current) return;
     const storedPreference = getModePreference();
     const preferredMode = storedPreference ?? 'demo';
     if (session.mode === preferredMode) {
-      if (!storedPreference) setModePreference(session.mode);
+      if (!storedPreference && persistPreferencesRef.current) setModePreference(session.mode);
       return;
     }
     const transitionKey = `${session.mode}->${preferredMode}`;
@@ -308,7 +377,7 @@ export function App() {
     const first = visibleOrgs[0] ?? null;
     resetWorkspaceState(createWorkspaceContext(mode, first)?.contextId ?? null);
     setSelectedAlias(first?.alias ?? null);
-    setSelectedOrg(first?.alias ?? null);
+    if (persistPreferencesRef.current) setSelectedOrg(first?.alias ?? null);
   }, [isRestoring, sessionReady, visibleOrgs, selectedAlias, mode, queryClient]);
 
   if (sessionQuery.isPending) return <BootScreen hosted={hosted} />;
@@ -325,6 +394,7 @@ export function App() {
   }
 
   const selectOrg = (alias: string) => {
+    resumePreferencePersistence();
     // Read the cache directly: a just-connected org may be present before the
     // observing query has re-rendered, and inventory must start in this tick.
     const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(orgsQueryKey(mode)) ?? [];
@@ -337,6 +407,7 @@ export function App() {
   };
 
   const hideOrg = (alias: string) => {
+    resumePreferencePersistence();
     const next = hiddenAliases.includes(alias) ? hiddenAliases : [...hiddenAliases, alias];
     setHiddenOrgs(next);
     setHiddenAliases(next);
@@ -349,6 +420,7 @@ export function App() {
   };
 
   const restoreOrg = (alias: string) => {
+    resumePreferencePersistence();
     const next = hiddenAliases.filter((entry) => entry !== alias);
     setHiddenOrgs(next);
     setHiddenAliases(next);
@@ -356,6 +428,7 @@ export function App() {
 
   const toggleMode = () => {
     if (modePendingRef.current) return;
+    resumePreferencePersistence();
     modeAppliedRef.current = null;
     modePendingRef.current = true;
     setModeError('');
@@ -364,6 +437,7 @@ export function App() {
 
   const retryMode = () => {
     if (modePendingRef.current) return;
+    resumePreferencePersistence();
     modePendingRef.current = true;
     setModeError('');
     mutateMode(failedModeRef.current);
@@ -401,7 +475,14 @@ export function App() {
           />
         );
       case 'settings':
-        return <Settings theme={theme} />;
+        return (
+          <Settings
+            theme={theme}
+            onClearCachedMetadata={clearCachedMetadata}
+            onResetSavedLayouts={resetSavedLayouts}
+            onEraseLocalData={eraseLocalData}
+          />
+        );
       case 'data-spaces':
         return <DataSpaces context={context} />;
       case 'dlos':
@@ -464,6 +545,7 @@ export function App() {
         page={page}
         onNavigate={navigate}
         context={context}
+        mode={mode}
         onToggleMode={toggleMode}
         isTogglingMode={isTogglingMode}
         modeNotice={modeNotice}
@@ -477,10 +559,11 @@ export function App() {
         theme={theme}
         searchResults={searchResults}
         onSelectSearchResult={selectSearchResult}
+        localDataEpoch={preferencesEpoch}
       >
         {/* Explorers remount on context change to reset local filters and search.
             Org Connections keeps its two-step action state while selection moves. */}
-        <div key={page === 'orgs' ? page : `${page}-${context?.contextId ?? 'none'}`} className="page-enter">{content}</div>
+        <div key={contentKey} className="page-enter">{content}</div>
       </AppShell>
     </InventoryActionsProvider>
   );

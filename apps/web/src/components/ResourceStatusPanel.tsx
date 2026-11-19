@@ -4,6 +4,8 @@ import type { BadgeTone } from './ui/index.ts';
 import { Icon } from './Icon.tsx';
 import { data360NotEnabled, hasDegradedResources, statusLabel } from '../lib/resourceStatus.ts';
 import type { ResourceStage, ResourceStageState } from '../lib/resourceStatus.ts';
+import { useDismissibleNotice } from '../lib/noticeDismissal.ts';
+import { NoticeDismissButton } from './NoticeDismissButton.tsx';
 
 const stateTone: Record<ResourceStageState, BadgeTone> = {
   complete: 'success',
@@ -69,8 +71,6 @@ export function DiscoveryProgress({ stages, label = 'Discovering your Data 360 i
 /** Surfaced on every inventory view so one failed family cannot look like empty data. */
 export function ResourceStatusNotice({ inventory, onReview }: { inventory: InventorySnapshot; onReview?: () => void }) {
   const data360Unavailable = data360NotEnabled(inventory);
-  if (!data360Unavailable && !hasDegradedResources(inventory)) return null;
-
   const failures = inventory.capabilities.filter((capability) =>
     capability.status === 'error' || capability.status === 'forbidden',
   );
@@ -85,6 +85,16 @@ export function ResourceStatusNotice({ inventory, onReview }: { inventory: Inven
     : failures.length > 0
       ? `${failures.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} could not be retrieved. Other families are still available.`
       : `${partial.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} returned partial results.`;
+  const statusSignature = inventory.capabilities
+    .map((capability) => `${capability.family}:${capability.status}:${capability.message ?? ''}`)
+    .sort()
+    .join('|');
+  const noticeKey = `${inventory.mode}:${inventory.org.orgId ?? inventory.org.alias}:${
+    data360Unavailable ? 'data360' : 'gaps'
+  }:${statusSignature}`;
+  const { visible, dismiss } = useDismissibleNotice('inventory-status', noticeKey);
+
+  if ((!data360Unavailable && !hasDegradedResources(inventory)) || !visible) return null;
 
   return (
     <div className={`mb-4 flex flex-wrap items-start gap-3 rounded-lg border px-4 py-3 ${
@@ -95,15 +105,18 @@ export function ResourceStatusNotice({ inventory, onReview }: { inventory: Inven
         <p className="text-sm font-medium text-ink">{title}</p>
         <p className="mt-0.5 text-xs text-ink-soft">{detail}</p>
       </div>
-      {onReview ? (
-        <button
-          type="button"
-          onClick={onReview}
-          className="shrink-0 text-xs font-semibold text-brand underline underline-offset-2"
-        >
-          Review discovery health
-        </button>
-      ) : null}
+      <div className="ml-auto flex items-center gap-1.5">
+        {onReview ? (
+          <button
+            type="button"
+            onClick={onReview}
+            className="shrink-0 text-xs font-semibold text-brand underline underline-offset-2"
+          >
+            Review discovery health
+          </button>
+        ) : null}
+        <NoticeDismissButton label="Dismiss inventory status notice" onClick={dismiss} />
+      </div>
     </div>
   );
 }

@@ -434,6 +434,116 @@ test('mode changes refresh diagnostics in the currently open view', async ({ pag
   await expect(modeFact).toContainText('live');
 });
 
+test('stored data controls clear caches, reset layouts, and gate a full erase', async ({ page }) => {
+  const calls = { orgs: 0, inventory: 0 };
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('dcat.theme', 'dark');
+      localStorage.setItem('dcat.sidebarCollapsed', 'true');
+      localStorage.setItem('dcat.erd.v1.demo:demo-uat', '{"nodes":[]}');
+      localStorage.setItem('dcat.lineage.v1.demo:demo-uat', '{"nodes":[]}');
+      localStorage.setItem('unrelated-app', 'keep');
+    } catch {
+      // Storage may be unavailable in a locked-down browser.
+    }
+  });
+  await mockConnector(page, createConnectorState(), { calls });
+  await page.goto('/');
+
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#desktop-sidebar')).toHaveAttribute('data-collapsed', 'true');
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+
+  const storedData = page.locator('section.panel').filter({
+    has: page.getByRole('heading', { name: 'Stored data' }),
+  });
+  await expect(storedData).toContainText('DCAT caches org lists and loaded inventory snapshots here for up to 7 days');
+  await expect(storedData).toContainText('Access tokens, pairing codes, and customer records are never persisted.');
+
+  const orgsBeforeClear = calls.orgs;
+  await storedData.getByRole('button', { name: 'Clear cached metadata' }).click();
+  await expect(storedData.getByRole('status')).toContainText('Cached metadata cleared');
+  await expect.poll(() => calls.orgs).toBeGreaterThan(orgsBeforeClear);
+
+  await storedData.getByRole('button', { name: 'Reset saved layouts' }).click();
+  await expect(storedData.getByRole('status')).toContainText('Saved ERD and Lineage layouts reset');
+  expect(await page.evaluate(() => [
+    localStorage.getItem('dcat.erd.v1.demo:demo-uat'),
+    localStorage.getItem('dcat.lineage.v1.demo:demo-uat'),
+  ])).toEqual([null, null]);
+
+  await storedData.getByRole('button', { name: 'Erase all local data' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Erase all local data?' })).toBeVisible();
+  await expect(dialog).toContainText('Cached org lists and inventory snapshots');
+  await expect(dialog).toContainText('Bridge pairing or the local bridge installation');
+  await dialog.getByRole('button', { name: 'Keep my data' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('dcat.theme'))).toBe('dark');
+  expect(await page.evaluate(() => Boolean(localStorage.getItem('dcat.mode')))).toBe(true);
+  expect(await page.evaluate(() => Boolean(localStorage.getItem('dcat.selectedOrg')))).toBe(true);
+
+  await storedData.getByRole('button', { name: 'Erase all local data' }).click();
+  await dialog.getByRole('button', { name: 'Erase all local data' }).click();
+  await expect(storedData.getByRole('status')).toContainText('All local data erased');
+  await expect(dialog).toHaveCount(0);
+  expect(await page.evaluate(() => [
+    localStorage.getItem('dcat.theme'),
+    localStorage.getItem('dcat.hiddenOrgs'),
+    localStorage.getItem('dcat.sidebarCollapsed'),
+    localStorage.getItem('dcat.erd.v1.demo:demo-uat'),
+    localStorage.getItem('dcat.lineage.v1.demo:demo-uat'),
+    localStorage.getItem('dcat.mode'),
+    localStorage.getItem('dcat.selectedOrg'),
+  ])).toEqual([null, null, null, null, null, null, null]);
+  expect(await page.evaluate(() => localStorage.getItem('unrelated-app'))).toBe('keep');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('#desktop-sidebar')).toHaveAttribute('data-collapsed', 'false');
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toBeVisible();
+});
+
+test('erasing from live mode keeps the demo reset and does not restore live mode', async ({ page }) => {
+  const modeCalls: string[] = [];
+  await seedLiveMode(page);
+  await mockConnector(page, createConnectorState(), { modeCalls });
+  await page.goto('/');
+
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+  await page.getByRole('button', { name: 'Erase all local data' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: 'Erase all local data' }).click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('status')).toContainText('All local data erased');
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toBeVisible();
+  await expect.poll(() => modeCalls).toEqual(['live', 'demo']);
+  expect(await page.evaluate(() => [
+    localStorage.getItem('dcat.mode'),
+    localStorage.getItem('dcat.selectedOrg'),
+  ])).toEqual([null, null]);
+});
+
+test('demo mode without an org never presents itself as live', async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('dcat.selectedOrg', 'missing-demo-org');
+    } catch {
+      // Storage may be unavailable in a locked-down browser.
+    }
+  });
+  await mockConnector(page, createConnectorState());
+  // Force the empty path: an org-less demo session is still a demo session.
+  await page.route('**/api/orgs**', (route) => route.fulfill({ json: [] }));
+  await page.goto('/');
+
+  await expect(page.locator('header').getByText('DEMO · NO ORG SELECTED', { exact: true })).toBeVisible();
+  await expect(page.locator('header').getByText('LIVE · NOT CONNECTED', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Use demo mode' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Switch to live mode' })).toBeVisible();
+});
+
 test('live Discovery Health and Needs attention stay inside the viewport', async ({ page }) => {
   const state = createConnectorState();
   state.mode = 'live';

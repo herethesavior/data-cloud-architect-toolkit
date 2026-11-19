@@ -79,8 +79,15 @@ export function invalidateWorkspaceState(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: ['orgs'] });
 }
 
-export function workspaceBadge(context: WorkspaceContext | null): { label: string; tone: 'warning' | 'success' | 'neutral' } {
-  if (!context) return { label: 'LIVE · NOT CONNECTED', tone: 'neutral' };
+export function workspaceBadge(
+  context: WorkspaceContext | null,
+  mode: WorkspaceMode = 'live',
+): { label: string; tone: 'warning' | 'success' | 'neutral' } {
+  if (!context) {
+    return mode === 'demo'
+      ? { label: 'DEMO · NO ORG SELECTED', tone: 'warning' }
+      : { label: 'LIVE · NOT CONNECTED', tone: 'neutral' };
+  }
   if (context.mode === 'demo') return { label: 'DEMO DATA', tone: 'warning' };
   const environment = context.environment === 'unknown' ? 'UNKNOWN' : context.environment.toUpperCase();
   return { label: `LIVE · ${environment}`, tone: 'success' };

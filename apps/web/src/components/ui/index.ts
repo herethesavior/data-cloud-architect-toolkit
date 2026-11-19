@@ -1,6 +1,7 @@
 export { Badge } from './Badge.tsx';
 export type { BadgeTone } from './Badge.tsx';
 export { Button } from './Button.tsx';
+export { ConfirmDialog } from './ConfirmDialog.tsx';
 export { CopyButton } from './CopyButton.tsx';
 export { DataTable } from './DataTable.tsx';
 export type { DataTableColumn } from './DataTable.tsx';

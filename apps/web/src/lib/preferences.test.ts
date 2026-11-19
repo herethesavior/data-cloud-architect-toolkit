@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyTheme,
+  clearThemePreference,
   getHiddenOrgs,
   getThemePreference,
   resolveTheme,
@@ -59,6 +60,14 @@ describe('theme preferences', () => {
     expect(getThemePreference()).toBe('dark');
     setThemePreference('light');
     expect(getThemePreference()).toBe('light');
+  });
+
+  it('can clear a stored theme preference', () => {
+    setThemePreference('dark');
+    clearThemePreference();
+
+    expect(window.localStorage.getItem('dcat.theme')).toBeNull();
+    expect(getThemePreference()).toBe('system');
   });
 
   it('ignores unknown stored values', () => {

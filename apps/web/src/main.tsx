@@ -1,12 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient } from '@tanstack/react-query';
-import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { App } from './App.tsx';
 import {
-  createPersistedCacheStorage,
-  PERSISTED_CACHE_KEY,
+  dcatPersister,
   PERSISTED_CACHE_MAX_AGE,
   shouldPersistQuery,
 } from './lib/queryPersistence.ts';
@@ -26,13 +24,6 @@ const queryClient = new QueryClient({
   },
 });
 
-const persister = createAsyncStoragePersister({
-  key: PERSISTED_CACHE_KEY,
-  storage: createPersistedCacheStorage(),
-  // Keep the window where a fresh reload could miss the latest snapshot small.
-  throttleTime: 100,
-});
-
 const root = document.getElementById('root');
 if (!root) throw new Error('Application root element is missing.');
 
@@ -41,7 +32,7 @@ createRoot(root).render(
     <PersistQueryClientProvider
       client={queryClient}
       persistOptions={{
-        persister,
+        persister: dcatPersister,
         maxAge: PERSISTED_CACHE_MAX_AGE,
         buster: `${import.meta.env.MODE}-v1`,
         dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },

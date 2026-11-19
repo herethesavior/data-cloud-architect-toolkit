@@ -81,6 +81,10 @@ export function setThemePreference(theme: ThemePreference): void {
   getStorage()?.setItem(THEME_KEY, theme);
 }
 
+export function clearThemePreference(): void {
+  getStorage()?.removeItem(THEME_KEY);
+}
+
 export function resolveTheme(preference: ThemePreference): ResolvedTheme {
   if (preference !== 'system') return preference;
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light';

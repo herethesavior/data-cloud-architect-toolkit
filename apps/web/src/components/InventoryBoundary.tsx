@@ -4,10 +4,12 @@ import type { DiscoveryProgress as DiscoveryProgressData, InventorySnapshot } fr
 import { formatUpdatedAt, isInventoryStale } from '../lib/inventory.ts';
 import { discoveryStages, humanizeResource, resumableProgressFamilies } from '../lib/resourceStatus.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
+import { useDismissibleNotice } from '../lib/noticeDismissal.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 import { Button } from './ui/index.ts';
 import { EmptyState, ErrorState } from './DataStates.tsx';
 import { Icon } from './Icon.tsx';
+import { NoticeDismissButton } from './NoticeDismissButton.tsx';
 import { DiscoveryProgress, ResourceStatusNotice } from './ResourceStatusPanel.tsx';
 import { NoOrgState } from './NoOrgState.tsx';
 
@@ -137,6 +139,11 @@ interface InventoryBoundaryProps {
 
 export function InventoryBoundary({ query, context, children }: InventoryBoundaryProps) {
   const actions = useInventoryActions();
+  const refreshError = actions?.refreshError ?? '';
+  const { visible: refreshErrorVisible, dismiss: dismissRefreshError } = useDismissibleNotice(
+    'inventory-refresh-error',
+    refreshError ? `${context?.contextId ?? 'none'}:${refreshError}` : 'none',
+  );
 
   // A disabled query is "pending" in React Query. Without this guard every
   // explorer would spin forever when live mode has no authenticated org.
@@ -227,10 +234,11 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
         />
       ) : null}
       <ResourceStatusNotice inventory={inventory} />
-      {actions?.refreshError ? (
+      {refreshError && refreshErrorVisible ? (
         <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
-          <span>Refresh failed: {actions.refreshError}</span>
-          <button type="button" onClick={actions.refreshInventory} className="font-semibold underline underline-offset-2">Retry</button>
+          <span className="min-w-0 flex-1">Refresh failed: {refreshError}</span>
+          <button type="button" onClick={actions?.refreshInventory} className="font-semibold underline underline-offset-2">Retry</button>
+          <NoticeDismissButton label="Dismiss refresh error" onClick={dismissRefreshError} />
         </p>
       ) : null}
       {children(inventory, freshness)}
