@@ -458,6 +458,27 @@ test('mode changes refresh diagnostics in the currently open view', async ({ pag
   await expect(modeFact).toContainText('live');
 });
 
+test('switching live to demo clears live org setup state and disables live controls', async ({ page }) => {
+  await seedLiveMode(page);
+  await mockConnector(page, createConnectorState());
+  await page.goto('/orgs');
+
+  await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
+  const alias = page.getByLabel('Org alias');
+  await alias.fill('live-org-alias');
+  await expect(page.getByRole('button', { name: 'Connect org' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Switch to demo mode' }).click();
+
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Demo mode runs on labelled sample data/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect org' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Re-check CLI' })).toBeDisabled();
+  await expect(alias).toHaveValue('my-data360-org');
+  await expect(page.getByText('live-org-alias')).toHaveCount(0);
+  await expect(page.getByText(/Finish setup to view live inventory/)).toHaveCount(0);
+});
+
 test('stored data controls clear caches, reset layouts, and gate a full erase', async ({ page }) => {
   const calls = { orgs: 0, inventory: 0 };
   await page.addInitScript(() => {
@@ -1113,6 +1134,19 @@ test('Help page answers common questions and maps them to explorers', async ({ p
   await expect(page.locator('h1')).toHaveText('Help');
 });
 
+test('leaving Help drops the stale topic before another visit', async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole('button', { name: 'Help' }).click();
+  await page.getByRole('tab', { name: 'Glossary' }).click();
+  await expect(page).toHaveURL(/topic=glossary/);
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Dashboard' }).click();
+  await expect(page).not.toHaveURL(/topic=glossary/);
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Help' }).click();
+  await expect(page.getByRole('tab', { name: 'Start here' })).toHaveAttribute('aria-selected', 'true');
+});
+
 test('help tabs wrap on a phone and stay reachable by keyboard', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openDemo(page);
@@ -1338,6 +1372,14 @@ test('about page shows the story and a navigable full-screen deck', async ({ pag
 
   await deck.getByRole('button', { name: 'Exit presentation' }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+});
+
+test('about chapter deep links restore the target section on a direct load', async ({ page }) => {
+  await openDemo(page);
+  await page.goto('/about#story-scroll-flow');
+
+  await expect(page.locator('h1')).toHaveText('About DCAT');
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
 });
 
 test('command palette opens with Ctrl+K and opens a DLO detail drawer', async ({ page }) => {

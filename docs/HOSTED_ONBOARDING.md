@@ -41,7 +41,7 @@ No Salesforce app registration, callback URL, consumer key/secret, `SF_CLIENT_ID
 | Pairing code expired | Codes are one-time and short-lived. | Create a new code in Step 1 and rerun the `setup` command with it. |
 | Bridge not paired / already paired | The code was consumed elsewhere, or this browser still has an agent. | Create a new code (this replaces the old pairing), or unpair before pairing again. |
 | Bridge offline / "waiting for bridge" | The agent stopped, the machine is offline, or the relay URL is wrong. | Restart with `npx -y @dcat-toolkit/bridge@latest start`, check network access to the site, or re-run `setup` with a fresh code. |
-| CLI missing | Salesforce CLI is not installed on the agent machine. | Re-run the `setup` command (it installs SF CLI if needed), then use **Re-check CLI**. |
+| CLI missing | Salesforce CLI is not installed on the agent machine. | Re-run the `setup` command (it installs SF CLI if needed), then wait for the next agent check-in or use **Refresh status**. |
 | Browser login never completes | The Salesforce CLI login window was closed, sandbox URL was wrong, or login was not finished. | Re-run Step 2 with a valid alias and HTTPS instance URL, complete login in the CLI-opened browser window, then refresh the org list. |
 | Inventory unavailable / capability warnings | The org lacks Data 360 provisioning or permissions, or endpoints are unsupported. | DCAT reports unsupported/forbidden families explicitly. Check Data 360 access in the target org; do not treat these as empty results. |
 | Removed OAuth URL returns 404 | `/api/auth/*` paths no longer exist. | Use the local bridge pairing flow above. |

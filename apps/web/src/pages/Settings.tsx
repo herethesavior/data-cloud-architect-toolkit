@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.ts';
+import { isHosted } from '../lib/hosted.ts';
+import type { WorkspaceMode } from '../lib/workspace.ts';
 import { invalidateBridgeState } from '../lib/workspace.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
 import { ErrorState, LoadingState } from '../components/DataStates.tsx';
@@ -27,6 +29,7 @@ const privacyItems: { icon: IconName; text: string }[] = [
 
 interface SettingsProps {
   theme: ThemeController;
+  mode: WorkspaceMode;
   onClearCachedMetadata: () => Promise<void>;
   onResetSavedLayouts: () => void;
   onEraseLocalData: () => Promise<void>;
@@ -36,13 +39,19 @@ function actionError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-export function Settings({ theme, onClearCachedMetadata, onResetSavedLayouts, onEraseLocalData }: SettingsProps) {
+export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayouts, onEraseLocalData }: SettingsProps) {
   const queryClient = useQueryClient();
+  const hosted = isHosted();
   const [refreshError, setRefreshError] = useState('');
   const [dataNotice, setDataNotice] = useState('');
   const [dataError, setDataError] = useState('');
   const [eraseOpen, setEraseOpen] = useState(false);
   const [erasing, setErasing] = useState(false);
+
+  // Settings stays mounted across mode switches so its action results survive.
+  // A diagnostic error from the previous mode must not survive with them.
+  useEffect(() => setRefreshError(''), [mode]);
+
   const healthQuery = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 60_000 });
   const bridgeQuery = useQuery({ queryKey: ['bridge-status'], queryFn: api.bridgeStatus, refetchInterval: 30_000 });
   const refreshCli = useMutation({
@@ -163,7 +172,7 @@ export function Settings({ theme, onClearCachedMetadata, onResetSavedLayouts, on
                 disabled={refreshCli.isPending}
                 icon={<Icon name="refresh" size={15} />}
               >
-                {refreshCli.isPending ? 'Checking…' : 'Re-check CLI'}
+                {refreshCli.isPending ? 'Checking…' : hosted ? 'Refresh status' : 'Re-check CLI'}
               </Button>
             }
           />
