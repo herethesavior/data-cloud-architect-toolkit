@@ -91,6 +91,7 @@ export function OrgConnections({
 }: OrgConnectionsProps) {
   const queryClient = useQueryClient();
   const hosted = isHosted();
+  const demo = mode === 'demo';
   const [newAlias, setNewAlias] = useState('my-data360-org');
   const [instanceUrl, setInstanceUrl] = useState('');
   const [loginBrowser, setLoginBrowser] = useState<'' | 'chrome' | 'edge' | 'firefox'>('');
@@ -124,7 +125,7 @@ export function OrgConnections({
   const orgsQuery = useQuery({
     queryKey: orgsQueryKey(mode),
     queryFn: api.orgs,
-    enabled: !hosted || bridgeStatus?.mode === 'demo' || bridgeStatus?.paired === true,
+    enabled: !hosted || demo || bridgeStatus?.mode === 'demo' || bridgeStatus?.paired === true,
     ...orgsQueryOptions(hosted),
   });
 
@@ -216,7 +217,12 @@ export function OrgConnections({
     ? Boolean(status?.paired && status.relay === 'connected' && status.cli.installed)
     : Boolean(status?.cli.installed);
   const setupState = setupLabel(status, hosted, cliInstalled);
-  const liveMode = hosted && (status?.mode ?? 'live') === 'live';
+  // The session mode is authoritative; a cached bridge payload can briefly
+  // describe the previous mode after a switch.
+  const liveMode = hosted && mode === 'live';
+  // Hosted "Re-check CLI" reads cached relay status rather than probing the
+  // CLI, so name the action for what it actually does.
+  const statusRefreshLabel = !demo && hosted ? 'Refresh status' : 'Re-check CLI';
   // The shared cache can briefly contain fixtures from a prior mode switch.
   const candidateOrgs = (orgsQuery.data ?? []).filter(
     (org) => !liveMode || org.source !== 'demo-fixture',
@@ -359,10 +365,12 @@ export function OrgConnections({
     <>
       <PageIntro
         title="Connect an org"
-        description="Set up the local SF CLI bridge once, connect your Salesforce org, then read its inventory here."
+        description={demo
+          ? 'Demo mode uses labelled sample data. Salesforce CLI, the bridge, and org connection are not needed.'
+          : 'Set up the local SF CLI bridge once, connect your Salesforce org, then read its inventory here.'}
         meta={
-          <Badge tone={hosted ? 'brand' : 'neutral'} dot>
-            {hosted ? 'Live via local bridge' : 'Local Salesforce CLI'}
+          <Badge tone={demo ? 'neutral' : hosted ? 'brand' : 'neutral'} dot>
+            {demo ? 'Demo mode' : hosted ? 'Live via local bridge' : 'Local Salesforce CLI'}
           </Badge>
         }
       />
@@ -371,34 +379,43 @@ export function OrgConnections({
         <Step
           number={1}
           title="Set up SF CLI"
-          description={hosted
-            ? 'Install DCAT Bridge on this computer. It opens an outbound connection to this site and runs the Salesforce CLI locally.'
-            : 'DCAT uses the Salesforce CLI already installed on this computer.'}
-          badge={
-            <>
-              <Badge tone={bridgeReady ? 'success' : setupState === 'Checking…' ? 'neutral' : 'warning'} dot>
-                {setupState}
-              </Badge>
-              {status?.cli.version ? <span className="text-xs text-ink-soft">{status.cli.version}</span> : null}
-            </>
-          }
+          description={demo
+            ? 'Not needed in demo mode. Sample metadata is already available.'
+            : hosted
+              ? 'Install DCAT Bridge on this computer. It opens an outbound connection to this site and runs the Salesforce CLI locally.'
+              : 'DCAT uses the Salesforce CLI already installed on this computer.'}
+          badge={demo
+            ? <Badge tone="neutral" dot>Not needed in demo</Badge>
+            : <>
+                <Badge tone={bridgeReady ? 'success' : setupState === 'Checking…' ? 'neutral' : 'warning'} dot>
+                  {setupState}
+                </Badge>
+                {status?.cli.version ? <span className="text-xs text-ink-soft">{status.cli.version}</span> : null}
+              </>}
           action={
             <Button
               variant="secondary"
               onClick={() => refreshCli.mutate()}
-              disabled={refreshCli.isPending}
+              disabled={demo || refreshCli.isPending}
+              title={demo ? 'Not needed in demo mode' : undefined}
               icon={<Icon name="refresh" size={15} />}
             >
-              {refreshCli.isPending ? 'Checking…' : 'Re-check CLI'}
+              {refreshCli.isPending ? 'Checking…' : statusRefreshLabel}
             </Button>
           }
         >
-          {bridgeStatusQuery.isPending ? <LoadingState label="Checking the local bridge…" /> : null}
-          {bridgeStatusQuery.isError ? (
+          {demo ? (
+            <p className="text-sm text-ink-soft">
+              Demo mode runs on labelled sample data. No Salesforce CLI, bridge pairing, or org login is used.
+              Switch to live mode to set up a real org.
+            </p>
+          ) : null}
+          {!demo && bridgeStatusQuery.isPending ? <LoadingState label="Checking the local bridge…" /> : null}
+          {!demo && bridgeStatusQuery.isError ? (
             <ErrorState message={bridgeStatusQuery.error.message} onRetry={() => void bridgeStatusQuery.refetch()} />
           ) : null}
 
-          {status && hosted && status.paired && status.updateAvailable && status.selfUpdateSupported ? (
+          {!demo && status && hosted && status.paired && status.updateAvailable && status.selfUpdateSupported ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2.5">
               <div className="min-w-0">
                 <p className="text-sm font-medium text-ink">
@@ -420,7 +437,7 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {status && hosted && status.paired && status.updateAvailable && !status.selfUpdateSupported ? (
+          {!demo && status && hosted && status.paired && status.updateAvailable && !status.selfUpdateSupported ? (
             <div className="mb-3 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2.5">
               <p className="text-sm font-medium text-ink">
                 Bridge update available{status.latestVersion ? ` · ${status.latestVersion}` : ''}
@@ -437,7 +454,7 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {status && hosted && !status.paired && status.pairing ? (
+          {!demo && status && hosted && !status.paired && status.pairing ? (
             <div className="space-y-3">
               <div className="rounded-lg border border-line bg-surface-alt p-4">
                 <p className="label-xs">One-time pairing code</p>
@@ -462,7 +479,7 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {status && hosted && status.paired && status.relay !== 'connected' ? (
+          {!demo && status && hosted && status.paired && status.relay !== 'connected' ? (
             <div className="space-y-2 rounded-lg border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning">
               <p className="font-medium">
                 {status.relay === 'stale' ? 'The bridge stopped responding.' : 'Bridge paired. Waiting for its first check-in.'}
@@ -478,13 +495,13 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {status && !status.paired && !status.pairing && !createPairing.isPending ? (
+          {!demo && status && !status.paired && !status.pairing && !createPairing.isPending ? (
             <Button variant="primary" onClick={() => createPairing.mutate()} disabled={createPairing.isPending}>
               Create pairing code
             </Button>
           ) : null}
 
-          {status && !hosted && !status.cli.installed ? (
+          {!demo && status && !hosted && !status.cli.installed ? (
             <div className="rounded-lg border border-line bg-surface-alt p-4 text-sm text-ink-soft">
               <p>Install Salesforce CLI, then re-check.</p>
               <a className="mt-2 inline-flex items-center gap-1 font-medium text-brand underline underline-offset-2" href="https://developer.salesforce.com/docs/platform/salesforce-cli/guide/setup.html" target="_blank" rel="noopener noreferrer">
@@ -493,15 +510,19 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {status?.cli.error ? <p className="mt-3 text-sm text-warning">{status.cli.error}</p> : null}
-          {setupError ? <p className="mt-3 text-sm text-danger" role="alert">{setupError}</p> : null}
+          {!demo && status?.cli.error ? <p className="mt-3 text-sm text-warning">{status.cli.error}</p> : null}
+          {!demo && setupError ? <p className="mt-3 text-sm text-danger" role="alert">{setupError}</p> : null}
         </Step>
 
         <Step
           number={2}
           title="Connect org"
-          description="Choose a local alias and start Salesforce CLI's browser login. Credentials are entered in that browser window, never in DCAT."
-          badge={bridgeReady ? undefined : <Badge tone="neutral">Complete step 1 first</Badge>}
+          description={demo
+            ? 'Not needed in demo mode. The sample orgs below are ready to explore.'
+            : "Choose a local alias and start Salesforce CLI's browser login. Credentials are entered in that browser window, never in DCAT."}
+          badge={demo
+            ? <Badge tone="neutral">Not needed in demo</Badge>
+            : bridgeReady ? undefined : <Badge tone="neutral">Complete step 1 first</Badge>}
         >
           <div className="grid gap-4 md:grid-cols-3">
             <label className="block text-sm">
@@ -509,6 +530,7 @@ export function OrgConnections({
               <input
                 id={aliasInputId}
                 value={newAlias}
+                disabled={demo}
                 onChange={(event) => {
                   setNewAlias(event.target.value);
                   setConnectedAlias(null);
@@ -524,6 +546,7 @@ export function OrgConnections({
               <input
                 id={instanceInputId}
                 value={instanceUrl}
+                disabled={demo}
                 onChange={(event) => {
                   setInstanceUrl(event.target.value);
                   setConnectedAlias(null);
@@ -540,6 +563,7 @@ export function OrgConnections({
               <select
                 id={browserSelectId}
                 value={loginBrowser}
+                disabled={demo}
                 onChange={(event) => setLoginBrowser(event.target.value as '' | 'chrome' | 'edge' | 'firefox')}
                 className="input mt-1.5"
               >
@@ -559,14 +583,16 @@ export function OrgConnections({
                 if (connectStarted.current || connectOrg.isPending) return;
                 connectOrg.mutate(mode);
               }}
-              disabled={!bridgeReady || connectOrg.isPending || Boolean(aliasError || instanceError)}
+              disabled={demo || !bridgeReady || connectOrg.isPending || Boolean(aliasError || instanceError)}
+              title={demo ? 'Not needed in demo mode' : undefined}
               icon={<Icon name="plug" size={15} />}
               aria-busy={connectOrg.isPending}
             >
               {connectOrg.isPending ? 'Waiting for login…' : 'Connect org'}
             </Button>
-            {!bridgeReady ? <span className="text-xs text-ink-soft">Connect org unlocks when SF CLI is ready.</span> : null}
-            {bridgeReady ? <code className="mono min-w-0 flex-1 overflow-x-auto text-xs text-ink-soft">{loginCommand}</code> : null}
+            {demo ? <span className="text-xs text-ink-soft">Org connection is not needed in demo mode.</span> : null}
+            {!demo && !bridgeReady ? <span className="text-xs text-ink-soft">Connect org unlocks when SF CLI is ready.</span> : null}
+            {!demo && bridgeReady ? <code className="mono min-w-0 flex-1 overflow-x-auto text-xs text-ink-soft">{loginCommand}</code> : null}
           </div>
 
           {connectOrg.isPending ? (
@@ -666,7 +692,9 @@ export function OrgConnections({
               title="No authenticated orgs yet"
               description={hiddenOrgs.length > 0
                 ? 'All authenticated orgs are hidden from DCAT. Use Show removed orgs to restore one.'
-                : 'Connect an org in step 2 to load its inventory, or use demo mode to explore sample metadata.'}
+                : demo
+                  ? 'Demo sample orgs will appear here. Switch to live mode to connect a real org.'
+                  : 'Connect an org in step 2 to load its inventory, or use demo mode to explore sample metadata.'}
             />
           ) : null}
           {orgListReady && !inventoryLocked && activeOrgs.length > 0 ? (

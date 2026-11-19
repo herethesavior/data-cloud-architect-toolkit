@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { BridgeStatus, ConnectorHealth } from '@dcat/core';
 import { api } from '../lib/api.ts';
@@ -38,6 +39,7 @@ const theme: ThemeController = {
 };
 
 interface RenderOptions {
+  mode?: 'demo' | 'live';
   onClearCachedMetadata?: () => Promise<void>;
   onResetSavedLayouts?: () => void;
   onEraseLocalData?: () => Promise<void>;
@@ -45,17 +47,31 @@ interface RenderOptions {
 
 function renderSettings(options: RenderOptions = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={queryClient}>
-      <Settings
-        theme={theme}
-        onClearCachedMetadata={options.onClearCachedMetadata ?? vi.fn().mockResolvedValue(undefined)}
-        onResetSavedLayouts={options.onResetSavedLayouts ?? vi.fn()}
-        onEraseLocalData={options.onEraseLocalData ?? vi.fn().mockResolvedValue(undefined)}
-      />
-    </QueryClientProvider>,
+  const mode = options.mode ?? 'live';
+  const settings = (
+    <Settings
+      theme={theme}
+      mode={mode}
+      onClearCachedMetadata={options.onClearCachedMetadata ?? vi.fn().mockResolvedValue(undefined)}
+      onResetSavedLayouts={options.onResetSavedLayouts ?? vi.fn()}
+      onEraseLocalData={options.onEraseLocalData ?? vi.fn().mockResolvedValue(undefined)}
+    />
   );
-  return { queryClient };
+  const view = render(<QueryClientProvider client={queryClient}>{settings}</QueryClientProvider>);
+  return {
+    queryClient,
+    rerenderWithMode: (nextMode: 'demo' | 'live') => view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <Settings
+          theme={theme}
+          mode={nextMode}
+          onClearCachedMetadata={vi.fn().mockResolvedValue(undefined)}
+          onResetSavedLayouts={vi.fn()}
+          onEraseLocalData={vi.fn().mockResolvedValue(undefined)}
+        />
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 describe('Settings bridge diagnostics', () => {
@@ -84,9 +100,23 @@ describe('Settings bridge diagnostics', () => {
     renderSettings();
 
     expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Re-check CLI/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Refresh status/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Re-check CLI/ })).not.toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Salesforce OAuth' })).not.toBeInTheDocument();
+  });
+
+  it('clears a stale CLI status error when switching to demo mode', async () => {
+    vi.spyOn(api, 'refreshCli').mockRejectedValue(new Error('CLI probe failed.'));
+    const { rerenderWithMode } = renderSettings({ mode: 'live' });
+
+    expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Re-check CLI' }));
+    expect(await screen.findByText('CLI probe failed.')).toBeInTheDocument();
+
+    rerenderWithMode('demo');
+
+    expect(screen.queryByText('CLI probe failed.')).not.toBeInTheDocument();
   });
 
   it('keeps the page usable when a background diagnostics poll fails', async () => {

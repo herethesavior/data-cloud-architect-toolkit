@@ -482,7 +482,7 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   )).toBeVisible();
 
   await startFakeBridge(page, 'PAIR12345678');
-  await page.getByRole('button', { name: 'Re-check CLI' }).click();
+  await page.getByRole('button', { name: 'Refresh status' }).click();
   await expect(page.getByText('Bridge connected')).toBeVisible();
 
   await page.getByLabel('Org alias').fill('prod-org');
@@ -528,7 +528,7 @@ test('hosted connect detects a sandbox from its Salesforce instance URL', async 
   await page.getByRole('button', { name: 'Open org connection details' }).click();
   await page.getByRole('button', { name: 'Create pairing code' }).click();
   await startFakeBridge(page, 'PAIR12345678');
-  await page.getByRole('button', { name: 'Re-check CLI' }).click();
+  await page.getByRole('button', { name: 'Refresh status' }).click();
 
   await page.getByLabel('Org alias').fill('uat-org');
   await page.getByLabel(/Sandbox instance URL/).fill('https://acme--uat.sandbox.my.salesforce.com');
@@ -561,7 +561,7 @@ test('hosted bridge update button queues the allowlisted self-update operation',
   await page.getByRole('button', { name: 'Open org connection details' }).click();
   await page.getByRole('button', { name: 'Create pairing code' }).click();
   await startFakeBridge(page, 'PAIR12345678');
-  await page.getByRole('button', { name: 'Re-check CLI' }).click();
+  await page.getByRole('button', { name: 'Refresh status' }).click();
 
   const updateButton = page.getByRole('button', { name: 'Update bridge' });
   await expect(updateButton).toBeVisible();
@@ -597,4 +597,12 @@ test('hosted demo stays fixture-backed, labelled, and gap-free', async ({ page }
   expect(state.operations).toEqual([]);
   expect(state.pairCalls).toBe(0);
   expect(state.authCalls).toEqual([]);
+
+  await page.goto('/orgs');
+  await expect(page.getByText(/Demo mode runs on labelled sample data/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect org' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Re-check CLI' })).toBeDisabled();
+  await expect(page.getByText('SF CLI missing')).toHaveCount(0);
+  await expect(page.getByText('Complete step 1 first')).toHaveCount(0);
+  expect(state.pairCalls).toBe(0);
 });

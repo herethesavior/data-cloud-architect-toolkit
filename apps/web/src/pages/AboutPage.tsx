@@ -560,6 +560,21 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
   }, []);
 
   useEffect(() => {
+    const restoreChapter = () => {
+      const prefix = '#story-scroll-';
+      if (!window.location.hash.startsWith(prefix)) return;
+      const id = window.location.hash.slice(prefix.length);
+      if (!chapters.some((chapter) => chapter.id === id)) return;
+      requestAnimationFrame(() => {
+        document.getElementById(`story-scroll-${id}`)?.scrollIntoView({ block: 'start' });
+      });
+    };
+    restoreChapter();
+    window.addEventListener('popstate', restoreChapter);
+    return () => window.removeEventListener('popstate', restoreChapter);
+  }, []);
+
+  useEffect(() => {
     if (!isFullscreen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (['ArrowRight', 'PageDown', ' '].includes(event.key)) {

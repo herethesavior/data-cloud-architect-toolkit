@@ -18,7 +18,32 @@ class FakeKV implements KVNamespaceLike {
   }
 }
 
-const assetFetch = vi.fn(async () => new Response('spa shell', { headers: { 'content-type': 'text/html' } }));
+const shell = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta
+      name="description"
+      content="Dashboard description"
+    />
+    <meta property="og:title" content="DCAT | Data Cloud Architect Toolkit" />
+    <meta
+      property="og:description"
+      content="Dashboard description"
+    />
+    <meta property="og:url" content="https://sfdcat.pages.dev/" />
+    <meta name="twitter:title" content="DCAT | Data Cloud Architect Toolkit" />
+    <meta
+      name="twitter:description"
+      content="Dashboard description"
+    />
+    <meta name="twitter:url" content="https://sfdcat.pages.dev/" />
+    <link rel="canonical" href="https://sfdcat.pages.dev/" />
+    <title>DCAT | Data Cloud Architect Toolkit</title>
+  </head>
+  <body><div id="root"></div></body>
+</html>`;
+
+const assetFetch = vi.fn(async () => new Response(shell, { headers: { 'content-type': 'text/html' } }));
 const env = { DCAT_SESSIONS: new FakeKV(), ASSETS: { fetch: assetFetch } };
 
 describe('Cloudflare Pages advanced-mode entry', () => {
@@ -44,14 +69,51 @@ describe('Cloudflare Pages advanced-mode entry', () => {
 
   it('delegates SPA requests to the Pages asset binding', async () => {
     const response = await pages.fetch(
-      new Request('https://dcat.example/org-connections'),
+      new Request('https://dcat.example/unknown-path'),
       env,
       undefined as never,
     );
 
-    expect(await response.text()).toBe('spa shell');
+    expect(await response.text()).toBe(shell);
     expect(response.headers.get('content-type')).toContain('text/html');
     expect(response.headers.get('x-frame-options')).toBe('DENY');
     expect(assetFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('serves path-specific metadata in the raw HTML for non-rendering clients', async () => {
+    const response = await pages.fetch(
+      new Request('https://dcat.example/about'),
+      env,
+      undefined as never,
+    );
+    const html = await response.text();
+
+    expect(html).toContain('<title>About DCAT | Data Cloud Architect Toolkit</title>');
+    expect(html).toContain('<link rel="canonical" href="https://sfdcat.pages.dev/about" />');
+    expect(html).toContain('property="og:url" content="https://sfdcat.pages.dev/about"');
+    expect(html).toContain('name="twitter:url" content="https://sfdcat.pages.dev/about"');
+    expect(html).toContain('Read the product story');
+    expect(html).not.toContain('Dashboard description');
+    expect(response.headers.get('content-length')).toBeNull();
+  });
+
+  it('keeps the dashboard shell metadata for the root path', async () => {
+    const response = await pages.fetch(new Request('https://dcat.example/'), env, undefined as never);
+    const html = await response.text();
+
+    expect(html).toContain('<title>DCAT | Data Cloud Architect Toolkit</title>');
+    expect(html).toContain('href="https://sfdcat.pages.dev/"');
+  });
+
+  it('does not rewrite HTML for asset responses', async () => {
+    assetFetch.mockResolvedValueOnce(new Response('body{}', { headers: { 'content-type': 'text/css' } }));
+
+    const response = await pages.fetch(
+      new Request('https://dcat.example/about'),
+      env,
+      undefined as never,
+    );
+
+    expect(await response.text()).toBe('body{}');
   });
 });

@@ -99,6 +99,16 @@ export function App() {
   const [focusObject, setFocusObject] = useState<FocusObject | null>(null);
 
   const navigate = (nextPage: Page) => {
+    // Help tabs use ?topic= while the user stays on Help. Leaving that query
+    // on other paths makes a later Help visit reopen an old tab, so drop it
+    // only when actually changing pages.
+    if (nextPage !== page) {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('topic')) {
+        url.searchParams.delete('topic');
+        window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      }
+    }
     setPage(nextPage);
     writePagePath(nextPage);
   };
@@ -197,6 +207,12 @@ export function App() {
         await queryClient.cancelQueries({ queryKey: orgsQueryKey(previousMode) });
         queryClient.removeQueries({ queryKey: orgsQueryKey(previousMode) });
         resetWorkspaceState(null);
+        // Diagnostics are only invalidated elsewhere: their cached payloads and
+        // mutation errors would otherwise keep describing the previous mode.
+        queryClient.removeQueries({ queryKey: ['bridge-status'] });
+        queryClient.removeQueries({ queryKey: ['health'] });
+        refreshInventory.reset();
+        resumeInventory.reset();
         queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(result.mode), []);
         setFocusObject(null);
         if (persistPreferencesRef.current) setModePreference(requestedMode);
@@ -252,10 +268,14 @@ export function App() {
   };
 
   // Settings owns inline results for its data actions; remounting it from its
-  // own callback would discard the result the user needs to read.
+  // own callback would discard the result the user needs to read. Org
+  // Connections owns live alias and connect results, so a mode change must
+  // remount it or those strings would survive into demo mode.
   const contentKey = page === 'settings'
     ? 'settings'
-    : `${page === 'orgs' ? page : `${page}-${context?.contextId ?? 'none'}`}-${dataEpoch}`;
+    : page === 'orgs'
+      ? `orgs-${mode}-${dataEpoch}`
+      : `${page}-${context?.contextId ?? 'none'}-${dataEpoch}`;
 
   const refreshInventory = useMutation({
     mutationFn: async (target: WorkspaceContext | null) => {
@@ -484,6 +504,7 @@ export function App() {
         return (
           <Settings
             theme={theme}
+            mode={mode}
             onClearCachedMetadata={clearCachedMetadata}
             onResetSavedLayouts={resetSavedLayouts}
             onEraseLocalData={eraseLocalData}

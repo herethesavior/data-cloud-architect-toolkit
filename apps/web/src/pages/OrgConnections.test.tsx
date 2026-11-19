@@ -103,6 +103,14 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.queryByText(/OAuth/i)).not.toBeInTheDocument();
   });
 
+  it('names the hosted status action for what it actually refreshes', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    renderOrgConnections();
+
+    expect(await screen.findByRole('button', { name: 'Refresh status' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Re-check CLI' })).not.toBeInTheDocument();
+  });
+
   it('shows the one-time pairing command and keeps Connect org locked when hosted setup is pending', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     vi.mocked(api.bridgeStatus).mockResolvedValue(status({
@@ -288,14 +296,23 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.queryByText('Connect an org to view live inventory')).not.toBeInTheDocument();
   });
 
-  it('does not gate inventory in hosted demo mode', async () => {
+  it('disables live setup controls and keeps inventory available in demo mode', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     vi.mocked(api.orgs).mockResolvedValue([]);
     vi.mocked(api.bridgeStatus).mockResolvedValue(status({ mode: 'demo', paired: false, relay: 'waiting' }));
-    renderOrgConnections();
+    renderOrgConnections(vi.fn(), { mode: 'demo' });
 
     expect(await screen.findByText('No authenticated orgs yet')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh org list' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Connect org' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Re-check CLI' })).toBeDisabled();
+    expect(screen.getByLabelText('Org alias')).toBeDisabled();
+    expect(screen.getByLabelText(/Sandbox instance URL/)).toBeDisabled();
+    expect(screen.getByText(/Demo mode runs on labelled sample data/)).toBeInTheDocument();
+    expect(screen.getAllByText('Not needed in demo').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Complete step 1 first')).not.toBeInTheDocument();
+    expect(screen.queryByText('Connect org unlocks when SF CLI is ready.')).not.toBeInTheDocument();
+    expect(screen.queryByText('SF CLI missing')).not.toBeInTheDocument();
   });
 
   it('hides an org from DCAT only after an explicit per-row confirmation', async () => {
