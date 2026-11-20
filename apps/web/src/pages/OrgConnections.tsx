@@ -72,7 +72,7 @@ function Step({ number, title, description, badge, action, children }: StepProps
 }
 
 function setupLabel(status: BridgeStatus | undefined, hosted: boolean, installed: boolean | null): string {
-  if (status === undefined) return 'Checking…';
+  if (status === undefined) return 'Checking...';
   if (installed === false || status.cli.installed === false) return 'SF CLI missing';
   if (!hosted) return 'SF CLI ready';
   if (!status.paired) return 'Bridge not paired';
@@ -272,7 +272,7 @@ export function OrgConnections({
         </div>
       ),
     },
-    { key: 'username', header: 'Username', render: (org) => <span className="text-ink-soft">{org.username ?? '—'}</span> },
+    { key: 'username', header: 'Username', render: (org) => <span className="text-ink-soft">{org.username ?? '-'}</span> },
     { key: 'environment', header: 'Environment', render: (org) => org.environment },
     {
       key: 'status',
@@ -387,7 +387,7 @@ export function OrgConnections({
           badge={demo
             ? <Badge tone="neutral" dot>Not needed in demo</Badge>
             : <>
-                <Badge tone={bridgeReady ? 'success' : setupState === 'Checking…' ? 'neutral' : 'warning'} dot>
+                <Badge tone={bridgeReady ? 'success' : setupState === 'Checking...' ? 'neutral' : 'warning'} dot>
                   {setupState}
                 </Badge>
                 {status?.cli.version ? <span className="text-xs text-ink-soft">{status.cli.version}</span> : null}
@@ -400,7 +400,7 @@ export function OrgConnections({
               title={demo ? 'Not needed in demo mode' : undefined}
               icon={<Icon name="refresh" size={15} />}
             >
-              {refreshCli.isPending ? 'Checking…' : statusRefreshLabel}
+              {refreshCli.isPending ? 'Checking...' : statusRefreshLabel}
             </Button>
           }
         >
@@ -410,7 +410,7 @@ export function OrgConnections({
               Switch to live mode to set up a real org.
             </p>
           ) : null}
-          {!demo && bridgeStatusQuery.isPending ? <LoadingState label="Checking the local bridge…" /> : null}
+          {!demo && bridgeStatusQuery.isPending ? <LoadingState label="Checking the local bridge..." /> : null}
           {!demo && bridgeStatusQuery.isError ? (
             <ErrorState message={bridgeStatusQuery.error.message} onRetry={() => void bridgeStatusQuery.refetch()} />
           ) : null}
@@ -432,7 +432,7 @@ export function OrgConnections({
                 disabled={updateBridge.isPending}
                 icon={<Icon name="refresh" size={15} />}
               >
-                {updateBridge.isPending ? 'Updating…' : 'Update bridge'}
+                {updateBridge.isPending ? 'Updating...' : 'Update bridge'}
               </Button>
             </div>
           ) : null}
@@ -490,7 +490,7 @@ export function OrgConnections({
                 onClick={() => createPairing.mutate()}
                 disabled={createPairing.isPending}
               >
-                {createPairing.isPending ? 'Creating code…' : 'Create new pairing code'}
+                {createPairing.isPending ? 'Creating code...' : 'Create new pairing code'}
               </Button>
             </div>
           ) : null}
@@ -588,7 +588,7 @@ export function OrgConnections({
               icon={<Icon name="plug" size={15} />}
               aria-busy={connectOrg.isPending}
             >
-              {connectOrg.isPending ? 'Waiting for login…' : 'Connect org'}
+              {connectOrg.isPending ? 'Waiting for login...' : 'Connect org'}
             </Button>
             {demo ? <span className="text-xs text-ink-soft">Org connection is not needed in demo mode.</span> : null}
             {!demo && !bridgeReady ? <span className="text-xs text-ink-soft">Connect org unlocks when SF CLI is ready.</span> : null}
@@ -638,7 +638,7 @@ export function OrgConnections({
                 disabled={refreshOrgs.isPending || inventoryLocked}
                 icon={<Icon name="refresh" size={15} />}
               >
-                {refreshOrgs.isPending ? 'Refreshing…' : 'Refresh org list'}
+                {refreshOrgs.isPending ? 'Refreshing...' : 'Refresh org list'}
               </Button>
             </div>
           }
@@ -663,7 +663,7 @@ export function OrgConnections({
               </button>
             </div>
           ) : null}
-          {orgListChecking ? <LoadingState label="Checking for Salesforce orgs…" /> : null}
+          {orgListChecking ? <LoadingState label="Checking for Salesforce orgs..." /> : null}
           {!orgListChecking && orgsQuery.isError ? (
             <ErrorState
               title="Couldn't check for Salesforce orgs"

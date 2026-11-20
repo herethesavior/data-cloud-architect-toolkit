@@ -61,15 +61,15 @@ describe('NoOrgState', () => {
     expect(screen.queryByRole('button', { name: 'Use demo mode' })).not.toBeInTheDocument();
   });
 
-  it('shows a checking skeleton with recovery actions while org discovery is running', () => {
+  it('shows only the checking copy while org discovery is running', () => {
     renderState(actions({ orgList: { status: 'checking' } }));
 
     const status = screen.getByRole('status');
-    expect(status).toHaveTextContent('Checking for Salesforce orgs…');
+    expect(status).toHaveTextContent('Checking for Salesforce orgs...');
     expect(status).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByText('No org selected')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Select an org' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Use demo mode' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Select an org' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use demo mode' })).not.toBeInTheDocument();
   });
 
   it('shows an org-check error with a retry while recovery actions stay available', () => {

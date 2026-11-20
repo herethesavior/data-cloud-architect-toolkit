@@ -110,12 +110,12 @@ function runColumns(): DataTableColumn<TransformRun>[] {
       key: 'duration',
       header: 'Duration',
       hideBelow: 'lg',
-      render: (run) => typeof run.durationMs === 'number' ? `${run.durationMs} ms` : '—',
+      render: (run) => typeof run.durationMs === 'number' ? `${run.durationMs} ms` : '-',
     },
     {
       key: 'records',
       header: 'Records',
-      render: (run) => typeof run.recordsProcessed === 'number' ? run.recordsProcessed.toLocaleString() : '—',
+      render: (run) => typeof run.recordsProcessed === 'number' ? run.recordsProcessed.toLocaleString() : '-',
     },
   ];
 }
@@ -302,7 +302,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
       }
       onClose={onClose}
     >
-      {bundleQuery.isPending ? <LoadingState label="Loading transform detail…" /> : null}
+      {bundleQuery.isPending ? <LoadingState label="Loading transform detail..." /> : null}
       {bundleQuery.isError ? (
         <ErrorState
           title="Couldn't load transform detail"

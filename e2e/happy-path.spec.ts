@@ -179,9 +179,9 @@ test('demo first impression shows the inventory and the CTA opens an explorer', 
   await expect(page.getByRole('button', { name: 'Explore the inventory' })).toBeVisible();
   await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toHaveAttribute(
     'title',
-    'Sample metadata only — no Salesforce org is connected.',
+    'Sample metadata only - no Salesforce org is connected.',
   );
-  await expect(page.getByText('Sample metadata only — no Salesforce org is connected.')).toHaveCount(0);
+  await expect(page.getByText('Sample metadata only - no Salesforce org is connected.')).toHaveCount(0);
   await expect(page.getByText('Sample inventory')).toBeVisible();
   await expect(page.locator('header').getByText(/SF CLI (ready|missing|checking)/)).toHaveCount(0);
   await expect(page.getByText('Your Data 360 model, clearly mapped.')).toBeVisible();
@@ -401,7 +401,7 @@ test('switching to live mode announces the context and never flashes demo metada
 
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
 
-  const notice = 'Now using live mode — reading metadata from your Salesforce CLI.';
+  const notice = 'Now using live mode - reading metadata from your Salesforce CLI.';
   await expect(page.locator('.sr-only[aria-live="polite"]')).toHaveText(notice);
   await expect(page.locator('.mode-toast')).toContainText(notice);
   await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
@@ -660,7 +660,7 @@ test('live mode without an org leads with Select an org and offers the demo fall
 
   await page.getByRole('button', { name: 'Use demo mode' }).click();
   await expect(page.locator('.sr-only[aria-live="polite"]')).toHaveText(
-    'Now using demo mode — sample metadata only.',
+    'Now using demo mode - sample metadata only.',
   );
   await expect(page.getByText('Sample inventory')).toBeVisible();
 });
@@ -700,11 +700,12 @@ test('switching to live shows an org-check skeleton while the org list is pendin
 
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
 
-  const status = page.getByRole('status').filter({ hasText: 'Checking for Salesforce orgs…' });
+  const status = page.getByRole('status').filter({ hasText: 'Checking for Salesforce orgs...' });
   await expect(status).toBeVisible();
   await expect(page.locator('#main-content').getByText('No org selected')).toHaveCount(0);
-  await expect(page.locator('#main-content').getByRole('button', { name: 'Use demo mode' })).toBeVisible();
-  await expect(page.getByLabel('Selected organization')).toContainText('Checking for orgs…');
+  await expect(page.locator('#main-content').getByRole('button', { name: 'Select an org' })).toHaveCount(0);
+  await expect(page.locator('#main-content').getByRole('button', { name: 'Use demo mode' })).toHaveCount(0);
+  await expect(page.getByLabel('Selected organization')).toContainText('Checking for orgs...');
 
   await page.getByRole('button', { name: 'Open org connection details' }).click();
   await expect(status).toBeVisible();
@@ -1305,7 +1306,7 @@ test('desktop sidebar collapses to an icon rail and persists the choice', async 
   await expect(sidebar.locator('nav > div > div[aria-hidden="true"]')).toHaveCount(3);
   await expect(sidebar.locator('.sidebar-footer-heading')).toHaveAttribute(
     'title',
-    'Local-first — read-only metadata',
+    'Local-first - read-only metadata',
   );
   const collapsedWidth = (await sidebar.boundingBox())?.width ?? 0;
   expect(collapsedWidth).toBeLessThan(expandedWidth - 150);

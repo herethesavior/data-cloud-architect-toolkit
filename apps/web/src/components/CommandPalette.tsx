@@ -129,7 +129,7 @@ export function CommandPalette({
             type="text"
             role="combobox"
             autoComplete="off"
-            placeholder="Search data spaces, objects, streams, mappings, transforms…"
+            placeholder="Search data spaces, objects, streams, mappings, transforms..."
             aria-expanded="true"
             aria-controls={resultsId}
             aria-autocomplete="list"
@@ -203,7 +203,7 @@ export function CommandPalette({
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-surface-alt px-4 py-2 text-xs text-ink-faint">
           <span className="truncate">{contextLabel} · current inventory</span>
-          <span className="hidden sm:inline">↑↓ navigate · Enter open · Esc close</span>
+          <span className="hidden sm:inline">Up/Down navigate · Enter open · Esc close</span>
           <span className="sm:hidden">Snapshots not available yet</span>
         </div>
       </div>

@@ -96,7 +96,7 @@ export function ConfirmDialog({
             {cancelLabel}
           </button>
           <Button variant="danger" onClick={onConfirm} disabled={busy} aria-busy={busy}>
-            {busy ? 'Working…' : confirmLabel}
+            {busy ? 'Working...' : confirmLabel}
           </Button>
         </div>
       </div>

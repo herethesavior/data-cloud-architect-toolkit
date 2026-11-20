@@ -267,13 +267,13 @@ describe('OrgConnections connect wizard', () => {
     vi.mocked(api.orgs).mockReturnValue(pending);
     renderOrgConnections(vi.fn(), { seedOrgs: [], invalidateSeededOrgs: true });
 
-    expect(await screen.findByText('Checking for Salesforce orgs…')).toBeInTheDocument();
+    expect(await screen.findByText('Checking for Salesforce orgs...')).toBeInTheDocument();
     expect(screen.queryByText('Connect an org to view live inventory')).not.toBeInTheDocument();
 
     finish([]);
     await pending;
     expect(await screen.findByText('Connect an org to view live inventory')).toBeInTheDocument();
-    expect(screen.queryByText('Checking for Salesforce orgs…')).not.toBeInTheDocument();
+    expect(screen.queryByText('Checking for Salesforce orgs...')).not.toBeInTheDocument();
   });
 
   it('surfaces an org-list failure instead of hiding it behind the locked empty state', async () => {

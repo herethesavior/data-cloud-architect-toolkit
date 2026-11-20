@@ -63,14 +63,14 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
     onError: (error: Error) => setRefreshError(error.message),
   });
 
-  if (healthQuery.isPending && !healthQuery.data) return <LoadingState label="Reading connector diagnostics…" />;
+  if (healthQuery.isPending && !healthQuery.data) return <LoadingState label="Reading connector diagnostics..." />;
   // A failed background poll must not replace the rest of Settings: React Query
   // keeps the last good health payload, so the panels can stay usable.
   if (healthQuery.isError && !healthQuery.data) {
     return <ErrorState message={healthQuery.error.message} onRetry={() => void healthQuery.refetch()} />;
   }
   const health = healthQuery.data;
-  if (!health) return <LoadingState label="Reading connector diagnostics…" />;
+  if (!health) return <LoadingState label="Reading connector diagnostics..." />;
 
   const clearMetadata = async () => {
     setDataNotice('');
@@ -172,7 +172,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
                 disabled={refreshCli.isPending}
                 icon={<Icon name="refresh" size={15} />}
               >
-                {refreshCli.isPending ? 'Checking…' : hosted ? 'Refresh status' : 'Re-check CLI'}
+                {refreshCli.isPending ? 'Checking...' : hosted ? 'Refresh status' : 'Re-check CLI'}
               </Button>
             }
           />
