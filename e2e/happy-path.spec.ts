@@ -1106,6 +1106,43 @@ test('Data Lineage Explorer joins all metadata families and persists grounded fi
   await expect(page.locator('.react-flow__edge')).toHaveCount(37);
 });
 
+test('Change Impact Analyzer shows grounded impact for a deep-linked target and supports scope controls', async ({ page }) => {
+  await openDemo(page);
+  await page.goto('/change-impact?target=field:dlo:Account_DLO__dll:Industry&direction=downstream&depth=direct');
+
+  await expect(page.locator('h1')).toHaveText('Change Impact Analyzer');
+  await expect(page.locator('#main-content').getByRole('heading', { name: 'Change Impact Analyzer' })).toBeVisible();
+  await expect(page.getByText('Direct dependencies')).toBeVisible();
+  await expect(page.getByText('All reviewed paths')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Downstream' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: '1 hop' })).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('button', { name: 'Both directions' }).click();
+  await expect(page.getByRole('button', { name: 'Both directions' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page).toHaveURL(/direction=both/);
+
+  await page.getByRole('button', { name: 'All paths' }).click();
+  await expect(page.getByRole('button', { name: 'All paths' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page).toHaveURL(/depth=all/);
+  await expect(page.getByRole('link', { name: /Open in Data Lineage Explorer/i }).first()).toBeVisible();
+});
+
+test('contextual Analyze impact link opens Change Impact Analyzer for a field', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
+
+  const rows = page.getByRole('table', { name: 'DLO Explorer results' });
+  await rows.getByRole('button', { name: 'Details', exact: true }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('tab', { name: /Fields \(/ }).click();
+
+  await dialog.getByRole('table', { name: 'Object fields' }).getByRole('link', { name: 'Analyze impact' }).first().click();
+  await expect(page.locator('h1')).toHaveText('Change Impact Analyzer');
+  await expect(page).toHaveURL(/\/change-impact\?target=field/);
+  await expect(page.getByText('Direct dependencies')).toBeVisible();
+});
+
 test('export menu consolidates local export formats', async ({ page }) => {
   await openDemo(page);
   await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
@@ -1148,7 +1185,7 @@ test('Help page answers common questions and maps them to explorers', async ({ p
   await expect(page.getByText('Data Lake Object (DLO)')).toBeVisible();
   await expect(page.getByText('Discovery Health')).toBeVisible();
   await page.getByRole('searchbox', { name: 'Filter glossary terms' }).fill('unified model');
-  await expect(page.getByText(/Showing 1 of 12 terms/)).toBeVisible();
+  await expect(page.getByText(/Showing 1 of 13 terms/)).toBeVisible();
   await expect(page).toHaveURL(/topic=glossary/);
 
   await page.reload();
@@ -1159,7 +1196,7 @@ test('Help page answers common questions and maps them to explorers', async ({ p
   await expect(page.getByText('No hosted OAuth')).toBeVisible();
   await expect(page.getByText(/\/api\/auth\/\* routes are intentionally removed and return 404/)).toBeVisible();
 
-  await page.getByRole('tab', { name: 'About & contact' }).click();
+  await page.getByRole('tab', { name: 'Contact' }).click();
   await expect(page.getByText('Ryan Joshua Dela Cruz')).toBeVisible();
   await expect(page.getByText('Technical Architect at Salesforce')).toBeVisible();
   await expect(page.getByText(/Created in a personal capacity/)).toBeVisible();
@@ -1208,7 +1245,7 @@ test('help tabs wrap on a phone and stay reachable by keyboard', async ({ page }
     'Explore & trace',
     'Status & privacy',
     'Glossary',
-    'About & contact',
+    'Contact',
   ]) {
     const box = await page.getByRole('tab', { name }).boundingBox();
     expect(box, `${name} tab bounds`).not.toBeNull();
@@ -1218,7 +1255,7 @@ test('help tabs wrap on a phone and stay reachable by keyboard', async ({ page }
 
   await page.getByRole('tab', { name: 'Start here' }).focus();
   await page.keyboard.press('End');
-  await expect(page.getByRole('tab', { name: 'About & contact' })).toBeFocused();
+  await expect(page.getByRole('tab', { name: 'Contact' })).toBeFocused();
   await expect(page).toHaveURL(/topic=about/);
 });
 
@@ -1373,6 +1410,7 @@ test('every screen fits a phone viewport', async ({ page }) => {
     'Data Transform Explorer',
     'ERD Explorer',
     'Data Lineage Explorer',
+    'Change Impact Analyzer',
     'Data Dictionary',
     'Settings & Diagnostics',
     'Help',

@@ -62,7 +62,7 @@ describe('HelpPage', () => {
     expect(screen.getByText('Mapping')).toBeInTheDocument();
     expect(screen.getByText('Data Lineage Explorer')).toBeInTheDocument();
     expect(screen.queryByText('Discovery Health')).not.toBeInTheDocument();
-    expect(screen.getByText(/Showing 2 of 12 terms/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 2 of 13 terms/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: 'Status & privacy' }));
     expect(await screen.findByText(/Read metadata with allowlisted, read-only Salesforce CLI commands/)).toBeInTheDocument();
@@ -90,7 +90,7 @@ describe('HelpPage', () => {
     const onNavigate = vi.fn();
     render(<HelpPage onNavigate={onNavigate} />);
 
-    await user.click(screen.getByRole('tab', { name: 'About & contact' }));
+    await user.click(screen.getByRole('tab', { name: 'Contact' }));
     expect(await screen.findByText('Ryan Joshua Dela Cruz')).toBeInTheDocument();
     expect(screen.getByText('Technical Architect at Salesforce')).toBeInTheDocument();
     expect(screen.getByText(/Created in a personal capacity/)).toBeInTheDocument();

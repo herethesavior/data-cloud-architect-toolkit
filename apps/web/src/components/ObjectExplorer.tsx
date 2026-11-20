@@ -19,6 +19,8 @@ import { ExportNotice } from './ExportNotice.tsx';
 import { InventoryBoundary } from './InventoryBoundary.tsx';
 import { Icon } from './Icon.tsx';
 import { PageIntro } from './PageIntro.tsx';
+import { navigateFromLink } from './AppShell.tsx';
+import { pageHref, pagePath } from '../navigation.ts';
 import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from './ui/index.ts';
 import type { DataTableColumn, TabItem } from './ui/index.ts';
 
@@ -27,6 +29,7 @@ interface ObjectExplorerProps {
   kind: 'dlo' | 'dmo';
   focusObject?: FocusObject | null;
   onFocusHandled?: () => void;
+  onNavigate?: (page: import('../navigation.ts').Page) => void;
 }
 
 const formatLabels = { csv: 'CSV', json: 'JSON', markdown: 'Markdown' } as const;
@@ -69,7 +72,7 @@ function objectSummary(object: ExplorerObject): string {
   ].join(' ');
 }
 
-export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: ObjectExplorerProps) {
+export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onNavigate }: ObjectExplorerProps) {
   const query = useInventory(context);
   const [search, setSearch] = useState('');
   const [space, setSpace] = useState('all');
@@ -157,6 +160,27 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
         ];
 
         const selectedLinks = selected ? linksFor(selected) : null;
+        const impactHref = (targetId: string) => `${pagePath('change-impact')}?target=${encodeURIComponent(targetId)}`;
+
+        const ImpactLink = ({ targetId, label = 'Analyze impact', compact = false }: { targetId: string; label?: string; compact?: boolean }) => {
+          const href = impactHref(targetId);
+          return (
+            <a
+              href={href}
+              onClick={(event) => {
+                if (!onNavigate) return;
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                event.preventDefault();
+                window.history.replaceState(null, '', href);
+                onNavigate('change-impact');
+              }}
+              className={compact ? 'text-xs font-semibold text-brand underline underline-offset-2' : 'btn-quiet px-2 py-1 text-xs'}
+              aria-label={label}
+            >
+              {label}
+            </a>
+          );
+        };
 
         const linkBadges = (object: ExplorerObject) => {
           const links = linksFor(object);
@@ -214,7 +238,20 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
                 content: (
                   <div className="overflow-x-auto rounded-lg border border-line">
                     <DataTable
-                      columns={fieldColumns}
+                      columns={[
+                        ...fieldColumns,
+                        {
+                          key: 'impact',
+                          header: <span className="sr-only">Impact</span>,
+                          render: (field) => (
+                            <ImpactLink
+                              targetId={`field:${kind}:${selected.apiName}:${field.apiName}`}
+                              label="Analyze impact"
+                              compact
+                            />
+                          ),
+                        },
+                      ]}
                       rows={selected.fields}
                       getRowKey={(field) => field.apiName}
                       ariaLabel="Object fields"
@@ -231,10 +268,13 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
                   <ul className="space-y-2">
                     {selectedLinks.relationships.map((edge) => (
                       <li key={edge.id} className="rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="mono text-ink">{edge.source}</span>
-                          <Icon name="arrowRight" size={14} className="text-ink-faint" />
-                          <span className="mono text-ink">{edge.target}</span>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="mono text-ink">{edge.source}</span>
+                            <Icon name="arrowRight" size={14} className="text-ink-faint" />
+                            <span className="mono text-ink">{edge.target}</span>
+                          </div>
+                          <ImpactLink targetId={`relationship:${edge.id}`} label="Analyze impact" compact />
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
                           <Badge tone={edge.certainty === 'confirmed' ? 'success' : 'warning'} dot>{edge.certainty}</Badge>
@@ -443,6 +483,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled }: O
               breadcrumbs={selected ? `${title} / ${selected.label ?? selected.apiName}` : undefined}
               headerActions={selected && selectedLinks ? (
                 <>
+                  <ImpactLink targetId={`${kind}:${selected.apiName}`} label="Analyze impact" />
                   <CopyButton value={selected.apiName} label="Copy API name" />
                   <CopyButton value={selected.provenance.sourceEndpoint} label="Copy endpoint" icon="route" />
                   <CopyButton
@@ -469,12 +510,13 @@ interface FocusableExplorerProps {
   context: WorkspaceContext | null;
   focusObject?: FocusObject | null;
   onFocusHandled?: () => void;
+  onNavigate?: (page: import('../navigation.ts').Page) => void;
 }
 
-export function DloExplorer({ context, focusObject, onFocusHandled }: FocusableExplorerProps) {
-  return <ObjectExplorer context={context} kind="dlo" focusObject={focusObject} onFocusHandled={onFocusHandled} />;
+export function DloExplorer({ context, focusObject, onFocusHandled, onNavigate }: FocusableExplorerProps) {
+  return <ObjectExplorer context={context} kind="dlo" focusObject={focusObject} onFocusHandled={onFocusHandled} onNavigate={onNavigate} />;
 }
 
-export function DmoExplorer({ context, focusObject, onFocusHandled }: FocusableExplorerProps) {
-  return <ObjectExplorer context={context} kind="dmo" focusObject={focusObject} onFocusHandled={onFocusHandled} />;
+export function DmoExplorer({ context, focusObject, onFocusHandled, onNavigate }: FocusableExplorerProps) {
+  return <ObjectExplorer context={context} kind="dmo" focusObject={focusObject} onFocusHandled={onFocusHandled} onNavigate={onNavigate} />;
 }

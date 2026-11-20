@@ -20,6 +20,7 @@ import {
   exportInventoryMarkdown,
 } from '@dcat/exporters';
 import type { ErdCertaintyFilter, ErdLayoutDirection } from '@dcat/exporters';
+import { navigateFromLink } from '../components/AppShell.tsx';
 import { ErdObjectNodeComponent } from '../components/erd/ErdObjectNode.tsx';
 import { ExportMenu } from '../components/ExportMenu.tsx';
 import type { ExportMenuItem } from '../components/ExportMenu.tsx';
@@ -27,6 +28,8 @@ import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Panel, SectionHeading } from '../components/ui/index.ts';
+import { pagePath } from '../navigation.ts';
+import type { Page } from '../navigation.ts';
 import {
   applyErdPositions,
   buildErdGraph,
@@ -69,9 +72,10 @@ interface ErdViewProps {
   context: WorkspaceContext | null;
   inventory: InventorySnapshot;
   freshness: ReactNode;
+  onNavigate: (page: Page) => void;
 }
 
-function ErdExplorerView({ context, inventory, freshness }: ErdViewProps) {
+function ErdExplorerView({ context, inventory, freshness, onNavigate }: ErdViewProps) {
   const contextId = context?.contextId ?? 'none';
   const [initial] = useState(() => loadErdViewState(contextId));
   const [filter, setFilter] = useState<ErdCertaintyFilter>(initial.filter);
@@ -642,13 +646,30 @@ function ErdExplorerView({ context, inventory, freshness }: ErdViewProps) {
                   </tbody>
                 </table>
               </div>
-              {selectedEdge ? (
-                <p className="rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
-                  Selected edge: <span className="mono">{selectedEdge.data?.joinField}</span>
-                  {' · '}{selectedEdge.data?.certainty}
-                  {selectedEdge.data?.status ? ` · ${selectedEdge.data.status}` : ''}
-                </p>
-              ) : null}
+              {selectedEdge ? (() => {
+                const href = `${pagePath('change-impact')}?target=${encodeURIComponent(`relationship:${selectedEdge.id}`)}`;
+                return (
+                  <div className="rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
+                    <p>
+                      Selected edge: <span className="mono">{selectedEdge.data?.joinField}</span>
+                      {' · '}{selectedEdge.data?.certainty}
+                      {selectedEdge.data?.status ? ` · ${selectedEdge.data.status}` : ''}
+                    </p>
+                    <a
+                      href={href}
+                      onClick={(event) => {
+                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                        event.preventDefault();
+                        window.history.replaceState(null, '', href);
+                        onNavigate('change-impact');
+                      }}
+                      className="mt-2 inline-block font-semibold text-brand underline underline-offset-2"
+                    >
+                      Analyze impact
+                    </a>
+                  </div>
+                );
+              })() : null}
             </div>
           ) : (
             <p className="text-sm text-ink-soft">
@@ -665,13 +686,13 @@ function ErdExplorerView({ context, inventory, freshness }: ErdViewProps) {
   );
 }
 
-export function ErdExplorer({ context }: { context: WorkspaceContext | null }) {
+export function ErdExplorer({ context, onNavigate }: { context: WorkspaceContext | null; onNavigate: (page: Page) => void }) {
   const query = useInventory(context);
   return (
     <InventoryBoundary query={query} context={context}>
       {(inventory, freshness) => (
         <ReactFlowProvider>
-          <ErdExplorerView context={context} inventory={inventory} freshness={freshness} />
+          <ErdExplorerView context={context} inventory={inventory} freshness={freshness} onNavigate={onNavigate} />
         </ReactFlowProvider>
       )}
     </InventoryBoundary>

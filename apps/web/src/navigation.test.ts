@@ -23,6 +23,7 @@ describe('path navigation', () => {
     expect(pageHref('dashboard')).toBe('/');
     expect(pageHref('orgs')).toBe('/orgs');
     expect(pageHref('data-transforms')).toBe('/data-transforms');
+    expect(pageHref('change-impact')).toBe('/change-impact');
     expect(pageHref('about')).toBe('/about');
   });
 

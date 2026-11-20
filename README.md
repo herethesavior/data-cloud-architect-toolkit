@@ -14,7 +14,7 @@ Both modes include a clearly labelled **Demo** mode. Demo mode needs no Salesfor
 - Repository: https://github.com/herethesavior/data-cloud-architect-toolkit
 - Hosted site: https://sfdcat.pages.dev/
 
-> Release status: local discovery, hosted live-org inventory, the outbound bridge, and CI are in place. This release adds the **Data Stream Explorer** described under [What changed](README.md#what-changed).
+> Release status: local discovery, hosted live-org inventory, the outbound bridge, and CI are in place. The current release adds the **Change Impact Analyzer** and the latest stability pass described under [What changed](README.md#what-changed).
 
 ## Quick start
 
@@ -93,7 +93,7 @@ The pairing code is one-time and short-lived. **Step 1** also contains the bridg
 
 - Salesforce CLI owns authentication. DCAT never asks for or stores usernames, passwords, tokens, SFDX auth URLs, or client secrets. The browser's inventory cache holds metadata snapshots only.
 - The browser never runs `sf`. Hosted mode uses an outbound bridge that polls the Worker; it needs no open inbound port or tunnel.
-- The relay accepts only six typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `transform.get`, and `mode.set`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
+- The relay accepts only seven typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `transform.get`, `mode.set`, and `bridge.update`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
 - Process output is redacted before it is returned to the browser. Bridge storage contains only the relay URL, agent token, and version, written with mode `600`; it never reads the CLI credential store.
 - The local connector binds only to `127.0.0.1` and validates Host and Origin headers.
 - There is no hosted OAuth. `/api/auth/*` paths are intentionally removed and return `404`.
@@ -153,6 +153,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 - **Exports:** available from each explorer's **Export** menu. Live exports first show a short notice that the file contains org metadata. All exports stay local. The ERD Explorer adds a portable Mermaid `.mmd` export; the lineage explorer adds SVG, Mermaid, JSON, and Markdown exports of the visible flow.
 - **ERD Explorer:** pan, zoom, drag objects, fit or reset the view, toggle the grid and minimap, and use full screen. Auto-layout can arrange objects left-to-right or top-to-bottom and sort them by connections or alphabetically. Object search and detail panels support focusing one object or relationship. Certainty distinguishes source-confirmed links from inferred or unknown links. Layout and viewport preferences are stored per workspace context in this browser only.
 - **Data Lineage Explorer:** trace source systems → streams → DLOs → mappings/transforms → DMOs on one canvas. Filter by step type, link grounding, or Data Space; trace upstream/downstream paths; inspect field mappings, provenance, and integrity gaps; and jump to the owning explorer. Solid links come from snapshot metadata, dashed links are explicitly DCAT-derived, and dotted links name objects missing from the snapshot. Layout, filters, and viewport preferences are stored per workspace context in this browser only.
+- **Change Impact Analyzer:** select a DLO, DMO, field, or relationship to review grounded upstream and downstream dependencies before a change. Direct and all-path results are separate, inferred links are labelled, and field-level impact is shown only when the current snapshot names that field. No new metadata is fetched.
 
 ## Screens
 
@@ -167,9 +168,11 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 | Data Transform Explorer | Transform overview, lineage, definition, runs, schedules, and raw metadata. |
 | ERD Explorer | Interactive relationship canvas with drag, zoom/pan, full screen, auto-layout, search, details, certainty filtering, and local exports. |
 | Data Lineage Explorer | End-to-end grounded flow across sources, streams, DLOs, mappings, transforms, and DMOs with path tracing, gap detection, details, and local exports. |
+| Change Impact Analyzer | Grounded upstream and downstream dependency review for a DLO, DMO, field, or relationship, with direct/all-path scopes and evidence labels. |
 | Data Dictionary | Unified field reference. |
 | Settings & Diagnostics | Connector and CLI status plus privacy summary. |
 | Help | Task-first documentation with quick answers, connection and status guidance, a question-to-explorer map, link-grounding rules, a filterable glossary, privacy limits, and contact links. Topics are URL-addressable so reload, back/forward, and shared links keep your place. |
+| About DCAT | Product story, boundaries, roadmap context, and a full-screen deck view. |
 
 The demo inventory is fully labelled and intentionally healthy. It contains eight DLOs, eight DMOs, seven field-level mappings, six streams, five transforms, and nine labelled ERD relationships so the explorers can be evaluated without implying that live data was discovered. The lineage explorer joins those families into 30 steps and 43 links, including source connector nodes, transform inputs/outputs, and explicit derived links; no references are missing in demo mode.
 
@@ -263,7 +266,10 @@ Live-site checks covered `/api/health`, `/api/relay/status`, built assets, and t
 
 ## What changed
 
-- The new **Data Stream Explorer** lists streams with their source connector, target DLO, status, cadence, and provenance. Command-search stream results open it directly, and its detail drawer keeps the shared breadcrumb, tab, copy, and no-scrim behavior.
+- The new **Change Impact Analyzer** traces grounded upstream and downstream dependencies from a selected DLO, DMO, field, or relationship. It separates direct from all-path impact, labels inferred and missing paths, and shows field-level impact only when the current snapshot names that field.
+- Stream details and exports now show resolved source-connector and configured-connection labels from Data 360 lookups while keeping the raw connector code stable for lineage, joins, and exports.
+- A stability pass fixed progressive ERD refresh, normalized case-insensitive joins across explorers, and polished the dashboard hero without changing tested copy or CTA labels.
+- The **Data Stream Explorer** lists streams with their source connector, target DLO, status, cadence, and provenance. Command-search stream results open it directly, and its detail drawer keeps the shared breadcrumb, tab, copy, and no-scrim behavior.
 - Shared drawers and menus now restore focus only after close animations finish, allow Tab to leave an open export menu, and show a visible message when clipboard access is blocked.
 - Connected orgs are classified as sandbox or production from CLI metadata (`isSandbox`, `isScratch`, `isDevHub`) plus safe URL inference. A hyphenated Developer Edition host is no longer mislabeled as a sandbox, and older bridges returning `unknown` are normalized in the web client.
 - Switching between demo and live cancels in-flight org fetches, clears the shared org cache, and filters `demo-fixture` orgs out of live views.

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { MouseEvent } from 'react';
 import {
   downloadTextFile,
   exportInventoryCsv,
@@ -15,11 +16,22 @@ import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, DataTable, Panel, SearchField } from '../components/ui/index.ts';
 import type { DataTableColumn } from '../components/ui/index.ts';
 import { useInventory } from '../lib/useInventory.ts';
+import { pageHref, pagePath } from '../navigation.ts';
+import type { Page } from '../navigation.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 import type { DictionaryRow } from '../lib/inventory.ts';
 import type { InventorySnapshot } from '@dcat/core';
 
-const columns: DataTableColumn<DictionaryRow>[] = [
+function impactTargetId(row: DictionaryRow): string {
+  return `field:${row.objectType.toLowerCase()}:${row.objectApiName}:${row.field.apiName}`;
+}
+
+function impactHref(row: DictionaryRow): string {
+  return `${pagePath('change-impact')}?target=${encodeURIComponent(impactTargetId(row))}`;
+}
+
+function makeColumns(onNavigate?: (page: Page) => void): DataTableColumn<DictionaryRow>[] {
+  return [
   {
     key: 'object',
     header: 'Object',
@@ -44,7 +56,27 @@ const columns: DataTableColumn<DictionaryRow>[] = [
     render: (row) => (row.field.isPrimaryKey ? <Badge tone="success">Primary</Badge> : <span className="text-ink-faint">—</span>),
   },
   { key: 'space', header: 'Data space', render: (row) => <span className="mono">{row.dataSpace}</span>, hideBelow: 'lg' },
+  {
+    key: 'impact',
+    header: <span className="sr-only">Impact</span>,
+    render: (row) => {
+      const href = impactHref(row);
+      const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
+        if (!onNavigate) return;
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+        event.preventDefault();
+        window.history.replaceState(null, '', href);
+        onNavigate('change-impact');
+      };
+      return (
+        <a href={href} onClick={onClick} className="text-xs font-semibold text-brand underline underline-offset-2">
+          Analyze impact
+        </a>
+      );
+    },
+  },
 ];
+}
 
 type ExportFormat = 'json' | 'csv' | 'markdown';
 
@@ -56,11 +88,12 @@ function exportText(inventory: InventorySnapshot, format: ExportFormat): { conte
   return { contents: exportInventoryJson(inventory), mimeType: 'application/json', extension: 'json' };
 }
 
-export function DataDictionary({ context }: { context: WorkspaceContext | null }) {
+export function DataDictionary({ context, onNavigate }: { context: WorkspaceContext | null; onNavigate?: (page: Page) => void }) {
   const query = useInventory(context);
   const [search, setSearch] = useState('');
   const [type, setType] = useState<'all' | 'DLO' | 'DMO'>('all');
   const [message, setMessage] = useState('');
+  const columns = makeColumns(onNavigate);
 
   return (
     <InventoryBoundary query={query} context={context}>
