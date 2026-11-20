@@ -215,6 +215,12 @@ const explorerRows: { question: string; label: string; shows: string; page: Page
     shows: 'Sources → streams → DLOs → transforms → DMOs',
     page: 'lineage',
   },
+  {
+    question: 'What would a change affect before I make it?',
+    label: 'Change Impact Analyzer',
+    shows: 'Grounded upstream and downstream dependencies for a DLO, DMO, field, or relationship',
+    page: 'change-impact',
+  },
 ];
 
 const linkLegend = [
@@ -238,6 +244,7 @@ const linkLegend = [
 const navigationTips = [
   'Search metadata from anywhere with Ctrl K (⌘K on Mac).',
   'Filter and search inside each explorer instead of scanning every row.',
+  'Use Change Impact Analyzer to review direct and all-path dependencies before a change; the result is limited to metadata named in the current snapshot.',
   'On the canvases, drag nodes, zoom, pan, and use Fit to frame the graph.',
   'Filters, layout, positions, and viewport persist per org, so returning to a view keeps your place.',
   'Exports are generated locally and only when you choose a format.',
@@ -274,7 +281,7 @@ const privacyItems: { title: string; body: string; icon: IconName }[] = [
   },
   {
     title: 'Typed operations only',
-    body: 'The relay accepts only cli.status, org.list, org.connect, inventory.get, transform.get, and mode.set. There is no arbitrary command, URL proxy, shell, or SOQL.',
+    body: 'The relay accepts only cli.status, org.list, org.connect, inventory.get, transform.get, mode.set, and bridge.update. There is no arbitrary command, URL proxy, shell, or SOQL.',
     icon: 'route',
   },
   {
@@ -334,6 +341,10 @@ const glossaryGroups: { title: string; terms: { term: string; definition: string
       {
         term: 'Data Lineage Explorer',
         definition: 'An end-to-end view of source systems, streams, DLOs, mappings, transforms, and DMOs. Solid links are named in metadata, dashed links are derived, and missing references appear as gaps.',
+      },
+      {
+        term: 'Change Impact Analyzer',
+        definition: 'A review of upstream and downstream dependencies for one selected DLO, DMO, field, or relationship. It reuses the same grounded snapshot and labels direct, transitive, derived, and missing paths separately instead of guessing.',
       },
     ],
   },
@@ -690,7 +701,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
     },
     {
       id: 'about',
-      label: 'About & contact',
+      label: 'Contact',
       content: (
         <div className="space-y-5">
           <Panel>

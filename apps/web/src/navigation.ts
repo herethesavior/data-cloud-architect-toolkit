@@ -9,6 +9,7 @@ export type Page =
   | 'data-transforms'
   | 'erd'
   | 'lineage'
+  | 'change-impact'
   | 'dictionary'
   | 'settings'
   | 'help'
@@ -43,6 +44,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'data-transforms', label: 'Data Transform Explorer' },
       { id: 'erd', label: 'ERD Explorer' },
       { id: 'lineage', label: 'Data Lineage Explorer' },
+      { id: 'change-impact', label: 'Change Impact Analyzer' },
     ],
   },
   {
@@ -72,6 +74,7 @@ export const PAGE_TITLES: Record<Page, string> = {
   'data-transforms': 'Data Transform Explorer',
   erd: 'ERD Explorer',
   lineage: 'Data Lineage Explorer',
+  'change-impact': 'Change Impact Analyzer',
   dictionary: 'Data Dictionary',
   settings: 'Settings & Diagnostics',
   help: 'Help',

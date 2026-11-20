@@ -44,12 +44,14 @@ describe('local data controls', () => {
   it('removes saved layouts for every context without touching other preferences', () => {
     window.localStorage.setItem('dcat.erd.v1.demo:demo-uat', '{}');
     window.localStorage.setItem('dcat.lineage.v1.live:org:00D', '{}');
+    window.localStorage.setItem('dcat.impact.v1.live:org:00D', '{}');
     window.localStorage.setItem('dcat.theme', 'dark');
 
     clearDcatSavedLayouts();
 
     expect(window.localStorage.getItem('dcat.erd.v1.demo:demo-uat')).toBeNull();
     expect(window.localStorage.getItem('dcat.lineage.v1.live:org:00D')).toBeNull();
+    expect(window.localStorage.getItem('dcat.impact.v1.live:org:00D')).toBeNull();
     expect(window.localStorage.getItem('dcat.theme')).toBe('dark');
   });
 

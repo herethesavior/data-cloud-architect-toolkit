@@ -16,6 +16,7 @@ export type SeoPage =
   | 'data-transforms'
   | 'erd'
   | 'lineage'
+  | 'change-impact'
   | 'dictionary'
   | 'settings'
   | 'help'
@@ -69,6 +70,10 @@ export const PAGE_SEO: Record<SeoPage, PageSeo> = {
   lineage: {
     title: 'Data Lineage Explorer | DCAT',
     description: 'Trace source-to-target data lineage and see which relationships are confirmed, derived, or unresolved.',
+  },
+  'change-impact': {
+    title: 'Change Impact Analyzer | DCAT',
+    description: 'Review upstream and downstream dependencies for a DLO, DMO, field, or relationship before changing Data Cloud metadata.',
   },
   dictionary: {
     title: 'Data Dictionary | DCAT',

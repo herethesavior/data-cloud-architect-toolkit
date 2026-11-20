@@ -292,7 +292,7 @@ const chapters: Chapter[] = [
         </div>
         <OutcomeStrip
           title="From isolated metadata to connected architecture."
-          detail="ERD + lineage + field-level mapping + transform context + data dictionary."
+          detail="ERD + Data Lineage Explorer + Change Impact Analyzer + field-level mapping + transform context + data dictionary."
         />
       </>
     ),
@@ -309,7 +309,7 @@ const chapters: Chapter[] = [
         <div className="story-grid story-grid-5">
           <Step number="01" title="Connect">Use the Salesforce CLI authentication already on the architect’s machine.</Step>
           <Step number="02" title="Inventory">Review available Data Spaces, streams, objects, mappings, and transforms.</Step>
-          <Step number="03" title="Explore">Open ERD, lineage, mapping, stream, and transform views.</Step>
+          <Step number="03" title="Explore">Open ERD, Data Lineage Explorer, Change Impact Analyzer, mapping, stream, and transform views.</Step>
           <Step number="04" title="Investigate">Trace dependencies, inspect provenance, and identify partial or unresolved areas.</Step>
           <Step number="05" title="Share">Export diagrams and metadata summaries for reviews and handovers.</Step>
         </div>
@@ -449,6 +449,7 @@ const chapters: Chapter[] = [
           items={[
             { title: 'Inventory & explorers', detail: 'Data Spaces, DLOs, DMOs, streams, mappings, transforms.' },
             { title: 'ERD & lineage', detail: 'Relationship visualization, tracing, evidence and gaps.' },
+            { title: 'Change Impact Analyzer', detail: 'Review grounded upstream and downstream dependencies before a change.' },
             { title: 'Dictionary & exports', detail: 'Field reference and reusable architecture artifacts.' },
           ]}
         />
@@ -458,8 +459,8 @@ const chapters: Chapter[] = [
           description="Help teams answer what changed and what might be affected."
           items={[
             { title: 'Environment comparison', detail: 'Compare metadata snapshots across Dev, UAT, and Production.' },
-            { title: 'Change impact analysis', detail: 'Summarize upstream and downstream dependencies before change.' },
             { title: 'Architecture health checks', detail: 'Flag reviewable gaps, inconsistencies, and unresolved references.' },
+            { title: 'Guided change reviews', detail: 'Turn dependency findings into review checklists.' },
           ]}
         />
         <RoadmapColumn

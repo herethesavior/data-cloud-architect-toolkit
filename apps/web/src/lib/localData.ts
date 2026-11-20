@@ -3,7 +3,7 @@ import { clearPersistedCache } from './queryPersistence.ts';
 import { isContextScopedQuery } from './workspace.ts';
 
 const DCAT_KEY_PREFIX = 'dcat.';
-const LAYOUT_PREFIXES = ['dcat.erd.v1.', 'dcat.lineage.v1.'] as const;
+const LAYOUT_PREFIXES = ['dcat.erd.v1.', 'dcat.lineage.v1.', 'dcat.impact.v1.'] as const;
 
 function localStorageKeys(): string[] {
   try {

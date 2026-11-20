@@ -33,6 +33,7 @@ const pageIcons: Record<Page, IconName> = {
   'data-transforms': 'sparkles',
   erd: 'graph',
   lineage: 'route',
+  'change-impact': 'shield',
   dictionary: 'book',
   settings: 'settings',
   help: 'info',

@@ -38,6 +38,7 @@ import { DataLineageExplorer } from './pages/DataLineageExplorer.tsx';
 import { DataDictionary } from './pages/DataDictionary.tsx';
 import { HelpPage } from './pages/HelpPage.tsx';
 import { AboutPage } from './pages/AboutPage.tsx';
+import { ChangeImpactAnalyzer } from './pages/ChangeImpactAnalyzer.tsx';
 import { isLegacyPageHash, pageFromLocation, pagePath, writePagePath } from './navigation.ts';
 import type { Page } from './navigation.ts';
 
@@ -575,9 +576,9 @@ export function App() {
       case 'data-spaces':
         return <DataSpaces context={context} />;
       case 'dlos':
-        return <DloExplorer context={context} focusObject={focusObject} onFocusHandled={() => setFocusObject(null)} />;
+        return <DloExplorer context={context} focusObject={focusObject} onFocusHandled={() => setFocusObject(null)} onNavigate={navigate} />;
       case 'dmos':
-        return <DmoExplorer context={context} focusObject={focusObject} onFocusHandled={() => setFocusObject(null)} />;
+        return <DmoExplorer context={context} focusObject={focusObject} onFocusHandled={() => setFocusObject(null)} onNavigate={navigate} />;
       case 'mappings':
         return <MappingExplorer context={context} />;
       case 'data-streams':
@@ -597,11 +598,13 @@ export function App() {
           />
         );
       case 'erd':
-        return <ErdExplorer context={context} />;
+        return <ErdExplorer context={context} onNavigate={navigate} />;
       case 'lineage':
         return <DataLineageExplorer context={context} onNavigate={navigate} />;
+      case 'change-impact':
+        return <ChangeImpactAnalyzer context={context} onNavigate={navigate} />;
       case 'dictionary':
-        return <DataDictionary context={context} />;
+        return <DataDictionary context={context} onNavigate={navigate} />;
       case 'help':
         return <HelpPage onNavigate={navigate} />;
       case 'about':
