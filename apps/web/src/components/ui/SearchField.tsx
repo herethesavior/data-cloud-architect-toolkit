@@ -11,7 +11,7 @@ interface SearchFieldProps {
 export function SearchField({
   value,
   onChange,
-  placeholder = 'Search…',
+  placeholder = 'Search...',
   label = 'Search',
   className = '',
 }: SearchFieldProps) {

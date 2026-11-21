@@ -17,7 +17,7 @@ export function NoOrgState() {
   ) : undefined;
 
   if (actions?.orgList.status === 'checking') {
-    return <LoadingState label="Checking for Salesforce orgs…" action={recovery} />;
+    return <LoadingState label="Checking for Salesforce orgs..." />;
   }
   if (actions?.orgList.status === 'error') {
     return (

@@ -68,7 +68,7 @@ function PanelTitle({ icon, title, description }: { icon: IconName; title: strin
 const quickAnswers = [
   {
     question: 'What do I need to get started?',
-    answer: 'Nothing for demo mode — it uses labelled sample data and works offline. Live mode reads metadata through Salesforce CLI on this machine, or through your local bridge when you use the hosted site.',
+    answer: 'Nothing for demo mode - it uses labelled sample data and works offline. Live mode reads metadata through Salesforce CLI on this machine, or through your local bridge when you use the hosted site.',
   },
   {
     question: 'Can DCAT change anything in my org?',
@@ -125,7 +125,7 @@ const connectSteps = [
   },
   {
     title: 'Select an org',
-    body: 'Choose an alias in the header picker, or connect a new one in Org Connections. Credentials stay in Salesforce CLI — DCAT never sees them.',
+    body: 'Choose an alias in the header picker, or connect a new one in Org Connections. Credentials stay in Salesforce CLI - DCAT never sees them.',
   },
   {
     title: 'Check Discovery Health',
@@ -212,7 +212,7 @@ const explorerRows: { question: string; label: string; shows: string; page: Page
   {
     question: 'What is the whole path, end to end?',
     label: 'Data Lineage Explorer',
-    shows: 'Sources → streams → DLOs → transforms → DMOs',
+    shows: 'Sources -> streams -> DLOs -> transforms -> DMOs',
     page: 'lineage',
   },
   {
@@ -227,7 +227,7 @@ const linkLegend = [
   {
     className: 'border-solid',
     label: 'Named in metadata',
-    detail: 'The link is written in the current snapshot — for example a stream target or a declared mapping.',
+    detail: 'The link is written in the current snapshot - for example a stream target or a declared mapping.',
   },
   {
     className: 'border-dashed',
@@ -242,7 +242,7 @@ const linkLegend = [
 ];
 
 const navigationTips = [
-  'Search metadata from anywhere with Ctrl K (⌘K on Mac).',
+  'Search metadata from anywhere with Ctrl K (Cmd+K on Mac).',
   'Filter and search inside each explorer instead of scanning every row.',
   'Use Change Impact Analyzer to review direct and all-path dependencies before a change; the result is limited to metadata named in the current snapshot.',
   'On the canvases, drag nodes, zoom, pan, and use Fit to frame the graph.',
@@ -505,7 +505,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
             <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-soft">
               Loaded orgs and inventories are saved in this browser and restored after a reload, so menu navigation does not
               retrieve them again. The Updated chip shows their age. Use Refresh for a token-protected retrieval; you can
-              cancel an in-flight refresh, and a failure in one metadata family never erases another family’s results.
+              cancel an in-flight refresh, and a failure in one metadata family never erases another family's results.
             </p>
           </Panel>
 
@@ -641,7 +641,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
             <p className="mt-2 max-w-3xl text-sm text-ink-soft">
               Operational controls such as audit logging and a formal retention policy are not part of this release.
               Add them before using the hosted edition for regulated data. Report security issues privately through the
-              repository’s security advisory feature, and never include real credentials or customer data in a report.
+              repository's security advisory feature, and never include real credentials or customer data in a report.
             </p>
           </Panel>
         </div>
@@ -663,7 +663,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
               value={termFilter}
               onChange={setTermFilter}
               label="Filter glossary terms"
-              placeholder="Filter terms…"
+              placeholder="Filter terms..."
             />
             <p className="mt-2 text-xs text-ink-soft" aria-live="polite">
               Showing {matchedTerms} of {glossaryGroups.reduce((total, group) => total + group.terms.length, 0)} terms
@@ -686,7 +686,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
               </div>
             ) : (
               <p className="mt-4 rounded-lg border border-line bg-surface-alt p-3 text-sm text-ink-soft">
-                No glossary terms match “{termFilter}”. Try a shorter word such as “mapping” or “gap”.
+                No glossary terms match "{termFilter}". Try a shorter word such as "mapping" or "gap".
               </p>
             )}
           </Panel>

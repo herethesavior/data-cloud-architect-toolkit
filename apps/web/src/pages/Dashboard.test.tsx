@@ -94,8 +94,8 @@ describe('Dashboard discovery health', () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('Checking for Salesforce orgs…');
-    expect(screen.getByRole('button', { name: 'Use demo mode' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Checking for Salesforce orgs...');
+    expect(screen.queryByRole('button', { name: 'Use demo mode' })).not.toBeInTheDocument();
     expect(screen.queryByText('No org selected')).not.toBeInTheDocument();
   });
 });

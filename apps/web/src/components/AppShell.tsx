@@ -20,7 +20,7 @@ import { Badge, Button } from './ui/index.ts';
 
 const shortcutLabel = /Mac|iPhone|iPad/.test(
   typeof navigator === 'undefined' ? '' : `${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`,
-) ? '⌘K' : 'Ctrl K';
+) ? 'CmdK' : 'Ctrl K';
 
 const pageIcons: Record<Page, IconName> = {
   dashboard: 'dashboard',
@@ -136,7 +136,7 @@ function OrgPicker({ orgs, loading, selectedAlias, onSelectOrg }: OrgPickerProps
         disabled={orgs.length === 0}
         aria-busy={loading}
       >
-        {orgs.length === 0 ? <option value="">{loading ? 'Checking for orgs…' : 'No orgs available'}</option> : null}
+        {orgs.length === 0 ? <option value="">{loading ? 'Checking for orgs...' : 'No orgs available'}</option> : null}
         {orgs.map((org) => (
           <option key={org.alias} value={org.alias}>
             {org.alias}
@@ -314,7 +314,7 @@ export function AppShell({
           <div className="rounded-lg bg-surface-alt p-3">
             <div
               className="sidebar-footer-heading flex items-center gap-2 text-ink-soft"
-              title={hosted ? 'Hosted edition — read-only metadata' : 'Local-first — read-only metadata'}
+              title={hosted ? 'Hosted edition - read-only metadata' : 'Local-first - read-only metadata'}
             >
               <Icon name="shield" size={16} />
               <p className="label-xs sidebar-label">{hosted ? 'Hosted edition' : 'Local-first'}</p>
@@ -396,7 +396,7 @@ export function AppShell({
                 <Badge
                   tone={badge.tone}
                   dot
-                  title={activeMode === 'demo' ? 'Sample metadata only — no Salesforce org is connected.' : undefined}
+                  title={activeMode === 'demo' ? 'Sample metadata only - no Salesforce org is connected.' : undefined}
                 >
                   {badge.label}
                 </Badge>
@@ -414,7 +414,7 @@ export function AppShell({
                       : 'Live mode reads metadata through your local Salesforce CLI.'
                     : 'Demo mode uses sample metadata; no Salesforce org is connected.'}
                 >
-                  <span className="hidden sm:inline">{isTogglingMode ? 'Switching…' : `Use ${activeMode === 'demo' ? 'live' : 'demo'}`}</span>
+                  <span className="hidden sm:inline">{isTogglingMode ? 'Switching...' : `Use ${activeMode === 'demo' ? 'live' : 'demo'}`}</span>
                 </Button>
                 <Button
                   variant="quiet"

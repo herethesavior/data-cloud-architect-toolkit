@@ -68,7 +68,7 @@ function InventoryProgressBanner({
             disabled={isResuming}
             className="min-h-8 rounded-lg border border-line-strong bg-surface px-3 text-xs font-semibold text-brand transition-colors hover:bg-surface-alt disabled:opacity-50"
           >
-            {isResuming ? 'Resuming…' : 'Resume loading'}
+            {isResuming ? 'Resuming...' : 'Resume loading'}
           </button>
         ) : null}
       </div>
@@ -102,7 +102,7 @@ function InventoryRefreshSkeleton({ onCancel }: { onCancel?: () => void }) {
           <p className="label-xs">Inventory refresh</p>
           <h3 className="mt-1 flex items-center gap-2 text-base font-semibold text-ink">
             <Icon name="refresh" size={17} className="animate-spin text-brand" />
-            Getting the latest metadata…
+            Getting the latest metadata...
           </h3>
           <p className="mt-1 text-sm text-ink-soft">Previous results return when the refresh finishes.</p>
         </div>

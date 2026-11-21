@@ -61,7 +61,7 @@ function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: strin
         {error ? (
           <ErrorState message={error} onRetry={onRetry} />
         ) : (
-          <LoadingState label={hosted ? 'Loading the hosted workbench…' : 'Connecting to the local connector…'} />
+          <LoadingState label={hosted ? 'Loading the hosted workbench...' : 'Connecting to the local connector...'} />
         )}
       </div>
     </div>
@@ -249,10 +249,10 @@ export function App() {
         void queryClient.refetchQueries({ queryKey: orgsQueryKey(result.mode) });
         setModeError('');
         setModeNotice(requestedMode === 'demo'
-          ? 'Now using demo mode — sample metadata only.'
+          ? 'Now using demo mode - sample metadata only.'
           : hosted
-            ? 'Now using live mode — reading metadata through your local SF CLI bridge.'
-            : 'Now using live mode — reading metadata from your Salesforce CLI.');
+            ? 'Now using live mode - reading metadata through your local SF CLI bridge.'
+            : 'Now using live mode - reading metadata from your Salesforce CLI.');
       } finally {
         modePendingRef.current = false;
       }

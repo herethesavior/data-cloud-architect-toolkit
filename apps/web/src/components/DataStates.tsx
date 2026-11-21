@@ -8,7 +8,7 @@ interface LoadingStateProps {
   action?: ReactNode;
 }
 
-export function LoadingState({ label = 'Loading…', action }: LoadingStateProps) {
+export function LoadingState({ label = 'Loading...', action }: LoadingStateProps) {
   return (
     <div className="panel flex flex-col gap-3 px-6 py-9" role="status" aria-live="polite" aria-busy="true">
       <div className="flex items-center gap-2 text-sm text-ink-soft">

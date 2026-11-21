@@ -179,7 +179,7 @@ export function discoveryStages(
     const skipped = capabilities.find((capability) => capability.status === 'not-started');
 
     let detail = 'Waiting for the inventory snapshot.';
-    if (state === 'loading') detail = `Checking ${stage.families.map(humanizeResource).join(', ')}…`;
+    if (state === 'loading') detail = `Checking ${stage.families.map(humanizeResource).join(', ')}...`;
     else if (blocking) detail = resourceStatusMessage(blocking);
     else if (unsupported.length === capabilities.length && capabilities.length > 0) {
       detail = resourceStatusMessage(unsupported[0]!);
