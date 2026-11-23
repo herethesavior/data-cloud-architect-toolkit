@@ -1522,6 +1522,7 @@ html[data-theme='dark'] .dcat-mark {
   .story-mock-flow strong,
   .story-mock-flow span {
     display: block;
+    overflow-wrap: break-word;
     font-size: var(--story-note-size);
   }
 
@@ -2548,6 +2549,8 @@ html[data-theme='dark'] .dcat-mark {
     .story-row { grid-template-columns: 2rem minmax(0, 1fr); }
     .story-row-detail { grid-column: 2; text-align: left; }
     .story-mock-kpis { grid-template-columns: repeat(2, 1fr); }
+    .story-mock-flow { flex-wrap: wrap; }
+    .story-mock-flow > div { flex-basis: calc(33.333% - 0.2rem); }
     .deck-slide .story-grid-demo,
     .deck-slide .story-cover { grid-template-columns: 1fr; }
     .slide-capabilities,
