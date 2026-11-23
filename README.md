@@ -89,11 +89,19 @@ The pairing code is one-time and short-lived. **Step 1** also contains the bridg
 | Mark unsupported, forbidden, and partial results explicitly. | Turn a permissions problem into an empty dataset. |
 | Keep exports local and user-initiated. | Send org metadata to a third party. |
 
+## Use cases
+
+- **Architecture discovery during delivery:** join a project faster by inventorying Data Spaces, streams, DLOs, mappings, transforms, and DMOs, then tracing dependencies and gaps.
+- **Business-to-technical alignment:** start from a business attribute and follow it back through the model, mappings, streams, and source systems with labelled evidence.
+- **After Hypercare:** when the support period ends and the customer owns the org, use DCAT to confirm the handed-over metadata, bring new admins and architects up to speed, review dependencies before changes, refresh the snapshot as the org evolves, and export diagrams for internal runbooks. Discovery stays read-only: DCAT complements runbooks, monitoring, and change approvals, and it never displays customer or transaction records.
+
+The same three use cases are told as a story on **About DCAT**, including a presentable full-screen deck.
+
 ## Safety boundaries
 
 - Salesforce CLI owns authentication. DCAT never asks for or stores usernames, passwords, tokens, SFDX auth URLs, or client secrets. The browser's inventory cache holds metadata snapshots only.
 - The browser never runs `sf`. Hosted mode uses an outbound bridge that polls the Worker; it needs no open inbound port or tunnel.
-- The relay accepts only seven typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `transform.get`, `mode.set`, and `bridge.update`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
+- The relay accepts only nine typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `inventory.start`, `inventory.status`, `transform.get`, `mode.set`, and `bridge.update`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
 - Process output is redacted before it is returned to the browser. Bridge storage contains only the relay URL, agent token, and version, written with mode `600`; it never reads the CLI credential store.
 - The local connector binds only to `127.0.0.1` and validates Host and Origin headers.
 - There is no hosted OAuth. `/api/auth/*` paths are intentionally removed and return `404`.
@@ -171,8 +179,8 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 | Change Impact Analyzer | Grounded upstream and downstream dependency review for a DLO, DMO, field, or relationship, with direct/all-path scopes and evidence labels. |
 | Data Dictionary | Unified field reference. |
 | Settings & Diagnostics | Connector and CLI status plus privacy summary. |
-| Help | Task-first documentation with quick answers, connection and status guidance, a question-to-explorer map, link-grounding rules, a filterable glossary, privacy limits, and contact links. Topics are URL-addressable so reload, back/forward, and shared links keep your place. |
-| About DCAT | Product story, boundaries, roadmap context, and a full-screen deck view. |
+| Help | Task-first documentation with quick answers, connection and status guidance, after-Hypercare support steps, a question-to-explorer map, link-grounding rules, a filterable glossary, privacy limits, and contact links. Topics are URL-addressable so reload, back/forward, and shared links keep your place. |
+| About DCAT | Product story with three use cases (discovery, alignment, and post-Hypercare handover), boundaries, roadmap context, and a full-screen deck with a stable slide frame. |
 
 The demo inventory is fully labelled and intentionally healthy. It contains eight DLOs, eight DMOs, seven field-level mappings, six streams, five transforms, and nine labelled ERD relationships so the explorers can be evaluated without implying that live data was discovered. The lineage explorer joins those families into 30 steps and 43 links, including source connector nodes, transform inputs/outputs, and explicit derived links; no references are missing in demo mode.
 

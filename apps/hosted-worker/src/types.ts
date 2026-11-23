@@ -1,4 +1,4 @@
-import type { CliStatus, RelayOperation } from '@dcat/core';
+import type { CliStatus, RelayOperation, RelayResponse } from '@dcat/core';
 
 export type ConnectorMode = 'live' | 'demo';
 
@@ -32,6 +32,23 @@ export interface RelaySessionRecord {
   pairingCode: string | null;
   pairingExpiresAt: number | null;
   request: RelayRequestRecord | null;
+}
+
+/** Agent-owned state. Kept out of the session record so polls cannot clobber browser writes. */
+export interface RelayAgentState {
+  lastSeenAt: number | null;
+  agentVersion: string | null;
+  cli: CliStatus;
+}
+
+export interface RelayClaimRecord {
+  sessionId: string;
+  claimedAt: number;
+}
+
+export interface RelayResponseRecord {
+  response: RelayResponse;
+  respondedAt: number;
 }
 
 export interface Env {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AboutPage } from './AboutPage.tsx';
 
@@ -24,7 +24,13 @@ describe('AboutPage', () => {
 
     expect(screen.getByRole('heading', { name: 'About DCAT', level: 2 })).toBeInTheDocument();
     expect(screen.getByText('Scroll through the story below, or open the full-screen deck.')).toBeInTheDocument();
-    expect(screen.getByRole('navigation', { name: 'Chapters' })).toBeInTheDocument();
+    const chapterNav = screen.getByRole('navigation', { name: 'Chapters' });
+    expect(chapterNav).toBeInTheDocument();
+    expect(within(chapterNav).getAllByRole('button')).toHaveLength(14);
+    expect(screen.getByRole('button', { name: '07 Handover' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Carry the architecture forward after Hypercare/ })).toBeInTheDocument();
+    expect(screen.getAllByText(/When the support period ends, the customer owns the org/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/It does not replace runbooks, monitoring, or change approvals/).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Present' })).toHaveClass('btn-secondary');
     expect(screen.getByRole('heading', { name: /See the architecture behind the data/ })).toBeInTheDocument();
     expect(screen.getAllByText(/See the architecture\. Understand the connections\. Make better decisions\./).length).toBeGreaterThan(0);

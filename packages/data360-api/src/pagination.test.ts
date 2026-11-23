@@ -19,14 +19,22 @@ describe('opaque continuation handling', () => {
     }
   });
 
-  it('follows URL-style continuations on the allowlisted REST path', () => {
+  it('ignores URL-style continuations that leave the current REST endpoint', () => {
     const continuation = extractContinuation({
       done: false,
       nextRecordsUrl: '/services/data/v65.0/query/01gABC?locator=abc%2B123',
     });
     expect(continuation.nextPath).toBe('services/data/v65.0/query/01gABC?locator=abc%2B123');
     expect(buildNextPath('services/data/v65.0/ssot/data-lake-objects', continuation))
-      .toBe('services/data/v65.0/query/01gABC?locator=abc%2B123');
+      .toBe('services/data/v65.0/ssot/data-lake-objects');
+  });
+
+  it('ignores continuations that switch API version or resource family', () => {
+    const continuation = extractContinuation({
+      nextPageUrl: '/services/data/v68.0/ssot/data-model-objects?offset=20',
+    });
+    expect(buildNextPath('services/data/v65.0/ssot/data-lake-objects', continuation))
+      .toBe('services/data/v65.0/ssot/data-lake-objects');
   });
 
   it('follows Salesforce nextPageUrl responses for DLOs and streams', () => {

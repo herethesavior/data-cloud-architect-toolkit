@@ -65,7 +65,7 @@ function makeColumns(onNavigate?: (page: Page) => void): DataTableColumn<Diction
         if (!onNavigate) return;
         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
         event.preventDefault();
-        window.history.replaceState(null, '', href);
+        window.history.pushState(null, '', href);
         onNavigate('change-impact');
       };
       return (

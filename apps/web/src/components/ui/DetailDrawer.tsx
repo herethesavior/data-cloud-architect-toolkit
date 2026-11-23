@@ -76,6 +76,13 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
     previousFocusRef.current = null;
   }, [rendered]);
 
+  // Some callers unmount the drawer directly instead of closing it, so the
+  // rendered=false transition above never runs for them.
+  useEffect(() => () => {
+    const trigger = previousFocusRef.current;
+    if (trigger?.isConnected) trigger.focus();
+  }, []);
+
   if (!rendered) return null;
 
   return createPortal(

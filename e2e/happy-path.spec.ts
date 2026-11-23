@@ -201,7 +201,7 @@ test('org switcher and details page use the authenticated demo org', async ({ pa
   const picker = page.getByLabel('Selected organization');
   await expect(picker).toHaveValue('demo-uat');
 
-  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
   await expect(page.locator('h1')).toHaveText('Org Connections');
   await expect(
     page.getByRole('table', { name: 'Authenticated Salesforce orgs' }).getByText('demo-uat', { exact: true }),
@@ -671,7 +671,7 @@ test('switching demo to live clears demo orgs from the live inventory list', asy
   await mockConnector(page, state);
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
   await expect(
     page.getByRole('table', { name: 'Authenticated Salesforce orgs' }).getByText('demo-uat', { exact: true }),
   ).toBeVisible();
@@ -707,7 +707,7 @@ test('switching to live shows an org-check skeleton while the org list is pendin
   await expect(page.locator('#main-content').getByRole('button', { name: 'Use demo mode' })).toHaveCount(0);
   await expect(page.getByLabel('Selected organization')).toContainText('Checking for orgs...');
 
-  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
   await expect(status).toBeVisible();
   await expect(page.getByText('No authenticated orgs yet')).toHaveCount(0);
 
@@ -723,7 +723,7 @@ test('live orgs can be hidden from DCAT and restored without logging out', async
   await mockConnector(page, state);
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
   const table = page.getByRole('table', { name: 'Authenticated Salesforce orgs' });
   await expect(table.getByText('prod-org', { exact: true })).toBeVisible();
 
@@ -1142,6 +1142,18 @@ test('contextual Analyze impact link opens Change Impact Analyzer for a field', 
   await expect(page.locator('h1')).toHaveText('Change Impact Analyzer');
   await expect(page).toHaveURL(/\/change-impact\?target=field/);
   await expect(page.getByText('Direct dependencies')).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dlos$/);
+  await expect(page.getByRole('table', { name: 'DLO Explorer results' })).toBeVisible();
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
+  await page.getByRole('table', { name: 'Data dictionary fields' }).getByRole('link', { name: 'Analyze impact' }).first().click();
+  await expect(page).toHaveURL(/\/change-impact\?target=field/);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dictionary$/);
+  await expect(page.getByRole('table', { name: 'Data dictionary fields' })).toBeVisible();
 });
 
 test('export menu consolidates local export formats', async ({ page }) => {
@@ -1287,7 +1299,7 @@ test('header stays compact and groups workspace controls', async ({ page }) => {
   await expect(header.getByRole('button', { name: 'Search metadata' })).toBeVisible();
   await expect(header.getByLabel('Selected organization')).toBeVisible();
   await expect(header.getByText('DEMO DATA', { exact: true })).toBeVisible();
-  await expect(header.getByRole('button', { name: 'Open org connection details' })).toContainText('Details');
+  await expect(header.getByRole('button', { name: 'Open org connection details' })).toHaveCount(0);
   await expect(header.getByRole('button', { name: 'Help' })).toContainText('Help');
   await expect(header.locator('h1')).toHaveAttribute('title', 'Dashboard');
   await expect(header.getByRole('link', { name: 'DCAT home' })).toBeHidden();
@@ -1297,6 +1309,13 @@ test('header stays compact and groups workspace controls', async ({ page }) => {
   const phoneHeight = (await header.boundingBox())?.height ?? 0;
   expect(phoneHeight).toBeLessThanOrEqual(112);
   await expect(header.getByRole('link', { name: 'DCAT home' })).toBeVisible();
+  const picker = header.getByLabel('Selected organization');
+  await expect(picker).toBeVisible();
+  expect(await picker.evaluate((element) => {
+    const control = element.getBoundingClientRect();
+    const bar = element.closest('header')!.getBoundingClientRect();
+    return control.left >= bar.left && control.right <= bar.right && control.bottom <= bar.bottom;
+  })).toBe(true);
 });
 
 test('brand mark is transparent and the header adapts across screen sizes', async ({ page }) => {
@@ -1315,18 +1334,24 @@ test('brand mark is transparent and the header adapts across screen sizes', asyn
     await page.setViewportSize({ width, height: 900 });
     const metrics = await page.evaluate(() => {
       const bar = document.querySelector('header')!;
+      const barRect = bar.getBoundingClientRect();
+      const picker = bar.querySelector('select')!.getBoundingClientRect();
       const buttons = [...bar.querySelectorAll('button')].filter((button) => button.getBoundingClientRect().width > 0);
       return {
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        headerHeight: bar.getBoundingClientRect().height,
+        headerHeight: barRect.height,
         contextHeight: bar.querySelector('.app-header-context')!.getBoundingClientRect().height,
         minButtonHeight: Math.min(...buttons.map((button) => button.getBoundingClientRect().height)),
+        orgPickerWidth: picker.width,
+        orgPickerInsideHeader: picker.left >= barRect.left && picker.right <= barRect.right && picker.bottom <= barRect.bottom,
       };
     });
     expect(metrics.overflow, `horizontal overflow at ${width}px`).toBe(0);
     expect(metrics.headerHeight, `header height at ${width}px`).toBeLessThanOrEqual(width < 640 ? 112 : 80);
     expect(metrics.contextHeight, `context height at ${width}px`).toBeLessThanOrEqual(56);
     expect(metrics.minButtonHeight, `touch target at ${width}px`).toBeGreaterThanOrEqual(36);
+    expect(metrics.orgPickerWidth, `org picker width at ${width}px`).toBeGreaterThanOrEqual(72);
+    expect(metrics.orgPickerInsideHeader, `org picker inside header at ${width}px`).toBe(true);
   }
 
   await page.setViewportSize({ width: 768, height: 900 });
@@ -1501,7 +1526,9 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
   await expect(page.locator('h1')).toHaveText('About DCAT');
   await expect(page.getByRole('heading', { name: 'About DCAT', level: 2 })).toBeVisible();
   await expect.poll(() => new URL(page.url()).pathname).toBe('/about');
-  await expect(page.getByRole('navigation', { name: 'Chapters' }).getByRole('button')).toHaveCount(13);
+  await expect(page.getByRole('navigation', { name: 'Chapters' }).getByRole('button')).toHaveCount(14);
+  await expect(page.getByRole('navigation', { name: 'Chapters' }).getByRole('button', { name: /07 Handover/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Carry the architecture forward after Hypercare/ })).toBeVisible();
   await expect(page.locator('.story-flow').getByText(/Created in a personal capacity/)).toBeVisible();
 
   await page.getByRole('navigation', { name: 'Chapters' }).getByRole('button', { name: /04 Flow/ }).click();
@@ -1512,10 +1539,16 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   await expect(deck.locator('.deck-counter')).toContainText('01');
   const deckScroll = await page.evaluate(() => Math.round(window.scrollY));
+  const slideHeights: number[] = [];
+  const recordSlideHeight = async () => {
+    const box = await deck.locator('.deck-slide').boundingBox();
+    slideHeights.push(Math.round(box?.height ?? 0));
+  };
+  await recordSlideHeight();
 
   const slideTop = await deck.locator('.deck-slide').evaluate((element) => Math.round(element.getBoundingClientRect().top));
   await page.evaluate(() => {
-    for (let index = 0; index < 12; index += 1) {
+    for (let index = 0; index < 13; index += 1) {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', repeat: index > 0, bubbles: true }));
     }
   });
@@ -1530,10 +1563,24 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
 
   await deck.getByRole('button', { name: 'Next slide' }).click();
   await expect(deck.locator('.deck-counter')).toContainText('03');
+  await recordSlideHeight();
   await page.keyboard.press('ArrowRight');
   await expect(deck.locator('.deck-counter')).toContainText('04');
+  await recordSlideHeight();
+
+  const pipelineColumns = await deck.locator('.story-pipeline').evaluate(
+    (element) => getComputedStyle(element).gridTemplateColumns.split(' ').length,
+  );
+  expect(pipelineColumns, 'flow pipeline columns').toBe(3);
+  const pipelineRows = await deck.locator('.story-flow-node').evaluateAll(
+    (nodes) => new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().top))).size,
+  );
+  expect(pipelineRows, 'flow pipeline rows').toBe(2);
+
   await page.keyboard.press('End');
-  await expect(deck.locator('.deck-counter')).toContainText('13');
+  await expect(deck.locator('.deck-counter')).toContainText('14');
+  await recordSlideHeight();
+  expect(new Set(slideHeights).size, `slide heights: ${slideHeights.join(', ')}`).toBe(1);
 
   await deck.getByRole('button', { name: 'Exit presentation' }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
@@ -1738,4 +1785,36 @@ test('browser history during a live org switch keeps the selected context', asyn
   await page.goForward();
   await expect(page.locator('h1')).toHaveText('Dashboard');
   await expect(page.getByText('Sandbox Account')).toHaveCount(0);
+});
+
+test('a failed refresh does not follow the user into another org', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  let failRefresh = false;
+  await page.route('**/api/orgs/*/inventory/session', async (route: Route) => {
+    const url = new URL(route.request().url());
+    const alias = decodeURIComponent(url.pathname.split('/').filter(Boolean)[2] ?? '');
+    if (failRefresh && alias === 'prod-org') {
+      await route.fulfill({
+        status: 500,
+        json: { error: { code: 'COMMAND_FAILED', message: 'Production CLI is unavailable.' } },
+      });
+      return;
+    }
+    const inventory = state.inventories[alias] ?? demoInventory;
+    await route.fulfill({ json: { sessionId: 'e2e-session', snapshot: inventory } });
+  });
+  await page.goto('/');
+
+  const picker = page.getByLabel('Selected organization');
+  await expect(picker).toHaveValue('prod-org');
+  await expect(page.getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
+  failRefresh = true;
+  await page.getByRole('button', { name: 'Refresh inventory' }).click();
+  await expect(page.getByRole('alert')).toContainText(/Refresh failed: Production CLI is unavailable\./);
+
+  await picker.selectOption('sandbox-org');
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

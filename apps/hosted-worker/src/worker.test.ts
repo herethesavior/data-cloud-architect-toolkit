@@ -6,16 +6,20 @@ import type { Env, KVNamespaceLike } from './types.ts';
 
 class FakeKV implements KVNamespaceLike {
   readonly store = new Map<string, string>();
+  readonly puts: string[] = [];
+  readonly deletes: string[] = [];
 
   async get(key: string): Promise<string | null> {
     return this.store.get(key) ?? null;
   }
 
   async put(key: string, value: string): Promise<void> {
+    this.puts.push(key);
     this.store.set(key, value);
   }
 
   async delete(key: string): Promise<void> {
+    this.deletes.push(key);
     this.store.delete(key);
   }
 }
@@ -201,6 +205,83 @@ describe('hosted bridge relay', () => {
       body: JSON.stringify({ agentToken: paired.agentToken, cli }),
     }, env);
     expect(staleAgent.status).toBe(401);
+  });
+
+  it('keeps agent heartbeats and responses from overwriting browser session state', async () => {
+    const kv = new FakeKV();
+    const env = makeEnv(kv);
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      version: '0.1.4',
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const sessionWritesAfterPair = kv.puts.filter((key) => key.startsWith('session:')).length;
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    await postJson('/api/relay/respond', {
+      agentToken: paired.agentToken,
+      response: { id: created.id, ok: true, result: cli },
+    }, {}, env);
+    const status = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect((await status.json() as { mode: string }).mode).toBe('live');
+
+    expect(kv.puts.filter((key) => key.startsWith('session:'))).toHaveLength(sessionWritesAfterPair);
+    expect(kv.puts).toContain(`relay:request:${session.cookie.slice('dcat_session='.length).split(';')[0]}`);
+    expect(kv.puts).toContain(`relay:claim:${created.id}`);
+    expect(kv.puts).toContain(`relay:response:${created.id}`);
+  });
+
+  it('serves current agent CLI state and cancels relayed requests when the mode changes', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    const updatedCli = { installed: true, version: '2.159.7', error: null };
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli: updatedCli }, {}, env);
+
+    const cliStatus = await app.request('/api/cli/status', { headers: session.headers }, env);
+    expect(await cliStatus.json()).toEqual(updatedCli);
+    const health = await app.request('/api/health', { headers: session.headers }, env);
+    expect((await health.json() as { cli: { version: string } }).cli.version).toBe('2.159.7');
+
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/mode', { mode: 'demo' }, session.headers, env);
+    const cancelled = await app.request(`/api/relay/requests/${created.id}`, {
+      headers: session.headers,
+    }, env);
+    expect(cancelled.status).toBe(404);
+  });
+
+  it('keeps a concurrent mode change when a browser queues a request', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const [created, mode] = await Promise.all([
+      postJson<{ id: string }>('/api/relay/requests', { operation: 'cli.status' }, session.headers, env),
+      postJson<{ mode: string }>('/api/mode', { mode: 'demo' }, session.headers, env),
+    ]);
+
+    expect(created.id).toMatch(/\S/);
+    expect(mode).toEqual({ mode: 'demo' });
+    const status = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect((await status.json() as { mode: string }).mode).toBe('demo');
   });
 
   it('rejects unsupported operations and mismatched responses without queueing work', async () => {

@@ -184,8 +184,14 @@ export class SalesforceCliAdapter {
 
     // A hidden child window stops the CLI's `open` call from raising the login
     // browser on Windows, so this is the one command that keeps its console.
-    const login = this.run(args, { timeoutMs: LOGIN_TIMEOUT_MS, windowsHide: false });
+    // Once either side wins the race, aborting also kills the CLI child so a
+    // successful browser login does not leave a visible process behind.
     const controller = new AbortController();
+    const login = this.run(args, {
+      timeoutMs: LOGIN_TIMEOUT_MS,
+      windowsHide: false,
+      signal: controller.signal,
+    });
     const detected = this.waitForOrgConnected(safeAlias, baseline, {
       timeoutMs: LOGIN_TIMEOUT_MS,
       signal: controller.signal,

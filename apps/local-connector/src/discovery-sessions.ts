@@ -127,7 +127,6 @@ export async function startDiscoverySession(
   if (reusedId && !options.refresh) {
     const existing = state.discoverySessions.get(reusedId);
     if (existing && existing.alias === org.alias && !isExpired(existing)) {
-      await existing.firstBatch;
       return resultOf(existing);
     }
   }
@@ -137,6 +136,13 @@ export async function startDiscoverySession(
     const previous = state.discoverySessions.get(previousId);
     if (previous) stopSession(state, previous);
   }
+
+  // A caller-supplied id must not silently replace another org's live session.
+  const conflicting = options.sessionId ? state.discoverySessions.get(options.sessionId) : undefined;
+  if (conflicting && conflicting.alias !== org.alias) {
+    throw new CliError('INVALID_ARGUMENT', 'This discovery session belongs to another org.');
+  }
+  if (conflicting) stopSession(state, conflicting);
 
   const sessionId = options.sessionId ?? newId();
   const generation = `${Date.now().toString(36)}-${newId().slice(0, 8)}`;
@@ -158,7 +164,6 @@ export async function startDiscoverySession(
     state: progressive,
     latest: progressiveSnapshot(progressive),
     controller,
-    firstBatch: Promise.resolve(),
     running: false,
   };
   state.discoverySessions.set(sessionId, record);
@@ -187,7 +192,6 @@ export async function getDiscoverySession(
     record.latest = progressiveSnapshot(record.state);
     record.updatedAt = Date.now();
   }
-  await record.firstBatch;
   ensureRunner(state, record);
   return resultOf(record);
 }

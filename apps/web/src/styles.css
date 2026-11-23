@@ -1690,22 +1690,47 @@ html[data-theme='dark'] .dcat-mark {
     padding: clamp(0.5rem, 1.5vw, 1.25rem);
   }
 
+  /* Every slide occupies the same stage box. Only the body scrolls, so the
+     frame, title, and controls stay put as chapters change length. */
   .deck-slide {
     display: flex;
     flex: 1;
     min-width: 0;
     min-height: 0;
-    align-items: flex-start;
+    align-items: stretch;
     justify-content: center;
-    overflow: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
+    overflow: hidden;
   }
 
   .deck-slide .story-chapter {
     width: 100%;
     max-width: 96rem;
+    height: 100%;
+    min-height: 0;
     margin: 0 auto;
+  }
+
+  .deck-slide .story-chapter-head,
+  .deck-slide .story-note {
+    flex: 0 0 auto;
+  }
+
+  .deck-slide .story-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding-right: 0.25rem;
+    scrollbar-gutter: stable;
+  }
+
+  /* Six stages fit two readable rows instead of six narrow columns. */
+  .deck-slide .story-pipeline {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .deck-slide .story-flow-node:nth-child(3)::after {
+    display: none;
   }
 
   .deck-hint {
@@ -1752,6 +1777,10 @@ html[data-theme='dark'] .dcat-mark {
     .story-pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .story-flow-node:nth-child(2)::after,
     .story-flow-node:nth-child(4)::after { display: none; }
+    .deck-slide .story-pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .deck-slide .story-flow-node:nth-child(3)::after { display: block; }
+    .deck-slide .story-flow-node:nth-child(2)::after,
+    .deck-slide .story-flow-node:nth-child(4)::after { display: none; }
     .story-row { grid-template-columns: 2rem minmax(0, 1fr); }
     .story-row-detail { grid-column: 2; text-align: left; }
     .story-mock-kpis { grid-template-columns: repeat(2, 1fr); }

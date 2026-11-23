@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { isValidTransformId } from '@dcat/core';
 import { demoInventory, demoOrgs, demoTransformBundles } from '@dcat/test-fixtures';
 import { sendError, sendRouteError } from '../errors.ts';
-import { getBridgeStatus, RELAY_VERSION } from '../relay.ts';
+import { bridgeStatusForSession, clearRelayRequest, RELAY_VERSION } from '../relay.ts';
 import { hasValidCsrf, resolveSession, saveSession } from '../session.ts';
 import type { Env, SessionRecord } from '../types.ts';
 
@@ -21,7 +21,7 @@ export function apiRoutes() {
   app.get('/api/health', async (context) => {
     try {
       const session = await resolveSession(context, context.env);
-      const status = getBridgeStatus(session, new URL(context.req.url).origin);
+      const status = await bridgeStatusForSession(context.env, session, new URL(context.req.url).origin);
       return context.json({
         status: 'ok',
         mode: session.mode,
@@ -37,7 +37,8 @@ export function apiRoutes() {
   app.get('/api/cli/status', async (context) => {
     try {
       const session = await resolveSession(context, context.env);
-      return context.json(getBridgeStatus(session, new URL(context.req.url).origin).cli);
+      const status = await bridgeStatusForSession(context.env, session, new URL(context.req.url).origin);
+      return context.json(status.cli);
     } catch (error) {
       return sendRouteError(context, error);
     }
@@ -49,7 +50,8 @@ export function apiRoutes() {
       if (!hasValidCsrf(context, session)) {
         return sendError(context, 401, 'INVALID_SESSION_TOKEN', 'Refresh the page and try again.');
       }
-      return context.json(getBridgeStatus(session, new URL(context.req.url).origin).cli);
+      const status = await bridgeStatusForSession(context.env, session, new URL(context.req.url).origin);
+      return context.json(status.cli);
     } catch (error) {
       return sendRouteError(context, error);
     }
@@ -76,6 +78,7 @@ export function apiRoutes() {
       }
       session.mode = body.mode;
       session.relay.request = null;
+      await clearRelayRequest(context.env, session);
       await saveSession(context.env, session);
       return context.json({ mode: session.mode });
     } catch (error) {

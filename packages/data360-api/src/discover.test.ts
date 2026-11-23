@@ -241,6 +241,21 @@ describe('live Data 360 discovery', () => {
     expect(inventory.warnings).toHaveLength(0);
   });
 
+  it('does not follow a continuation into an unrelated REST endpoint', async () => {
+    const crossFamilyPath = 'services/data/v65.0/query/01gABC?locator=abc%2B123';
+    const cli = fakeCli({
+      [`${base}/data-lake-objects`]: JSON.stringify({
+        records: [{ apiName: 'Only_DLO__dll', fields: [] }],
+        nextPageUrl: `/${crossFamilyPath}`,
+      }),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+
+    expect(pathCalls(cli, crossFamilyPath)).toBe(0);
+    expect(inventory.dlos).toHaveLength(1);
+    expect(inventory.warnings.some((warning) => warning.message.includes('different REST endpoint'))).toBe(true);
+  });
+
   it('queries mappings only for source-enabled DMOs and leaves disabled DMOs as explicit gaps', async () => {
     const enabledPath = buildMappingPath('Enabled_DMO__dlm', '65.0', 'default');
     const cli = fakeCli({
@@ -305,6 +320,20 @@ describe('live Data 360 discovery', () => {
       expect.objectContaining({ family: 'dmos', severity: 'error' }),
     ]));
     expect(inventory.relationships.some((edge) => edge.certainty === 'confirmed')).toBe(false);
+  });
+
+  it('reports a forbidden DMO lookup instead of a skipped mappings capability', async () => {
+    const cli = fakeCli({
+      [dmoPath]: new CliError('COMMAND_FAILED', forbiddenRestOutput),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const capability = inventory.capabilities.find((entry) => entry.family === 'mappings');
+
+    expect(capability).toMatchObject({ status: 'forbidden', itemCount: 0 });
+    expect(capability?.message).toMatch(/Access denied/);
+    expect(inventory.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: 'mappings', code: 'FORBIDDEN', severity: 'error' }),
+    ]));
   });
 
   it('keeps raw connector codes when connector lookups fail', async () => {

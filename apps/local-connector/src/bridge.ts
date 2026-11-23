@@ -5,7 +5,7 @@ import { CliError, safeErrorMessage, validateAlias } from '@dcat/salesforce-cli'
 import { clearDiscoverySessions, getDiscoverySession, startDiscoverySession } from './discovery-sessions.ts';
 import { refreshCliStatus } from './state.ts';
 import type { AppState } from './state.ts';
-import { resolveInventory, resolveOrgs } from './routes/orgs.ts';
+import { invalidateOrgState, resolveInventory, resolveOrgs } from './routes/orgs.ts';
 
 export interface RelayHttp {
   post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T>;
@@ -107,7 +107,7 @@ export async function executeRelayOperation(
     case 'org.connect': {
       const alias = validateAlias(task.alias);
       await state.cli.loginOrg(alias, task.instanceUrl, task.browser);
-      state.orgsCache = null;
+      invalidateOrgState(state);
       // `loginOrg` can finish as soon as the CLI writes the authorization, so
       // use the fast local listing to answer instead of a slow network probe.
       const local = await state.cli.listOrgsLocal().catch(() => []);

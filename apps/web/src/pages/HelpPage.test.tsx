@@ -19,7 +19,13 @@ describe('HelpPage', () => {
     expect(screen.getByRole('heading', { name: 'Help & documentation' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Start here' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('What do I need to get started?')).toBeInTheDocument();
+    expect(screen.getByText('What do I use after Hypercare?')).toBeInTheDocument();
+    expect(screen.getByText(/When the customer owns the org, use DCAT/)).toBeInTheDocument();
+    expect(screen.getByText('After Hypercare: customer-owned support')).toBeInTheDocument();
     expect(screen.getByText(/Will I see customer or transaction records/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Read the handover use case' }));
+    expect(onNavigate).toHaveBeenCalledWith('about');
 
     await user.click(screen.getByRole('button', { name: 'Open Data Lineage Explorer' }));
     expect(onNavigate).toHaveBeenCalledWith('lineage');
@@ -42,6 +48,7 @@ describe('HelpPage', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Explore & trace' }));
     expect(await screen.findByText('Pick the view for your question')).toBeInTheDocument();
+    expect(screen.getByText(/The header picker switches the active org/)).toBeInTheDocument();
     expect(screen.getByText('Named in metadata')).toBeInTheDocument();
     expect(screen.getByText(/never presented as a declared edge/)).toBeInTheDocument();
 
@@ -66,6 +73,7 @@ describe('HelpPage', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Status & privacy' }));
     expect(await screen.findByText(/Read metadata with allowlisted, read-only Salesforce CLI commands/)).toBeInTheDocument();
+    expect(screen.getByText(/inventory.start, inventory.status, transform.get/)).toBeInTheDocument();
     expect(screen.getByText('No hosted OAuth')).toBeInTheDocument();
     expect(screen.getByText(/\/api\/auth\/\* routes are intentionally removed and return 404/)).toBeInTheDocument();
   });

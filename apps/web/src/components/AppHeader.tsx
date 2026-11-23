@@ -26,7 +26,6 @@ interface AppHeaderProps {
   orgsLoading: boolean;
   selectedAlias: string | null;
   onSelectOrg: (alias: string) => void;
-  onGoToOrgs: () => void;
   theme: ThemeController;
   onOpenNavigation: () => void;
   sidebarCollapsed: boolean;
@@ -81,7 +80,6 @@ export function AppHeader({
   orgsLoading,
   selectedAlias,
   onSelectOrg,
-  onGoToOrgs,
   theme,
   onOpenNavigation,
   sidebarCollapsed,
@@ -155,19 +153,10 @@ export function AppHeader({
         </div>
 
         <div className="app-header-context" role="group" aria-label="Workspace context">
-          <div className="flex items-center gap-1.5">
-            <div className="w-20 shrink-0 lg:w-24 xl:w-40 2xl:w-52">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <div className="w-28 shrink-0 lg:w-32 xl:w-40 2xl:w-52">
               <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
             </div>
-            <Button
-              variant="quiet"
-              onClick={onGoToOrgs}
-              aria-label="Open org connection details"
-              className="shrink-0 px-2"
-            >
-              <Icon name="plug" size={17} />
-              <span className="hidden xl:inline">Details</span>
-            </Button>
           </div>
           <div className="flex items-center gap-1.5 border-l border-line pl-1.5">
             <Badge

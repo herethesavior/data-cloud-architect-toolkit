@@ -5,7 +5,7 @@ import type { InventorySnapshot, OrgSummary } from '@dcat/core';
 import { discoverInventory } from '@dcat/data360-api';
 import { validateAlias } from '@dcat/salesforce-cli';
 import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
-import { getDiscoverySession, startDiscoverySession } from '../discovery-sessions.ts';
+import { clearDiscoverySessions, getDiscoverySession, startDiscoverySession } from '../discovery-sessions.ts';
 import type { AppState } from '../state.ts';
 import { hasSessionToken, requireSessionToken } from '../security.ts';
 import { sendRouteError } from './shared.ts';
@@ -52,6 +52,13 @@ async function findOrg(state: AppState, alias: string): Promise<OrgSummary | nul
   return orgs.find((entry) => entry.alias === alias) ?? null;
 }
 
+/** An alias can be re-pointed to a different org, so none of its state survives login. */
+export function invalidateOrgState(state: AppState): void {
+  state.orgsCache = null;
+  state.inventoryCache = null;
+  clearDiscoverySessions(state);
+}
+
 export function registerOrgRoutes(app: FastifyInstance, state: AppState): void {
   app.get('/api/orgs', async (_request, reply) => {
     try {
@@ -82,7 +89,7 @@ export function registerOrgRoutes(app: FastifyInstance, state: AppState): void {
       }
       const alias = validateAlias(parsed.data.alias);
       await state.cli.loginOrg(alias, parsed.data.instanceUrl, parsed.data.browser);
-      state.orgsCache = null;
+      invalidateOrgState(state);
       const orgs = await resolveOrgs(state, true);
       return (
         orgs.find((org) => org.alias === alias) ?? {

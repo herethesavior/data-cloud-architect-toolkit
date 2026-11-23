@@ -79,6 +79,10 @@ const quickAnswers = [
     answer: 'Open the Dashboard for a health snapshot, then pick the explorer that matches your question. The Explore & trace tab maps common questions to the right view.',
   },
   {
+    question: 'What do I use after Hypercare?',
+    answer: 'When the customer owns the org, use DCAT to confirm the current metadata, trace source-to-target paths, review changes, and export diagrams for internal runbooks. Discovery stays read-only.',
+  },
+  {
     question: 'Will I see customer or transaction records?',
     answer: 'Never. DCAT reads configuration and schema metadata only.',
   },
@@ -102,6 +106,21 @@ const firstSteps: { title: string; body: string; action: string; page: Page }[] 
     body: 'Connect an org, then check Discovery Health before you trust what an explorer is showing you.',
     action: 'Open Org Connections',
     page: 'orgs',
+  },
+];
+
+const supportSteps = [
+  {
+    title: 'Confirm the handover',
+    body: 'Compare the documented design with the metadata that is actually in the org before the delivery team steps away.',
+  },
+  {
+    title: 'Onboard the customer team',
+    body: 'Trace one source-to-target path in Data Lineage Explorer and inspect the DLOs, DMOs, mappings, and transforms behind it.',
+  },
+  {
+    title: 'Support ongoing changes',
+    body: 'Refresh the snapshot as the org evolves, review dependencies before a change, and export diagrams for internal runbooks.',
   },
 ];
 
@@ -242,6 +261,7 @@ const linkLegend = [
 ];
 
 const navigationTips = [
+  'The header picker switches the active org. Open Org Connections from the sidebar to authenticate a new alias.',
   'Search metadata from anywhere with Ctrl K (Cmd+K on Mac).',
   'Filter and search inside each explorer instead of scanning every row.',
   'Use Change Impact Analyzer to review direct and all-path dependencies before a change; the result is limited to metadata named in the current snapshot.',
@@ -281,7 +301,7 @@ const privacyItems: { title: string; body: string; icon: IconName }[] = [
   },
   {
     title: 'Typed operations only',
-    body: 'The relay accepts only cli.status, org.list, org.connect, inventory.get, transform.get, mode.set, and bridge.update. There is no arbitrary command, URL proxy, shell, or SOQL.',
+    body: 'The relay accepts only cli.status, org.list, org.connect, inventory.get, inventory.start, inventory.status, transform.get, mode.set, and bridge.update. There is no arbitrary command, URL proxy, shell, or SOQL.',
     icon: 'route',
   },
   {
@@ -411,7 +431,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
             <PanelTitle
               icon="info"
               title="Quick answers"
-              description="The four questions people ask most before they explore a real org."
+              description="The questions people ask most before and after they explore a real org."
             />
             <dl className="mt-4 space-y-3">
               {quickAnswers.map((item) => (
@@ -447,6 +467,39 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
                 </li>
               ))}
             </ol>
+          </Panel>
+
+          <Panel>
+            <PanelTitle
+              icon="shield"
+              title="After Hypercare: customer-owned support"
+              description="How the incoming team keeps the architecture clear once the support period ends."
+            />
+            <ol className="mt-4 space-y-3">
+              {supportSteps.map((step, index) => (
+                <li key={step.title} className="flex gap-3 rounded-lg border border-line bg-surface-alt p-3">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-soft text-xs font-semibold text-brand">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-medium text-ink">{step.title}</p>
+                    <p className="mt-1 text-sm text-ink-soft">{step.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => onNavigate('about')}
+                icon={<Icon name="arrowRight" size={15} />}
+              >
+                Read the handover use case
+              </Button>
+              <Button variant="quiet" onClick={() => onNavigate('change-impact')}>
+                Open Change Impact Analyzer
+              </Button>
+            </div>
           </Panel>
         </div>
       ),
