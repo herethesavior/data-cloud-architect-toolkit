@@ -1691,7 +1691,8 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   /* Every slide owns the same stage box. Type and spacing respond to that box,
-     and --slide-fit is a measured last resort so no slide scrolls internally. */
+     and --slide-fit is a measured last resort for slides that would otherwise
+     scroll. Phones keep full-size text and scroll the body instead. */
   .deck-slide {
     --story-title: clamp(1.6rem, min(7cqh, 7cqw), 3.25rem);
     --story-lead: clamp(0.95rem, min(2.3cqh, 2.1cqw), 1.25rem);
@@ -2538,6 +2539,12 @@ html[data-theme='dark'] .dcat-mark {
     .deck-slide .story-body > * {
       height: auto;
       min-height: 100%;
+    }
+    /* Let cards grow with their text; a 1fr row can trap taller content here. */
+    .deck-slide .slide-diagnosis,
+    .deck-slide .slide-evidence,
+    .deck-slide .slide-guardrails {
+      grid-template-rows: auto auto;
     }
     .story-pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .story-flow-node:nth-child(2)::after,
