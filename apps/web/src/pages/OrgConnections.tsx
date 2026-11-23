@@ -96,7 +96,6 @@ export function OrgConnections({
   const [instanceUrl, setInstanceUrl] = useState('');
   const [loginBrowser, setLoginBrowser] = useState<'' | 'chrome' | 'edge' | 'firefox'>('');
   const [setupError, setSetupError] = useState('');
-  const [updateNotice, setUpdateNotice] = useState('');
   const [connectError, setConnectError] = useState('');
   const [refreshError, setRefreshError] = useState('');
   const [connectedAlias, setConnectedAlias] = useState<string | null>(null);
@@ -136,16 +135,6 @@ export function OrgConnections({
     onSuccess: () => {
       setSetupError('');
       invalidateDiagnosticsState(queryClient);
-    },
-    onError: (error: Error) => setSetupError(error.message),
-  });
-
-  const updateBridge = useMutation({
-    mutationFn: api.updateBridge,
-    onSuccess: (result) => {
-      setSetupError('');
-      setUpdateNotice(result.message);
-      invalidateBridgeState(queryClient);
     },
     onError: (error: Error) => setSetupError(error.message),
   });
@@ -415,35 +404,13 @@ export function OrgConnections({
             <ErrorState message={bridgeStatusQuery.error.message} onRetry={() => void bridgeStatusQuery.refetch()} />
           ) : null}
 
-          {!demo && status && hosted && status.paired && status.updateAvailable && status.selfUpdateSupported ? (
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-ink">
-                  Bridge update available{status.latestVersion ? ` · ${status.latestVersion}` : ''}
-                </p>
-                <p className="text-xs text-ink-soft">
-                  Running {status.agentVersion ?? 'an older version'}. Updating installs the latest npm release and restarts the bridge automatically.
-                </p>
-                {updateNotice ? <p className="mt-1 text-xs text-ink-soft" role="status">{updateNotice}</p> : null}
-              </div>
-              <Button
-                variant="secondary"
-                onClick={() => updateBridge.mutate()}
-                disabled={updateBridge.isPending}
-                icon={<Icon name="refresh" size={15} />}
-              >
-                {updateBridge.isPending ? 'Updating...' : 'Update bridge'}
-              </Button>
-            </div>
-          ) : null}
-
-          {!demo && status && hosted && status.paired && status.updateAvailable && !status.selfUpdateSupported ? (
+          {!demo && status && hosted && status.paired && status.updateAvailable ? (
             <div className="mb-3 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2.5">
               <p className="text-sm font-medium text-ink">
                 Bridge update available{status.latestVersion ? ` · ${status.latestVersion}` : ''}
               </p>
               <p className="mt-1 text-xs text-ink-soft">
-                This bridge predates in-app updates. Run the command below on this computer, then restart DCAT Bridge.
+                Running {status.agentVersion ?? 'an older version'}. Run the command below on this computer, then restart the bridge.
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <code className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink">

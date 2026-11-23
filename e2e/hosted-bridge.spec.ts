@@ -551,7 +551,7 @@ test('hosted connect detects a sandbox from its Salesforce instance URL', async 
   });
 });
 
-test('hosted bridge update button queues the allowlisted self-update operation', async ({ page }) => {
+test('hosted bridge update guidance offers a copyable command without queuing a relay task', async ({ page }) => {
   const state = createState('live');
   state.latestVersion = '0.1.5';
   await seedPreference(page, 'live');
@@ -563,13 +563,13 @@ test('hosted bridge update button queues the allowlisted self-update operation',
   await startFakeBridge(page, 'PAIR12345678');
   await page.getByRole('button', { name: 'Refresh status' }).click();
 
-  const updateButton = page.getByRole('button', { name: 'Update bridge' });
-  await expect(updateButton).toBeVisible();
+  await expect(page.getByText(/Bridge update available · 0\.1\.5/)).toBeVisible();
   await expect(page.getByText(/Running 0\.1\.4/)).toBeVisible();
-  await updateButton.click();
+  await expect(page.getByText('npm install -g @dcat-toolkit/bridge@latest')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy command' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Update bridge' })).toHaveCount(0);
 
-  await expect(page.getByText('Bridge updated and restarting.')).toBeVisible();
-  expect(state.operationBodies).toContainEqual({ operation: 'bridge.update' });
+  expect(state.operationBodies.some((operation) => operation.operation === 'bridge.update')).toBe(false);
   expect(state.authCalls).toEqual([]);
   expect(state.operations.some((operation) => operation.operation === 'shell.exec')).toBe(false);
 

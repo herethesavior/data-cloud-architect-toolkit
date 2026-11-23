@@ -499,8 +499,6 @@ export const api = {
     return normalizeOrg({ ...connected, instanceUrl: connected.instanceUrl ?? instanceUrl ?? null });
   },
   bridgeStatus,
-  updateBridge: (): Promise<{ updated: true; restarting: true; message: string }> =>
-    relayCall({ operation: 'bridge.update' }),
   relayPairing: (): Promise<RelayPairing> => requestWithToken<RelayPairing>('/api/relay/pairing', { method: 'POST' }),
   unpairBridge: (): Promise<{ paired: false }> => postJson<{ paired: false }>('/api/relay/unpair', {}),
 };

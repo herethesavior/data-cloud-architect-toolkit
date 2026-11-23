@@ -77,7 +77,7 @@ The mode choice is saved as `dcat.mode` in local browser storage. The local conn
 4. In **Step 2: Connect org**, choose an alias and, optionally, an HTTPS sandbox URL. Salesforce CLI opens your browser for login. DCAT does not collect credentials.
 5. **Step 3: View inventory** starts immediately after the org is connected. A disabled Data 360 feature is shown as **Not enabled**, not as a failed retrieval or an empty dataset.
 
-The pairing code is one-time and short-lived. **Step 1** also contains the bridge update control. The Worker checks npm for the latest bridge release, caches that answer for one hour, and shares one registry request across concurrent status checks. Connected bridges version `0.1.4` or newer can self-update; older bridges receive a fixed, copyable install command. This branch prepares bridge `0.1.5`; the hosted wizard always installs whatever version npm currently marks `@latest`.
+The pairing code is one-time and short-lived. The Worker checks npm for the latest bridge release, caches that answer for one hour, and shares one registry request across concurrent status checks. When a paired bridge is behind, **Step 1** shows a copyable `npm install -g @dcat-toolkit/bridge@latest` command to run on the bridge machine. This branch prepares bridge `0.1.5`; the hosted wizard always installs whatever version npm currently marks `@latest`.
 
 ## What DCAT does and does not do
 
