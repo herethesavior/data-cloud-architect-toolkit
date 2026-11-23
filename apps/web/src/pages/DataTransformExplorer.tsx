@@ -110,11 +110,13 @@ function runColumns(): DataTableColumn<TransformRun>[] {
       key: 'duration',
       header: 'Duration',
       hideBelow: 'lg',
+      align: 'end',
       render: (run) => typeof run.durationMs === 'number' ? `${run.durationMs} ms` : '-',
     },
     {
       key: 'records',
       header: 'Records',
+      align: 'end',
       render: (run) => typeof run.recordsProcessed === 'number' ? run.recordsProcessed.toLocaleString() : '-',
     },
   ];

@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Icon } from '../Icon.tsx';
 
 interface SearchFieldProps {
@@ -15,11 +16,14 @@ export function SearchField({
   label = 'Search',
   className = '',
 }: SearchFieldProps) {
+  const inputId = useId();
+
   return (
-    <label className={`relative block ${className}`}>
-      <span className="sr-only">{label}</span>
+    <div className={`relative ${className}`}>
+      <label htmlFor={inputId} className="sr-only">{label}</label>
       <Icon name="search" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint" />
       <input
+        id={inputId}
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -31,11 +35,11 @@ export function SearchField({
           type="button"
           onClick={() => onChange('')}
           aria-label="Clear search"
-          className="absolute top-1/2 right-2 grid size-6 -translate-y-1/2 place-items-center rounded text-ink-faint hover:bg-surface-alt hover:text-ink"
+          className="absolute top-1/2 right-2 grid size-8 -translate-y-1/2 place-items-center rounded text-ink-faint hover:bg-surface-alt hover:text-ink"
         >
           <Icon name="close" size={14} />
         </button>
       ) : null}
-    </label>
+    </div>
   );
 }

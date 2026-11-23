@@ -15,7 +15,7 @@ export function NoticeDismissButton({ label, onClick }: { label: string; onClick
       onClick={dismiss}
       aria-label={label}
       title={label}
-      className="grid size-7 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink"
+      className="grid size-8 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink"
     >
       <Icon name="close" size={14} />
     </button>

@@ -3,7 +3,7 @@ interface DcatMarkProps {
   className?: string;
 }
 
-export function DcatMark({ size = 40, className = '' }: DcatMarkProps) {
+export function DcatMark({ size = 44, className = '' }: DcatMarkProps) {
   return (
     <img
       src="/dcat-icon-192.png"
@@ -12,7 +12,7 @@ export function DcatMark({ size = 40, className = '' }: DcatMarkProps) {
       height={size}
       decoding="async"
       draggable={false}
-      className={`shrink-0 rounded-xl object-cover ${className}`}
+      className={`dcat-mark shrink-0 object-contain ${className}`}
     />
   );
 }

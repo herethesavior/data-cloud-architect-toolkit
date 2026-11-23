@@ -372,7 +372,8 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
           {
             key: 'fields',
             header: 'Fields',
-            render: (object) => <span className="font-medium tabular-nums text-ink">{object.fields.length}</span>,
+            align: 'end',
+            render: (object) => <span className="font-medium text-ink">{object.fields.length}</span>,
           },
           {
             key: 'action',

@@ -688,7 +688,7 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
                     {confidenceLabels[edge.data?.confidence ?? 'source']}
                   </Badge>
                   <span className="text-[11px] text-ink-faint">{edge.data?.kind?.replace(/-/g, ' ')}</span>
-                  {edge.data?.fieldCount ? <span className="text-[11px] text-ink-faint">{edge.data.fieldCount} fields</span> : null}
+                  {edge.data?.fieldCount ? <span className="text-[11px] tabular-nums text-ink-faint">{edge.data.fieldCount} fields</span> : null}
                 </div>
                 <p className="mono mt-1.5 truncate text-[11px] text-ink">
                   {edge.source} <span className="text-ink-faint">→</span> {edge.target}
@@ -719,7 +719,7 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
                   <p className="text-sm font-semibold text-ink">{selectedGraphNode.label}</p>
                   <p className="mono mt-0.5 break-all text-xs text-ink-faint">{selectedGraphNode.apiName}</p>
                   <p className="mt-2 text-xs text-ink-soft">
-                    {selectedGraphNode.degree} direct link{selectedGraphNode.degree === 1 ? '' : 's'}
+                    <span className="tabular-nums">{selectedGraphNode.degree}</span> direct link{selectedGraphNode.degree === 1 ? '' : 's'}
                     {selectedGraphNode.dataSpace ? ` · ${selectedGraphNode.dataSpace}` : ''}
                   </p>
                 </div>
@@ -740,7 +740,7 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
                 )}
                 {trace ? (
                   <p className="rounded-lg border border-line px-3 py-2 text-xs text-ink-soft" role="status">
-                    {trace.upstreamCount} upstream and {trace.downstreamCount} downstream steps highlighted in the visible graph.
+                    <span className="tabular-nums">{trace.upstreamCount}</span> upstream and <span className="tabular-nums">{trace.downstreamCount}</span> downstream steps highlighted in the visible graph.
                   </p>
                 ) : null}
                 {selectedPage ? (

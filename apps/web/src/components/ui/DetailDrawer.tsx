@@ -104,11 +104,11 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
       >
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            {breadcrumbs ? <p className="label-xs mb-1 truncate text-ink-faint">{breadcrumbs}</p> : null}
-            <h2 id={titleId} className="truncate text-base font-semibold text-ink">
+            {breadcrumbs ? <p title={typeof breadcrumbs === 'string' ? breadcrumbs : undefined} className="label-xs mb-1 truncate text-ink-faint">{breadcrumbs}</p> : null}
+            <h2 id={titleId} title={typeof title === 'string' ? title : undefined} className="truncate text-base font-semibold text-ink">
               {title}
             </h2>
-            {subtitle ? <p className="mono mt-1 truncate text-ink-soft">{subtitle}</p> : null}
+            {subtitle ? <p title={subtitle} className="mono mt-1 truncate text-ink-soft">{subtitle}</p> : null}
             {headerActions ? <div className="mt-2 flex flex-wrap gap-1">{headerActions}</div> : null}
           </div>
           <button

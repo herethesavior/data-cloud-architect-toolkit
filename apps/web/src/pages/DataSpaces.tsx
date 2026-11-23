@@ -101,7 +101,7 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
             {message ? <p className="mb-4 text-xs text-ink-soft" role="status">{message}</p> : null}
 
             {spaces.length === 0 ? (
-              <Panel className="text-center text-sm text-ink-soft">No data spaces match that search.</Panel>
+              <Panel role="status" className="text-center text-sm text-ink-soft">No data spaces match that search.</Panel>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {spaces.map((space) => {
@@ -141,7 +141,7 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
                         ))}
                       </div>
                       <div className="p-5">
-                        <SectionHeading title="Linked objects" />
+                        <SectionHeading title="Linked objects" as="h4" />
                         {linkedObjects.length === 0 ? (
                           <p className="text-sm text-ink-soft">No objects are assigned to this space.</p>
                         ) : (

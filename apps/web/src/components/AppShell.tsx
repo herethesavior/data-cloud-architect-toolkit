@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import type { InventorySnapshot, OrgSummary } from '@dcat/core';
-import { NAV_GROUPS, PAGE_TITLES, pageHref } from '../navigation.ts';
+import { NAV_GROUPS, pageHref } from '../navigation.ts';
 import type { Page } from '../navigation.ts';
 import { buildCommandResults } from '../lib/commandSearch.ts';
 import type { CommandResult } from '../lib/commandSearch.ts';
@@ -11,16 +11,12 @@ import { getSidebarCollapsed, setSidebarCollapsed } from '../lib/preferences.ts'
 import { workspaceBadge } from '../lib/workspace.ts';
 import type { WorkspaceContext, WorkspaceMode } from '../lib/workspace.ts';
 import type { ThemeController } from '../lib/useTheme.ts';
+import { AppHeader } from './AppHeader.tsx';
 import { CommandPalette } from './CommandPalette.tsx';
 import { DcatMark } from './DcatMark.tsx';
 import { Icon } from './Icon.tsx';
 import type { IconName } from './Icon.tsx';
 import { MetadataResultDialog } from './MetadataResultDialog.tsx';
-import { Badge, Button } from './ui/index.ts';
-
-const shortcutLabel = /Mac|iPhone|iPad/.test(
-  typeof navigator === 'undefined' ? '' : `${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`,
-) ? 'CmdK' : 'Ctrl K';
 
 const pageIcons: Record<Page, IconName> = {
   dashboard: 'dashboard',
@@ -117,37 +113,6 @@ function NavigationList({ page, onNavigate, label, collapsed = false }: Navigati
   );
 }
 
-interface OrgPickerProps {
-  orgs: OrgSummary[];
-  loading: boolean;
-  selectedAlias: string | null;
-  onSelectOrg: (alias: string) => void;
-}
-
-function OrgPicker({ orgs, loading, selectedAlias, onSelectOrg }: OrgPickerProps) {
-  return (
-    <label className="relative block">
-      <span className="sr-only">Selected organization</span>
-      <Icon name="database" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-faint" size={16} />
-      <select
-        value={selectedAlias ?? ''}
-        onChange={(event) => onSelectOrg(event.target.value)}
-        className="input h-9 appearance-none py-1.5 pr-8 pl-9"
-        disabled={orgs.length === 0}
-        aria-busy={loading}
-      >
-        {orgs.length === 0 ? <option value="">{loading ? 'Checking for orgs...' : 'No orgs available'}</option> : null}
-        {orgs.map((org) => (
-          <option key={org.alias} value={org.alias}>
-            {org.alias}
-          </option>
-        ))}
-      </select>
-      <Icon name="chevronDown" className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-ink-faint" size={14} />
-    </label>
-  );
-}
-
 interface MobileNavProps {
   page: Page;
   onNavigate: (page: Page) => void;
@@ -241,8 +206,6 @@ export function AppShell({
     [paletteOpen, inventory],
   );
   const previousDataEpochRef = useRef(localDataEpoch);
-  const selectedOrg = orgs.find((org) => org.alias === selectedAlias) ?? null;
-  const groupLabel = NAV_GROUPS.find((group) => group.items.some((item) => item.id === page))?.label ?? 'Workspace';
   // The session mode is the source of truth even when no org is selected. A
   // context-less demo session must never present itself as a live workspace.
   const badge = workspaceBadge(context, mode);
@@ -300,13 +263,19 @@ export function AppShell({
         data-collapsed={sidebarCollapsed}
         className="sidebar hidden shrink-0 flex-col border-r border-line bg-surface lg:flex"
       >
-        <div className="sidebar-header flex items-center gap-3 px-5 py-5">
-          <DcatMark size={40} />
+        <a
+          href={pageHref('dashboard')}
+          onClick={(event) => navigateFromLink(event, 'dashboard', navigate)}
+          aria-label="DCAT home"
+          title="DCAT home"
+          className="sidebar-header flex items-center gap-3 px-5 py-5"
+        >
+          <DcatMark size={44} />
           <div className="sidebar-label min-w-0">
             <p className="font-semibold tracking-tight">DCAT</p>
             <p className="truncate text-xs text-ink-soft">Data Cloud Architect Toolkit</p>
           </div>
-        </div>
+        </a>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           <NavigationList page={page} onNavigate={navigate} label="Main navigation" collapsed={sidebarCollapsed} />
         </div>
@@ -337,108 +306,25 @@ export function AppShell({
       {menuOpen ? <MobileNav page={page} onNavigate={navigate} onClose={() => setMenuOpen(false)} /> : null}
 
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 border-b border-line bg-surface">
-          <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
-            <div className="flex min-h-16 flex-wrap items-center gap-x-3 gap-y-2 py-3">
-              <button
-                type="button"
-                onClick={() => setMenuOpen(true)}
-                aria-label="Open navigation"
-                className="grid size-9 place-items-center rounded-lg border border-line-strong text-ink-soft hover:bg-surface-alt lg:hidden"
-              >
-                <Icon name="menu" />
-              </button>
-              <button
-                type="button"
-                onClick={toggleSidebar}
-                aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                aria-expanded={!sidebarCollapsed}
-                aria-controls="desktop-sidebar"
-                title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                className="hidden size-9 place-items-center rounded-lg border border-line-strong text-ink-soft transition-colors hover:bg-surface-alt hover:text-ink lg:grid"
-              >
-                <Icon name="panelLeft" size={18} />
-              </button>
-              <Button
-                variant="quiet"
-                onClick={openPalette}
-                aria-label="Search metadata"
-                aria-keyshortcuts="Control+K Meta+K"
-                title={`Search metadata (${shortcutLabel})`}
-                className="px-2 sm:px-3"
-              >
-                <Icon name="search" size={17} />
-                <span className="hidden lg:inline">Search</span>
-                <kbd className="hidden rounded border border-line px-1.5 py-0.5 text-[11px] text-ink-faint xl:inline">{shortcutLabel}</kbd>
-              </Button>
-              <div className="min-w-0">
-                <p className="label-xs hidden sm:block">{groupLabel}</p>
-                <h1 className="truncate text-base font-semibold tracking-tight text-ink sm:text-lg">{PAGE_TITLES[page]}</h1>
-                <p className="hidden truncate text-xs text-ink-soft sm:block">
-                  {context
-                    ? `${context.alias} · ${context.environment === 'demo' ? 'sample metadata' : selectedOrg?.connectedStatus ?? 'Status unknown'}`
-                    : 'No org selected'}
-                </p>
-              </div>
-              <div className="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-                <div className="w-full sm:w-52">
-                  <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
-                </div>
-                <Button
-                  variant="quiet"
-                  onClick={onGoToOrgs}
-                  aria-label="Open org connection details"
-                  className="px-2"
-                >
-                  <Icon name="plug" size={17} />
-                  <span className="hidden xl:inline">Details</span>
-                </Button>
-                <Badge
-                  tone={badge.tone}
-                  dot
-                  title={activeMode === 'demo' ? 'Sample metadata only - no Salesforce org is connected.' : undefined}
-                >
-                  {badge.label}
-                </Badge>
-                <Button
-                  variant="secondary"
-                  onClick={onToggleMode}
-                  disabled={isTogglingMode}
-                  icon={<Icon name={activeMode === 'demo' ? 'plug' : 'database'} size={15} />}
-                  className="px-2.5 sm:px-3"
-                  aria-label={`Switch to ${activeMode === 'demo' ? 'live' : 'demo'} mode`}
-                  aria-busy={isTogglingMode}
-                  title={activeMode === 'demo'
-                    ? hosted
-                      ? 'Live mode reads metadata through your local SF CLI bridge.'
-                      : 'Live mode reads metadata through your local Salesforce CLI.'
-                    : 'Demo mode uses sample metadata; no Salesforce org is connected.'}
-                >
-                  <span className="hidden sm:inline">{isTogglingMode ? 'Switching...' : `Use ${activeMode === 'demo' ? 'live' : 'demo'}`}</span>
-                </Button>
-                <Button
-                  variant="quiet"
-                  onClick={() => navigate('help')}
-                  aria-label="Help"
-                  title="Help and documentation"
-                  className="px-2"
-                >
-                  <Icon name="info" size={17} />
-                  <span className="hidden xl:inline">Help</span>
-                </Button>
-                <Button
-                  variant="quiet"
-                  onClick={theme.toggle}
-                  aria-label={`Switch to ${theme.resolved === 'dark' ? 'light' : 'dark'} theme`}
-                  title={`Switch to ${theme.resolved === 'dark' ? 'light' : 'dark'} theme`}
-                  className="px-2"
-                >
-                  <Icon name={theme.resolved === 'dark' ? 'sun' : 'moon'} size={17} />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </header>
+        <AppHeader
+          page={page}
+          onNavigate={onNavigate}
+          context={context}
+          mode={mode}
+          badge={badge}
+          isTogglingMode={isTogglingMode}
+          onToggleMode={onToggleMode}
+          orgs={orgs}
+          orgsLoading={orgsLoading}
+          selectedAlias={selectedAlias}
+          onSelectOrg={onSelectOrg}
+          onGoToOrgs={onGoToOrgs}
+          theme={theme}
+          onOpenNavigation={() => setMenuOpen(true)}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={toggleSidebar}
+          onOpenPalette={openPalette}
+        />
 
         <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
           {modeError ? (

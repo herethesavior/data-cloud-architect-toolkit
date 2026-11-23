@@ -41,14 +41,19 @@ export function CopyButton({ value, label, icon = 'copy', className = '' }: Copy
   const currentIcon = state === 'copied' ? 'check' : state === 'error' ? 'warning' : icon;
 
   return (
-    <Button
-      variant="quiet"
-      onClick={() => void copy()}
-      aria-label={currentLabel}
-      className={`px-2 py-1 text-xs ${className}`}
-    >
-      <Icon name={currentIcon} size={14} />
-      <span>{currentLabel}</span>
-    </Button>
+    <>
+      <Button
+        variant="quiet"
+        onClick={() => void copy()}
+        aria-label={currentLabel}
+        className={`px-2 py-1 text-xs ${className}`}
+      >
+        <Icon name={currentIcon} size={14} />
+        <span>{currentLabel}</span>
+      </Button>
+      <span className="sr-only" role="status">
+        {state === 'copied' ? 'Copied to clipboard' : state === 'error' ? 'Copy failed' : ''}
+      </span>
+    </>
   );
 }
