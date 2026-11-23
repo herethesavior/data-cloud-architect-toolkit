@@ -1543,6 +1543,9 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
   const deck = page.locator('.deck-shell');
   await page.getByRole('button', { name: 'Present' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+  await expect(deck.locator('.deck-frame')).toBeVisible();
+  await expect(deck.getByText('Data Cloud Architect Toolkit', { exact: true })).toBeVisible();
+  await expect(deck.getByRole('link', { name: /Open DCAT/ })).toBeVisible();
   await expect(deck.locator('.deck-counter')).toContainText('01');
   const deckScroll = await page.evaluate(() => Math.round(window.scrollY));
   const slideHeights: number[] = [];

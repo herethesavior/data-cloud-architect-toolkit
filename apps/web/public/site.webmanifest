@@ -4,8 +4,8 @@
   "description": "See the architecture. Understand the connections. Make better decisions. A local-first, read-only workbench for Salesforce Data 360 metadata.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#010e3a",
-  "theme_color": "#010e3a",
+  "background_color": "#071326",
+  "theme_color": "#071326",
   "icons": [
     {
       "src": "/dcat-icon-192.png",
