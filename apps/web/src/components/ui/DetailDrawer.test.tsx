@@ -17,6 +17,20 @@ function Harness() {
   );
 }
 
+function UnmountHarness() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Open detail</button>
+      {open ? (
+        <DetailDrawer open title="Stream detail" onClose={() => setOpen(false)}>
+          <p>Read-only metadata</p>
+        </DetailDrawer>
+      ) : null}
+    </>
+  );
+}
+
 describe('DetailDrawer', () => {
   afterEach(() => {
     cleanup();
@@ -38,6 +52,20 @@ describe('DetailDrawer', () => {
     expect(close).toHaveFocus();
 
     act(() => { vi.advanceTimersByTime(200); });
+    expect(screen.queryByRole('dialog', { name: 'Stream detail' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('restores focus when a caller unmounts the drawer directly', () => {
+    render(<UnmountHarness />);
+    const trigger = screen.getByRole('button', { name: 'Open detail' });
+    trigger.focus();
+
+    fireEvent.click(trigger);
+    const close = screen.getAllByRole('button', { name: 'Close details' }).at(-1)!;
+    expect(close).toHaveFocus();
+
+    fireEvent.click(close);
     expect(screen.queryByRole('dialog', { name: 'Stream detail' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
   });

@@ -171,7 +171,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                 if (!onNavigate) return;
                 if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
                 event.preventDefault();
-                window.history.replaceState(null, '', href);
+                window.history.pushState(null, '', href);
                 onNavigate('change-impact');
               }}
               className={compact ? 'text-xs font-semibold text-brand underline underline-offset-2' : 'btn-quiet px-2 py-1 text-xs'}

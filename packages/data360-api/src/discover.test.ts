@@ -307,6 +307,20 @@ describe('live Data 360 discovery', () => {
     expect(inventory.relationships.some((edge) => edge.certainty === 'confirmed')).toBe(false);
   });
 
+  it('reports a forbidden DMO lookup instead of a skipped mappings capability', async () => {
+    const cli = fakeCli({
+      [dmoPath]: new CliError('COMMAND_FAILED', forbiddenRestOutput),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const capability = inventory.capabilities.find((entry) => entry.family === 'mappings');
+
+    expect(capability).toMatchObject({ status: 'forbidden', itemCount: 0 });
+    expect(capability?.message).toMatch(/Access denied/);
+    expect(inventory.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: 'mappings', code: 'FORBIDDEN', severity: 'error' }),
+    ]));
+  });
+
   it('keeps raw connector codes when connector lookups fail', async () => {
     const cli = fakeCli({
       [buildConnectorCatalogPath('65.0')]: new CliError('COMMAND_FAILED', 'Status: 500 Server Error'),

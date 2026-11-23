@@ -1142,6 +1142,18 @@ test('contextual Analyze impact link opens Change Impact Analyzer for a field', 
   await expect(page.locator('h1')).toHaveText('Change Impact Analyzer');
   await expect(page).toHaveURL(/\/change-impact\?target=field/);
   await expect(page.getByText('Direct dependencies')).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dlos$/);
+  await expect(page.getByRole('table', { name: 'DLO Explorer results' })).toBeVisible();
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Dictionary' }).click();
+  await page.getByRole('table', { name: 'Data dictionary fields' }).getByRole('link', { name: 'Analyze impact' }).first().click();
+  await expect(page).toHaveURL(/\/change-impact\?target=field/);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dictionary$/);
+  await expect(page.getByRole('table', { name: 'Data dictionary fields' })).toBeVisible();
 });
 
 test('export menu consolidates local export formats', async ({ page }) => {
@@ -1738,4 +1750,36 @@ test('browser history during a live org switch keeps the selected context', asyn
   await page.goForward();
   await expect(page.locator('h1')).toHaveText('Dashboard');
   await expect(page.getByText('Sandbox Account')).toHaveCount(0);
+});
+
+test('a failed refresh does not follow the user into another org', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  let failRefresh = false;
+  await page.route('**/api/orgs/*/inventory/session', async (route: Route) => {
+    const url = new URL(route.request().url());
+    const alias = decodeURIComponent(url.pathname.split('/').filter(Boolean)[2] ?? '');
+    if (failRefresh && alias === 'prod-org') {
+      await route.fulfill({
+        status: 500,
+        json: { error: { code: 'COMMAND_FAILED', message: 'Production CLI is unavailable.' } },
+      });
+      return;
+    }
+    const inventory = state.inventories[alias] ?? demoInventory;
+    await route.fulfill({ json: { sessionId: 'e2e-session', snapshot: inventory } });
+  });
+  await page.goto('/');
+
+  const picker = page.getByLabel('Selected organization');
+  await expect(picker).toHaveValue('prod-org');
+  await expect(page.getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
+  failRefresh = true;
+  await page.getByRole('button', { name: 'Refresh inventory' }).click();
+  await expect(page.getByRole('alert')).toContainText(/Refresh failed: Production CLI is unavailable\./);
+
+  await picker.selectOption('sandbox-org');
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

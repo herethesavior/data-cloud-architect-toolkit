@@ -297,11 +297,20 @@ function skippedMappings(
     : dmosConfirmed
       ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
       : 'Skipped: DMO lookup was unavailable; mapping lookup requires a DMO developer name.';
-  // Preserve a Data 360 disablement across every family instead of hiding it
-  // behind a generic skip when DMO discovery itself reported unsupported.
-  const status: ApiCapability['status'] = !dmosConfirmed && dmoCapability.status === 'unsupported'
-    ? 'unsupported'
+  // Keep a failed or disabled DMO lookup visible instead of reporting a
+  // permissions/API failure as a routine "Not started" mapping skip.
+  const inheritedStatus = dmoCapability.status === 'unsupported'
+    || dmoCapability.status === 'forbidden'
+    || dmoCapability.status === 'error'
+    ? dmoCapability.status
     : 'not-started';
+  const status: ApiCapability['status'] = dmosConfirmed ? 'not-started' : inheritedStatus;
+  const warningCode = status === 'unsupported' ? 'UNSUPPORTED'
+    : status === 'forbidden' ? 'FORBIDDEN'
+      : status === 'error' ? 'ERROR'
+        : 'MAPPINGS_SKIPPED';
+  const warningSeverity = status === 'not-started' ? 'info'
+    : status === 'unsupported' ? 'warning' : 'error';
   return {
     result: { items: [], skipped: 0 },
     capability: {
@@ -309,15 +318,11 @@ function skippedMappings(
       status,
       endpoint: buildData360Path('mappings', apiVersion),
       apiVersion,
-      message: status === 'unsupported'
-        ? (dmoCapability.message ?? message)
-        : message,
+      message: status === 'not-started' ? message : (dmoCapability.message ?? message),
       durationMs: 0,
       itemCount: 0,
     },
-    warnings: [dmosConfirmed
-      ? { family: 'mappings', code: 'MAPPINGS_SKIPPED', message, severity: 'info' }
-      : { family: 'mappings', code: status === 'unsupported' ? 'UNSUPPORTED' : 'MAPPINGS_SKIPPED', message, severity: status === 'unsupported' ? 'warning' : 'info' }],
+    warnings: [{ family: 'mappings', code: warningCode, message: status === 'not-started' ? message : (dmoCapability.message ?? message), severity: warningSeverity }],
   };
 }
 

@@ -186,6 +186,10 @@ export function App() {
     resumeControllerRef.current = null;
     refreshContextRef.current = activeContextId;
     clearWorkspaceCaches(queryClient, activeContextId);
+    // Mutation errors live on the mutation, not the query cache. A failure from
+    // the previous org must not be displayed under the newly selected one.
+    refreshInventory.reset();
+    resumeInventory.reset();
   };
 
   const stopInFlightDiscovery = () => {
@@ -400,6 +404,12 @@ export function App() {
     if (refreshContextRef.current !== nextContextId) {
       refreshControllerRef.current?.abort();
       resumeControllerRef.current?.abort();
+      refreshControllerRef.current = null;
+      resumeControllerRef.current = null;
+      // Mutation errors are global to the mutation instance, so a failure from
+      // the previous org must not be displayed under the newly selected org.
+      refreshInventory.reset();
+      resumeInventory.reset();
     }
     refreshContextRef.current = nextContextId;
   }, [context?.contextId]);

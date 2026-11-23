@@ -93,7 +93,7 @@ The pairing code is one-time and short-lived. **Step 1** also contains the bridg
 
 - Salesforce CLI owns authentication. DCAT never asks for or stores usernames, passwords, tokens, SFDX auth URLs, or client secrets. The browser's inventory cache holds metadata snapshots only.
 - The browser never runs `sf`. Hosted mode uses an outbound bridge that polls the Worker; it needs no open inbound port or tunnel.
-- The relay accepts only seven typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `transform.get`, `mode.set`, and `bridge.update`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
+- The relay accepts only nine typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `inventory.start`, `inventory.status`, `transform.get`, `mode.set`, and `bridge.update`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
 - Process output is redacted before it is returned to the browser. Bridge storage contains only the relay URL, agent token, and version, written with mode `600`; it never reads the CLI credential store.
 - The local connector binds only to `127.0.0.1` and validates Host and Origin headers.
 - There is no hosted OAuth. `/api/auth/*` paths are intentionally removed and return `404`.
