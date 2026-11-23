@@ -1535,7 +1535,8 @@ html[data-theme='dark'] .dcat-mark {
 
   .story-links {
     display: grid;
-    gap: 0.6rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
   }
 
   .story-links a {
@@ -1547,7 +1548,7 @@ html[data-theme='dark'] .dcat-mark {
     border: 1px solid var(--color-line-strong);
     border-radius: 0.75rem;
     background: var(--color-surface-alt);
-    padding: 0.85rem 1rem;
+    padding: 0.6rem 0.9rem;
     color: var(--color-ink);
     text-decoration: none;
     transition: border-color var(--duration-fast) var(--ease-standard),
@@ -1695,9 +1696,9 @@ html[data-theme='dark'] .dcat-mark {
     --story-lead: clamp(0.95rem, min(2.3cqh, 2.1cqw), 1.25rem);
     --story-body: clamp(0.9rem, min(2.1cqh, 1.9cqw), 1.0625rem);
     --story-small: clamp(0.875rem, min(1.9cqh, 1.8cqw), 1rem);
-    --story-note-size: clamp(0.68rem, min(1.5cqh, 1.4cqw), 0.8125rem);
-    --story-eyebrow-size: clamp(0.68rem, min(1.5cqh, 1.4cqw), 0.8125rem);
-    --story-gap: clamp(0.6rem, min(1.9cqh, 1.3cqw), 1.15rem);
+    --story-note-size: clamp(0.72rem, min(1.6cqh, 1.5cqw), 0.875rem);
+    --story-eyebrow-size: clamp(0.72rem, min(1.6cqh, 1.5cqw), 0.875rem);
+    --story-gap: clamp(0.55rem, min(1.8cqh, 1.1cqw), 1.1rem);
     --story-pad: clamp(0.85rem, min(3.2cqh, 2.6cqw), 2.25rem);
     --slide-fit: 1;
     position: relative;
@@ -1727,9 +1728,9 @@ html[data-theme='dark'] .dcat-mark {
 
   .deck-slide .story-chapter-head {
     display: flex;
-    min-height: clamp(4.75rem, 12cqh, 7rem);
+    min-height: clamp(3rem, 8cqh, 4.5rem);
     flex-direction: column;
-    justify-content: center;
+    justify-content: start;
   }
 
   /* Temporarily remove stretching so the fit pass can read natural height. */
@@ -1795,6 +1796,11 @@ html[data-theme='dark'] .dcat-mark {
   .deck-slide .story-body > .story-cover,
   .deck-slide .story-body > .story-pipeline {
     flex: 1 1 auto;
+  }
+
+  .deck-slide .story-body > .slide-measures {
+    flex: 1;
+    min-height: 0;
   }
 
   .deck-slide .story-grid,
@@ -2162,24 +2168,29 @@ html[data-theme='dark'] .dcat-mark {
 
   .slide-diagnosis {
     display: grid;
-    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
-    align-items: center;
-    gap: clamp(1rem, 3cqw, 2rem);
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: clamp(0.6rem, 1.8cqh, 1rem);
     height: 100%;
   }
 
-  .slide-diagnosis-list,
+  .slide-diagnosis-list {
+    display: grid;
+    align-content: start;
+    gap: 0.35rem;
+  }
+
   .slide-process-list {
     display: grid;
-    align-content: center;
+    align-content: start;
+    gap: clamp(0.5rem, 1.4cqh, 0.8rem);
   }
 
   .slide-capabilities {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    align-content: center;
+    align-content: stretch;
     align-items: stretch;
-    gap: clamp(0.75rem, 2cqw, 1.5rem);
+    gap: clamp(0.85rem, 2.4cqw, 1.4rem);
     height: 100%;
   }
 
@@ -2191,7 +2202,7 @@ html[data-theme='dark'] .dcat-mark {
     border: 1px solid var(--color-line);
     border-radius: 0.9rem;
     background: var(--color-surface-alt);
-    padding: clamp(0.9rem, 2.2cqh, 1.5rem);
+    padding: clamp(1rem, 2.6cqh, 1.75rem);
   }
 
   .slide-capability > svg {
@@ -2216,14 +2227,22 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .slide-flow,
-  .slide-timeline,
-  .slide-measures {
+  .slide-timeline {
     display: flex;
     min-width: 0;
     flex-direction: column;
-    justify-content: center;
-    gap: clamp(0.6rem, 1.8cqh, 1.25rem);
+    justify-content: start;
+    gap: clamp(0.5rem, 1.5cqh, 0.9rem);
     height: 100%;
+  }
+
+  .slide-measures {
+    display: grid;
+    align-content: start;
+    gap: 0.3rem;
+    width: 100%;
+    max-width: 56rem;
+    margin-inline: auto;
   }
 
   .slide-flow-track,
@@ -2231,6 +2250,16 @@ html[data-theme='dark'] .dcat-mark {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: clamp(0.5rem, 1.5cqh, 0.9rem);
+  }
+
+  .slide-flow-track {
+    flex: 1;
+    align-content: stretch;
+  }
+
+  .deck-slide .slide-flow-node {
+    min-height: 0;
+    height: 100%;
   }
 
   .slide-flow-track .slide-stage:nth-child(3)::after {
@@ -2252,8 +2281,8 @@ html[data-theme='dark'] .dcat-mark {
   .slide-process {
     display: grid;
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-    align-items: center;
-    gap: clamp(1rem, 3cqw, 2rem);
+    align-items: start;
+    gap: clamp(0.7rem, 2.2cqw, 1.2rem);
     height: 100%;
   }
 
@@ -2261,8 +2290,8 @@ html[data-theme='dark'] .dcat-mark {
     display: flex;
     min-width: 0;
     flex-direction: column;
-    justify-content: center;
-    gap: clamp(0.6rem, 1.6cqh, 1rem);
+    justify-content: start;
+    gap: clamp(0.5rem, 1.4cqh, 0.8rem);
     height: 100%;
   }
 
@@ -2273,29 +2302,12 @@ html[data-theme='dark'] .dcat-mark {
     gap: clamp(0.75rem, 2cqw, 1.5rem);
   }
 
+  /* Roles slide: five people → outcomes lines, packed top-down so the frame fills. */
   .slide-roles {
     display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-    align-content: center;
-    gap: clamp(0.75rem, 2cqw, 1.5rem);
+    align-content: start;
+    gap: 0.3rem;
     height: 100%;
-  }
-
-  .slide-roles-primary,
-  .slide-roles-secondary {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: clamp(0.3rem, 0.8cqh, 0.5rem);
-  }
-
-  .slide-roles-primary {
-    border-right: 1px solid var(--color-line);
-    padding-right: clamp(0.75rem, 2cqw, 1.5rem);
-  }
-
-  .slide-roles .slide-fineprint {
-    grid-column: 1 / -1;
   }
 
   .slide-evidence,
@@ -2304,9 +2316,14 @@ html[data-theme='dark'] .dcat-mark {
   .slide-takeaway {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
-    align-items: center;
-    gap: clamp(1rem, 3cqw, 2rem);
+    align-items: start;
+    gap: 0.5rem;
     height: 100%;
+  }
+
+  .slide-evidence {
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 0.5rem;
   }
 
   .slide-evidence-copy,
@@ -2316,7 +2333,15 @@ html[data-theme='dark'] .dcat-mark {
     display: flex;
     min-width: 0;
     flex-direction: column;
-    gap: clamp(0.5rem, 1.4cqh, 0.9rem);
+    gap: clamp(0.4rem, 1.2cqh, 0.8rem);
+  }
+
+  .slide-takeaway-copy {
+    flex: 1;
+  }
+
+  .slide-takeaway-statement {
+    font-size: clamp(1.35rem, 3.4cqw, 1.95rem);
   }
 
   .slide-evidence-copy .slide-principle {
@@ -2336,17 +2361,25 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .slide-evidence-legend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
     min-width: 0;
     border: 1px solid var(--color-line);
     border-radius: 0.9rem;
     background: var(--color-surface-alt);
-    padding: 0.25rem clamp(0.9rem, 2cqh, 1.3rem);
+    padding: 0.35rem;
+  }
+
+  .slide-guardrails {
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-content: stretch;
   }
 
   .slide-guardrails-list {
     display: grid;
-    align-content: center;
-    gap: clamp(0.5rem, 1.4cqh, 0.9rem);
+    align-content: start;
+    gap: clamp(0.4rem, 1cqh, 0.7rem);
   }
 
   .slide-guardrail {
@@ -2400,9 +2433,17 @@ html[data-theme='dark'] .dcat-mark {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: stretch;
-    align-content: center;
-    gap: clamp(0.75rem, 2cqw, 1.5rem);
+    align-content: start;
+    gap: clamp(0.6rem, 1.8cqw, 1.2rem);
     height: 100%;
+  }
+
+  .slide-demo-screen {
+    min-height: 16rem;
+  }
+
+  .deck-slide .story-mock {
+    min-height: 16rem;
   }
 
   .slide-demo-screen .story-note {
@@ -2463,12 +2504,6 @@ html[data-theme='dark'] .dcat-mark {
     .slide-flow-track,
     .slide-timeline-track,
     .slide-roadmap-phases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .slide-roles-primary {
-      border-right: 0;
-      border-bottom: 1px solid var(--color-line);
-      padding-right: 0;
-      padding-bottom: 0.75rem;
-    }
   }
 
   @media (max-width: 620px) {
@@ -2502,9 +2537,11 @@ html[data-theme='dark'] .dcat-mark {
     .deck-slide .story-cover { grid-template-columns: 1fr; }
     .slide-capabilities,
     .slide-alignment-panels { grid-template-columns: 1fr; }
-    .slide-flow-track,
+    .slide-capabilities { gap: 0.55rem; }
+    .slide-evidence-legend { grid-template-columns: 1fr; }
     .slide-timeline-track,
     .slide-roadmap-phases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .slide-flow-track { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .slide-roadmap-phases > :last-child { grid-column: 1 / -1; }
     .slide-stage:not(:last-child)::after { display: none; }
     .slide-cover .story-art { max-width: 20rem; }

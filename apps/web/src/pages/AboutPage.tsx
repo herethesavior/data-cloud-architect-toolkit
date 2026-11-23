@@ -273,7 +273,7 @@ function MockScreen() {
         <div><strong>05</strong><span>Transforms</span></div>
       </div>
       <div className="story-mock-flow">
-        {['Sources', 'Streams', 'DLOs', 'Mappings', 'DMOs'].map((label) => (
+        {['Sources', 'Streams', 'DLOs', 'Mappings', 'DMOs', 'Transforms'].map((label) => (
           <div key={label}><strong>{label}</strong><span>Stage</span></div>
         ))}
       </div>
@@ -607,17 +607,11 @@ const chapters: Chapter[] = [
     presentLayout: 'roles',
     presentBody: (
       <div className="slide-roles">
-        <div className="slide-roles-primary">
-          <SlideLabel>Primary workbench users</SlideLabel>
-          <SlideLine index="01" title="Architects" detail="Models, relationships, lineage, and implementation structure." />
-          <SlideLine index="02" title="Engineers" detail="Mappings, transforms, source paths, and dependencies." />
-          <SlideLine index="03" title="Admins" detail="Configured metadata and environment-level visibility." />
-        </div>
-        <div className="slide-roles-secondary">
-          <SlideLabel>Beneficiaries of the outputs</SlideLabel>
-          <SlideLine index="04" title="Analysts & Product" detail="Business attributes to technical objects and source context." />
-          <SlideLine index="05" title="Delivery leads" detail="Architecture artifacts, handovers, and areas needing attention." />
-        </div>
+        <SlideLine index="01" title="Architects" detail="Models, relationships, lineage, and implementation structure." />
+        <SlideLine index="02" title="Engineers" detail="Mappings, transforms, source paths, and dependencies." />
+        <SlideLine index="03" title="Admins" detail="Configured metadata and environment-level visibility." />
+        <SlideLine index="04" title="Analysts & Product" detail="Business attributes to technical objects and source context." />
+        <SlideLine index="05" title="Delivery leads" detail="Architecture artifacts, handovers, and areas needing attention." />
         <p className="slide-fineprint">Business stakeholders benefit from the outputs and shared explanations; the current workbench remains primarily architect-oriented.</p>
       </div>
     ),
