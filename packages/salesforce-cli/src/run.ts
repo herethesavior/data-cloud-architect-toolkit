@@ -20,14 +20,23 @@ export function resolveSfShim(shimPath: string, depth = 0): ResolvedCliCommand |
   if (depth > 3 || !existsSync(shimPath)) return null;
   const contents = readFileSync(shimPath, 'utf8');
 
-  const delegated = /if exist "([^"]+)"\s*\(/i.exec(contents)?.[1];
+  const expand = (value: string): string => resolve(
+    value
+      .replace(/%~dp0/g, `${dirname(shimPath)}${sep}`)
+      .replace(/%([A-Za-z_][A-Za-z0-9_]*)%/g, (token, name: string) =>
+        process.env[name] ?? process.env[name.toUpperCase()] ?? token),
+  );
+
+  const delegated = /if exist "([^"]+)"\s*\(/i.exec(contents)?.[1]
+    ?? /^\s*"([^"]+\.cmd)"[^\r\n]*%\*/im.exec(contents)?.[1];
   if (delegated) {
-    const resolved = resolveSfShim(delegated, depth + 1);
+    // Salesforce shims redirect through %LOCALAPPDATA% and %~dp0; following
+    // raw tokens would miss the user's updated CLI and find an older copy.
+    const resolved = resolveSfShim(expand(delegated), depth + 1);
     if (resolved) return resolved;
   }
 
   const match = /"([^"]+node\.exe)"\s+--no-deprecation\s+"([^"]+run[^"]*)"/i.exec(contents);
-  const expand = (value: string): string => resolve(value.replace(/%~dp0/g, `${dirname(shimPath)}${sep}`));
   const nodeExe = match?.[1] ? expand(match[1]) : null;
   const rawRun = match?.[2] ? expand(match[2]) : null;
   if (!nodeExe || !rawRun || !existsSync(nodeExe)) return null;
