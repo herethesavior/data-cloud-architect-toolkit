@@ -2221,8 +2221,8 @@ html[data-theme='dark'] .dcat-mark {
   .slide-capability p {
     margin: 0;
     color: var(--color-ink-soft);
-    font-size: var(--story-small);
-    line-height: 1.5;
+    font-size: clamp(1.05rem, 2.4cqw, 1.15rem);
+    line-height: 1.55;
     text-wrap: pretty;
   }
 
@@ -2273,13 +2273,19 @@ html[data-theme='dark'] .dcat-mark {
 
   .slide-timeline-step {
     border-top: 2px solid var(--color-brand);
-    padding-top: clamp(0.5rem, 1.4cqh, 0.85rem);
+    padding-top: clamp(0.6rem, 1.8cqh, 1rem);
+  }
+
+  .slide-timeline-step strong {
+    color: var(--color-ink);
+    font-size: var(--story-body);
+    font-weight: 700;
   }
 
   .slide-timeline-step p {
-    margin: 0.4rem 0 0;
+    margin: 0.35rem 0 0;
     color: var(--color-ink-soft);
-    font-size: var(--story-small);
+    font-size: clamp(1.05rem, 2.4cqw, 1.15rem);
     line-height: 1.5;
   }
 
