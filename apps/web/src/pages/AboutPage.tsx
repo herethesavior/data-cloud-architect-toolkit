@@ -33,6 +33,9 @@ interface Chapter {
   /** Shorter copy used in Present mode so the fixed slide frame stays readable. */
   presentLead?: string;
   presentNote?: string;
+  /** Presentation-only layout and composition; the story page keeps the original body. */
+  presentLayout?: string;
+  presentBody?: ReactNode;
 }
 
 function Accent({ children }: { children: ReactNode }) {
@@ -156,6 +159,69 @@ function RoadmapColumn({ kicker, title, description, current = false, items }: {
   );
 }
 
+function SlideLabel({ children }: { children: ReactNode }) {
+  return <p className="slide-label">{children}</p>;
+}
+
+function SlideLine({ index, title, detail }: { index: string; title: string; detail?: string }) {
+  return (
+    <div className="slide-line">
+      <span className="slide-line-index">{index}</span>
+      <strong className="slide-line-title">{title}</strong>
+      {detail ? <span className="slide-line-detail">{detail}</span> : null}
+    </div>
+  );
+}
+
+function SlidePanel({ label, title, children, tone }: {
+  label: string;
+  title?: string;
+  children: ReactNode;
+  tone?: 'brand' | 'success' | 'neutral';
+}) {
+  return (
+    <section className={`slide-panel ${tone ? `slide-panel-${tone}` : 'slide-panel-neutral'}`}>
+      <SlideLabel>{label}</SlideLabel>
+      {title ? <h4 className="slide-panel-title">{title}</h4> : null}
+      <div className="slide-panel-body">{children}</div>
+    </section>
+  );
+}
+
+function SlideStage({ icon, title, detail }: { icon: IconName; title: string; detail: string }) {
+  return (
+    <div className="slide-stage">
+      <Icon name={icon} size={19} className="slide-stage-icon" />
+      <strong>{title}</strong>
+      <span>{detail}</span>
+    </div>
+  );
+}
+
+function SlidePhase({ kicker, title, description, items, current = false }: {
+  kicker: string;
+  title: string;
+  description: string;
+  items: { title: string; detail: string }[];
+  current?: boolean;
+}) {
+  return (
+    <div className={`slide-phase ${current ? 'slide-phase-current' : ''}`}>
+      <SlideLabel>{kicker}</SlideLabel>
+      <h4 className="slide-phase-title">{title}</h4>
+      <p className="slide-phase-description">{description}</p>
+      <ul className="slide-phase-items">
+        {items.map((item) => (
+          <li key={item.title}>
+            <strong>{item.title}</strong>
+            <span>{item.detail}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ArchitectureArt() {
   const nodes = [
     { x: 252, y: 38, label: 'SOURCE', sub: 'Systems' },
@@ -240,6 +306,23 @@ const chapters: Chapter[] = [
       </div>
     ),
     presentNote: 'A local-first, read-only way to see how a Data Cloud org fits together.',
+    presentLayout: 'cover',
+    presentBody: (
+      <div className="slide-cover">
+        <div className="slide-cover-copy">
+          <p className="slide-cover-statement">See the architecture. Understand the connections. Make better decisions.</p>
+          <Pills items={[
+            { label: 'Local-first', tone: 'brand' },
+            { label: 'Read-only', tone: 'success' },
+            { label: 'Evidence-led', tone: 'warning' },
+          ]} />
+          <div className="slide-cover-steps">
+            <span>Discover</span><span>Understand</span><span>Validate</span>
+          </div>
+        </div>
+        <ArchitectureArt />
+      </div>
+    ),
   },
   {
     id: 'problem',
@@ -249,6 +332,22 @@ const chapters: Chapter[] = [
     lead: 'Data Cloud brings together many connected building blocks. Understanding the whole picture often means moving between screens, metadata, queries, spreadsheets, and tribal knowledge.',
     presentLead: 'Metadata is scattered; understanding it takes work.',
     presentNote: 'Architects need connected metadata, not another screen to search.',
+    presentLayout: 'diagnosis',
+    presentBody: (
+      <div className="slide-diagnosis">
+        <SlidePanel label="The real gap" title="The architecture exists. Connection does not.">
+          <p>Screens, metadata, queries, spreadsheets, and tribal knowledge become the working map.</p>
+          <p className="slide-panel-emphasis">Architects need connected metadata, not another screen to search.</p>
+        </SlidePanel>
+        <div className="slide-diagnosis-list">
+          <SlideLine index="01" title="Fragmented visibility across components" detail="Scattered views" />
+          <SlideLine index="02" title="Manual tracing from source to target" detail="Slow discovery" />
+          <SlideLine index="03" title="Relationships that are hard to explain" detail="Hidden context" />
+          <SlideLine index="04" title="Documentation that falls behind change" detail="Knowledge gaps" />
+          <SlideLine index="05" title="Uncertainty about what is confirmed" detail="Review risk" />
+        </div>
+      </div>
+    ),
     body: (
       <div className="story-rows">
         <NumberedRow number="01" title="Fragmented visibility across components" detail="Scattered views" />
@@ -268,6 +367,29 @@ const chapters: Chapter[] = [
     lead: 'DCAT is a local-first, read-only discovery workbench for Salesforce Data Cloud / Data 360 metadata. It helps teams inspect the structure and relationships behind an implementation.',
     presentLead: 'A read-only workbench for connected metadata.',
     presentNote: 'Built for discovery and assessment, not org configuration.',
+    presentLayout: 'capabilities',
+    presentBody: (
+      <div className="slide-capabilities">
+        <div className="slide-capability">
+          <SlideLabel>01 · Discover</SlideLabel>
+          <Icon name="layers" size={22} />
+          <h4>See what is there</h4>
+          <p>Explore Data Spaces, DLOs, DMOs, streams, mappings, transforms, and available metadata.</p>
+        </div>
+        <div className="slide-capability">
+          <SlideLabel>02 · Understand</SlideLabel>
+          <Icon name="graph" size={22} />
+          <h4>Connect the pieces</h4>
+          <p>Visualize relationships, field mappings, transformations, and end-to-end data lineage.</p>
+        </div>
+        <div className="slide-capability">
+          <SlideLabel>03 · Validate</SlideLabel>
+          <Icon name="shield" size={22} />
+          <h4>Review with evidence</h4>
+          <p>Inspect provenance, confidence, retrieval status, and gaps instead of treating every relationship as fact.</p>
+        </div>
+      </div>
+    ),
     body: (
       <div className="story-grid story-grid-3">
         <StoryCard icon="layers" tag="Discover" title="See what is there">
@@ -291,6 +413,23 @@ const chapters: Chapter[] = [
     lead: 'DCAT brings key metadata families into a connected exploration experience.',
     presentLead: 'Bring metadata families into one connected view.',
     presentNote: 'Conceptual flow; available paths depend on the org.',
+    presentLayout: 'flow',
+    presentBody: (
+      <div className="slide-flow">
+        <div className="slide-flow-track">
+          <SlideStage icon="plug" title="Source systems" detail="Where business data originates" />
+          <SlideStage icon="stream" title="Data Streams" detail="Ingestion configuration and source" />
+          <SlideStage icon="database" title="DLOs" detail="Data landing objects" />
+          <SlideStage icon="route" title="Mappings & transforms" detail="How data is shaped" />
+          <SlideStage icon="cube" title="DMOs" detail="Harmonized data model" />
+          <SlideStage icon="graph" title="Downstream use" detail="Business and activation context" />
+        </div>
+        <OutcomeStrip
+          title="From isolated metadata to connected architecture."
+          detail="ERD + Data Lineage Explorer + Change Impact Analyzer + field-level mapping + transform context + data dictionary."
+        />
+      </div>
+    ),
     body: (
       <>
         <div className="story-pipeline">
@@ -316,6 +455,23 @@ const chapters: Chapter[] = [
     title: <>Understand an unfamiliar <Accent>Data Cloud org faster.</Accent></>,
     lead: 'Useful when joining a project, taking over an implementation, preparing an assessment, or reviewing an existing design.',
     presentLead: 'Faster discovery for an unfamiliar org.',
+    presentLayout: 'process',
+    presentBody: (
+      <div className="slide-process">
+        <div className="slide-process-list">
+          <SlideLine index="01" title="Connect" detail="Use the Salesforce CLI authentication already on the architect’s machine." />
+          <SlideLine index="02" title="Inventory" detail="Review available Data Spaces, streams, objects, mappings, and transforms." />
+          <SlideLine index="03" title="Explore" detail="Open ERD, Data Lineage Explorer, Change Impact Analyzer, mapping, stream, and transform views." />
+          <SlideLine index="04" title="Investigate" detail="Trace dependencies, inspect provenance, and identify partial or unresolved areas." />
+          <SlideLine index="05" title="Share" detail="Export diagrams and metadata summaries for reviews and handovers." />
+        </div>
+        <SlidePanel label="Outcome" title="Less manual reconstruction." tone="success">
+          <p>A clearer starting point for technical discovery and architecture conversations.</p>
+          <p>Useful when joining a project, taking over an implementation, preparing an assessment, or reviewing an existing design.</p>
+          <p className="slide-panel-emphasis">Read-only discovery using metadata already available through the Salesforce CLI.</p>
+        </SlidePanel>
+      </div>
+    ),
     body: (
       <>
         <div className="story-grid story-grid-5">
@@ -341,6 +497,29 @@ const chapters: Chapter[] = [
     lead: 'Turn a business request into an inspectable chain of sources, streams, mappings, and model objects.',
     presentLead: 'Turn a business request into a traceable data path.',
     presentNote: 'Paths are inspectable; customer records are not validated.',
+    presentLayout: 'alignment',
+    presentBody: (
+      <div className="slide-alignment">
+        <div className="slide-alignment-panels">
+          <SlidePanel label="The business asks" tone="brand">
+            <blockquote className="slide-quote">“We need a unified customer profile with loyalty tier and latest purchase information.”</blockquote>
+            <p>The business cares about the outcome. The architect needs to identify the source data, ingestion path, mappings, model entities, and any gaps.</p>
+            <p className="slide-panel-emphasis">Start with the business attribute. Trace it back to evidence.</p>
+          </SlidePanel>
+          <SlidePanel label="The architect investigates" tone="success">
+            <div className="slide-checklist">
+              <CheckItem>Which source systems provide loyalty and purchase information?</CheckItem>
+              <CheckItem>Which streams and DLOs represent the ingested data?</CheckItem>
+              <CheckItem>Which mappings and transforms shape the attributes?</CheckItem>
+              <CheckItem>Which DMOs and relationships represent the business concepts?</CheckItem>
+              <CheckItem>What is confirmed, derived, partial, or not yet visible?</CheckItem>
+            </div>
+            <p className="slide-panel-emphasis">Outcome: a shared, inspectable explanation of the data foundation.</p>
+          </SlidePanel>
+        </div>
+        <p className="slide-fineprint">DCAT helps inspect metadata paths; it does not validate individual customer records or guarantee downstream business availability.</p>
+      </div>
+    ),
     body: (
       <div className="story-grid story-grid-2">
         <div className="story-scenario">
@@ -372,6 +551,30 @@ const chapters: Chapter[] = [
     lead: 'When the support period ends, the customer owns the org. DCAT gives the incoming team a read-only way to confirm what was built, answer questions, and review changes without relying on the delivery team’s memory.',
     presentLead: 'Give the incoming team a read-only handover view.',
     presentNote: 'Reads metadata only; runbooks and approvals still matter.',
+    presentLayout: 'timeline',
+    presentBody: (
+      <div className="slide-timeline">
+        <div className="slide-timeline-track">
+          <div className="slide-timeline-step">
+            <SlideLabel>01 · Confirm the handover</SlideLabel>
+            <p>Compare the documented design with the metadata actually present before the delivery team steps away.</p>
+          </div>
+          <div className="slide-timeline-step">
+            <SlideLabel>02 · Bring new owners up to speed</SlideLabel>
+            <p>Follow a source-to-target path and inspect DLOs, DMOs, mappings, and transforms in one place.</p>
+          </div>
+          <div className="slide-timeline-step">
+            <SlideLabel>03 · Support the org with confidence</SlideLabel>
+            <p>Review dependencies before a change, refresh the snapshot as the org evolves, and export diagrams for internal runbooks.</p>
+          </div>
+        </div>
+        <OutcomeStrip
+          title="Outcome: the customer team can explain and support its own data architecture."
+          detail="Repeatable discovery, grounded evidence, and shareable artifacts beyond the Hypercare window."
+        />
+        <p className="slide-fineprint">DCAT reads metadata only. It does not replace runbooks, monitoring, or change approvals, and it never shows customer or transaction records.</p>
+      </div>
+    ),
     body: (
       <>
         <div className="story-grid story-grid-3">
@@ -401,6 +604,23 @@ const chapters: Chapter[] = [
     lead: 'The same architecture view answers different questions for each role around the data.',
     presentLead: 'One view, different answers for each role.',
     presentNote: 'Outputs help everyone; the workbench is architect-oriented.',
+    presentLayout: 'roles',
+    presentBody: (
+      <div className="slide-roles">
+        <div className="slide-roles-primary">
+          <SlideLabel>Primary workbench users</SlideLabel>
+          <SlideLine index="01" title="Architects" detail="Models, relationships, lineage, and implementation structure." />
+          <SlideLine index="02" title="Engineers" detail="Mappings, transforms, source paths, and dependencies." />
+          <SlideLine index="03" title="Admins" detail="Configured metadata and environment-level visibility." />
+        </div>
+        <div className="slide-roles-secondary">
+          <SlideLabel>Beneficiaries of the outputs</SlideLabel>
+          <SlideLine index="04" title="Analysts & Product" detail="Business attributes to technical objects and source context." />
+          <SlideLine index="05" title="Delivery leads" detail="Architecture artifacts, handovers, and areas needing attention." />
+        </div>
+        <p className="slide-fineprint">Business stakeholders benefit from the outputs and shared explanations; the current workbench remains primarily architect-oriented.</p>
+      </div>
+    ),
     body: (
       <div className="story-grid story-grid-5">
         <StoryCard tag="Architects" title="Explore the model">Models, relationships, lineage, and implementation structure.</StoryCard>
@@ -420,6 +640,21 @@ const chapters: Chapter[] = [
     lead: 'DCAT’s strongest distinction is not simply showing more metadata. It is showing relationships with context, boundaries, and evidence.',
     presentLead: 'Show relationships with context and evidence.',
     presentNote: 'Evidence and boundaries make diagrams honest.',
+    presentLayout: 'evidence',
+    presentBody: (
+      <div className="slide-evidence">
+        <div className="slide-evidence-copy">
+          <p className="slide-principle">Make the status of every relationship <Accent>visible.</Accent></p>
+          <p>Architectural diagrams should not make inferred information look authoritative. DCAT separates what the org returned from what the toolkit derived and what could not be resolved.</p>
+          <p className="slide-panel-emphasis">Architecture with evidence, not guesswork: clearer reviews, more honest diagrams, and better technical conversations.</p>
+        </div>
+        <div className="slide-evidence-legend">
+          <LegendRow line="line-solid" title="Confirmed by metadata" detail="Grounded in retrieved source metadata" />
+          <LegendRow line="line-dashed" title="Derived by DCAT" detail="Explicitly inferred from available metadata" />
+          <LegendRow line="line-dotted" title="Unresolved reference" detail="Referenced but missing from the snapshot" />
+        </div>
+      </div>
+    ),
     body: (
       <div className="story-grid story-grid-2">
         <div>
@@ -443,6 +678,45 @@ const chapters: Chapter[] = [
     lead: 'DCAT is designed to inspect metadata without becoming another system that operates on the Salesforce org.',
     presentLead: 'Inspect metadata without operating on the org.',
     presentNote: 'Metadata can be sensitive; this is not a security review.',
+    presentLayout: 'guardrails',
+    presentBody: (
+      <div className="slide-guardrails">
+        <div className="slide-guardrails-list">
+          <div className="slide-guardrail">
+            <Icon name="shield" size={20} />
+            <div>
+              <strong>Read-only discovery</strong>
+              <p>Uses allowlisted, read-only Salesforce CLI commands. It does not create, update, delete, deploy, activate, ingest, or refresh org data.</p>
+            </div>
+          </div>
+          <div className="slide-guardrail">
+            <Icon name="lock" size={20} />
+            <div>
+              <strong>CLI-owned authentication</strong>
+              <p>Salesforce CLI handles login. DCAT does not ask for passwords, tokens, auth URLs, or client secrets.</p>
+            </div>
+          </div>
+          <div className="slide-guardrail">
+            <Icon name="database" size={20} />
+            <div>
+              <strong>Metadata, not customer records</strong>
+              <p>It does not query or display customer or transaction records. Exports are local and user-initiated.</p>
+            </div>
+          </div>
+        </div>
+        <SlidePanel label="How it runs">
+          <div className="slide-mode">
+            <strong>Local mode</strong>
+            <p>Run on your computer with Salesforce CLI authentication on that machine.</p>
+          </div>
+          <div className="slide-mode">
+            <strong>Hosted mode</strong>
+            <p>Hosted UI plus a local outbound bridge connects to CLI-backed discovery without exposing an inbound port.</p>
+          </div>
+          <p className="slide-fineprint">Security-conscious design does not replace an organization’s own security, privacy, or risk review. Metadata can still reveal sensitive architecture details.</p>
+        </SlidePanel>
+      </div>
+    ),
     body: (
       <>
         <div className="story-grid story-grid-3">
@@ -476,6 +750,17 @@ const chapters: Chapter[] = [
     lead: 'DCAT creates a practical starting point for discovery, investigation, architecture reviews, and knowledge transfer.',
     presentLead: 'A starting point for discovery, reviews, and handovers.',
     presentNote: 'Suggested measures, not claimed performance results.',
+    presentLayout: 'measures',
+    presentBody: (
+      <div className="slide-measures">
+        <SlideLine index="01" title="Time to understand an unfamiliar org" detail="Efficiency" />
+        <SlideLine index="02" title="Time to trace a source-to-target field" detail="Efficiency" />
+        <SlideLine index="03" title="Time to produce architecture artifacts" detail="Productivity" />
+        <SlideLine index="04" title="Dependencies and gaps surfaced" detail="Risk insight" />
+        <SlideLine index="05" title="Handover and review readiness" detail="Continuity" />
+        <p className="slide-fineprint">These are recommended success measures, not claimed or measured DCAT performance results.</p>
+      </div>
+    ),
     body: (
       <div className="story-rows">
         <NumberedRow number="01" title="Time to understand an unfamiliar org" detail="Efficiency" />
@@ -495,6 +780,43 @@ const chapters: Chapter[] = [
     lead: 'Build on the current metadata foundation. Prioritize capabilities that turn visibility into better decisions.',
     presentLead: 'Turn visibility into better decisions.',
     presentNote: 'Concepts are proposals, not shipped features.',
+    presentLayout: 'roadmap',
+    presentBody: (
+      <div className="slide-roadmap-phases">
+        <SlidePhase
+          kicker="Foundation · Current capabilities"
+          title="Discover & explain"
+          description="Make the existing workbench dependable, coherent, and easy to use."
+          current
+          items={[
+            { title: 'Inventory & explorers', detail: 'Data Spaces, DLOs, DMOs, streams, mappings, transforms.' },
+            { title: 'ERD & lineage', detail: 'Relationship visualization, tracing, evidence and gaps.' },
+            { title: 'Change Impact Analyzer', detail: 'Review grounded upstream and downstream dependencies before a change.' },
+            { title: 'Dictionary & exports', detail: 'Field reference and reusable architecture artifacts.' },
+          ]}
+        />
+        <SlidePhase
+          kicker="Next · High-value extensions"
+          title="Compare & assess"
+          description="Help teams answer what changed and what might be affected."
+          items={[
+            { title: 'Environment comparison', detail: 'Compare metadata snapshots across Dev, UAT, and Production.' },
+            { title: 'Architecture health checks', detail: 'Flag reviewable gaps, inconsistencies, and unresolved references.' },
+            { title: 'Guided change reviews', detail: 'Turn dependency findings into review checklists.' },
+          ]}
+        />
+        <SlidePhase
+          kicker="Later · Broader adoption"
+          title="Align & communicate"
+          description="Make architecture knowledge easier to share across teams."
+          items={[
+            { title: 'Business data dictionary', detail: 'Connect technical fields to business meaning and ownership.' },
+            { title: 'Requirements traceability', detail: 'Link business needs to data assets and implementation evidence.' },
+            { title: 'Architecture report generator', detail: 'Produce structured review and handover documentation.' },
+          ]}
+        />
+      </div>
+    ),
     body: (
       <div className="story-grid story-grid-3">
         <RoadmapColumn
@@ -541,6 +863,23 @@ const chapters: Chapter[] = [
     lead: 'Rather than touring every menu, anchor the demo in the problems architects and delivery teams actually face.',
     presentLead: 'Anchor the demo in real architect problems.',
     presentNote: 'Illustrative layout; counts and indicators are sample values.',
+    presentLayout: 'demo',
+    presentBody: (
+      <div className="slide-demo">
+        <div className="slide-demo-questions">
+          <SlideLabel>Questions that earn the demo</SlideLabel>
+          <div className="story-question">What does this org contain?</div>
+          <div className="story-question">Where does this field come from?</div>
+          <div className="story-question">How are these objects related?</div>
+          <div className="story-question">What do we know, and what is inferred?</div>
+          <div className="story-question">What can we share with the project team?</div>
+        </div>
+        <div className="slide-demo-screen">
+          <MockScreen />
+          <p className="slide-fineprint">Illustrative layout only. Counts and visual indicators are sample/demo values, not a live org.</p>
+        </div>
+      </div>
+    ),
     body: (
       <div className="story-grid story-grid-demo">
         <div className="story-rows">
@@ -565,6 +904,31 @@ const chapters: Chapter[] = [
     lead: 'DCAT can become the architect’s workbench for discovering what exists, understanding how it connects, and making better-informed decisions.',
     presentLead: 'Discover what exists, understand how it connects.',
     presentNote: 'Created in a personal capacity; not an official Salesforce product.',
+    presentLayout: 'takeaway',
+    presentBody: (
+      <div className="slide-takeaway">
+        <div className="slide-takeaway-copy">
+          <p className="slide-takeaway-statement">Don’t just see the data. <Accent>Understand the architecture.</Accent></p>
+          <Pills items={[
+            { label: 'Discover', tone: 'brand' },
+            { label: 'Understand', tone: 'success' },
+            { label: 'Validate', tone: 'warning' },
+            { label: 'Share', tone: 'neutral' },
+          ]} />
+          <p className="slide-takeaway-note">Created in a personal capacity. DCAT is not an official Salesforce product.</p>
+        </div>
+        <div className="story-links">
+          <a href={WORKBENCH_URL} target="_blank" rel="noopener noreferrer" aria-label="Open the DCAT workbench (opens in a new tab)">
+            <span><small>Try the workbench</small><strong>sfdcat.pages.dev</strong></span>
+            <Icon name="arrowRight" size={18} />
+          </a>
+          <a href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer" aria-label="Open the DCAT GitHub repository (opens in a new tab)">
+            <span><small>Explore the project</small><strong>GitHub repository</strong></span>
+            <Icon name="arrowRight" size={18} />
+          </a>
+        </div>
+      </div>
+    ),
     body: (
       <div className="story-grid story-grid-2">
         <div>
@@ -594,11 +958,13 @@ const chapters: Chapter[] = [
 
 function ChapterView({ chapter, mode }: { chapter: Chapter; mode: 'story' | 'present' }) {
   const headingId = `${mode}-chapter-${chapter.id}`;
-  const lead = mode === 'present' ? (chapter.presentLead ?? chapter.lead) : chapter.lead;
-  const note = mode === 'present' ? (chapter.presentNote ?? chapter.note) : chapter.note;
+  const isPresent = mode === 'present';
+  const lead = isPresent ? (chapter.presentLead ?? chapter.lead) : chapter.lead;
+  const note = isPresent ? (chapter.presentNote ?? chapter.note) : chapter.note;
+  const body = isPresent ? (chapter.presentBody ?? chapter.body) : chapter.body;
   return (
     <section
-      className={`story-chapter ${mode === 'story' ? 'story-chapter-scroll' : ''}`}
+      className={`story-chapter ${mode === 'story' ? 'story-chapter-scroll' : ''} ${isPresent && chapter.presentLayout ? `present-layout-${chapter.presentLayout}` : ''}`}
       data-chapter={chapter.id}
       data-mode={mode}
       aria-labelledby={headingId}
@@ -608,7 +974,7 @@ function ChapterView({ chapter, mode }: { chapter: Chapter; mode: 'story' | 'pre
         <h3 id={headingId} className="story-title">{chapter.title}</h3>
         {lead ? <p className="story-lead">{lead}</p> : null}
       </div>
-      <div className="story-body">{chapter.body}</div>
+      <div className="story-body">{body}</div>
       {note ? <Note>{note}</Note> : null}
     </section>
   );
@@ -680,7 +1046,7 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
         const naturalHeight = chapter.getBoundingClientRect().height;
         slide.classList.remove('is-measuring');
         const availableHeight = slide.clientHeight;
-        const fit = Math.max(0.82, Math.min(1, availableHeight / Math.max(naturalHeight, 1)));
+        const fit = Math.max(0.6, Math.min(1, availableHeight / Math.max(naturalHeight, 1)));
         slide.style.setProperty('--slide-fit', fit.toFixed(4));
       });
     };

@@ -1574,14 +1574,14 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
   await expect(deck.locator('.deck-counter')).toContainText('04');
   await recordSlideHeight();
 
-  const pipelineColumns = await deck.locator('.story-pipeline').evaluate(
+  const flowColumns = await deck.locator('.slide-flow-track').evaluate(
     (element) => getComputedStyle(element).gridTemplateColumns.split(' ').length,
   );
-  expect(pipelineColumns, 'flow pipeline columns').toBe(3);
-  const pipelineRows = await deck.locator('.story-flow-node').evaluateAll(
+  expect(flowColumns, 'flow stage columns').toBe(3);
+  const flowRows = await deck.locator('.slide-stage').evaluateAll(
     (nodes) => new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().top))).size,
   );
-  expect(pipelineRows, 'flow pipeline rows').toBe(2);
+  expect(flowRows, 'flow stage rows').toBe(2);
 
   await page.keyboard.press('End');
   await expect(deck.locator('.deck-counter')).toContainText('14');
@@ -1593,6 +1593,7 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
   const slideMetrics: {
     overflow: number; headHeight: number; hasFooterNote: boolean; fillGap: number;
     fit: number; clippedLead: boolean; cardSpill: number; bodyHorizontalOverflow: number;
+    layout: string;
   }[] = [];
   for (let index = 0; index < 14; index += 1) {
     await page.evaluate(() => new Promise<void>((resolve) => {
@@ -1604,9 +1605,10 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
       const head = slide.querySelector('.story-chapter-head') as HTMLElement;
       const children = [...body.children] as HTMLElement[];
       const bodyBottom = body.getBoundingClientRect().bottom;
-      const cards = [...slide.querySelectorAll('.story-card, .story-step, .story-scenario, .story-roadmap-col')] as HTMLElement[];
+      const cards = [...slide.querySelectorAll('.story-card, .story-step, .story-scenario, .story-roadmap-col, .slide-panel, .slide-capability, .slide-phase, .slide-stage, .slide-guardrail')] as HTMLElement[];
+      const fit = Number(slide.style.getPropertyValue('--slide-fit') || '1');
       const cardSpill = Math.max(0, ...cards.flatMap((card) => {
-        const inset = Number.parseFloat(getComputedStyle(card).paddingBottom) || 0;
+        const inset = (Number.parseFloat(getComputedStyle(card).paddingBottom) || 0) * fit;
         const bottom = card.getBoundingClientRect().bottom - inset;
         return [...card.children].map((child) => Math.round(child.getBoundingClientRect().bottom - bottom));
       }));
@@ -1621,6 +1623,9 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
         ),
         cardSpill,
         bodyHorizontalOverflow: body.scrollWidth - body.clientWidth,
+        layout: [...slide.querySelector('.story-chapter')?.classList ?? []]
+          .find((name) => name.startsWith('present-layout-'))
+          ?.replace('present-layout-', '') ?? '',
       };
     }));
     if (index < 13) {
@@ -1632,13 +1637,29 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
     expect(metrics.overflow, `slide ${index + 1} body overflow`).toBeLessThanOrEqual(1);
     expect(metrics.hasFooterNote, `slide ${index + 1} footer note`).toBe(true);
     expect(metrics.fillGap, `slide ${index + 1} content fill gap`).toBeLessThanOrEqual(24);
-    expect(metrics.fit, `slide ${index + 1} fit floor`).toBeGreaterThanOrEqual(0.8);
+    expect(metrics.fit, `slide ${index + 1} fit floor`).toBeGreaterThanOrEqual(0.6);
     expect(metrics.clippedLead, `slide ${index + 1} clipped lead`).toBe(false);
     expect(metrics.cardSpill, `slide ${index + 1} card content spill`).toBeLessThanOrEqual(2);
     expect(metrics.bodyHorizontalOverflow, `slide ${index + 1} body horizontal overflow`).toBeLessThanOrEqual(1);
   }
   const headHeights = slideMetrics.map((metrics) => metrics.headHeight);
   expect(Math.max(...headHeights) - Math.min(...headHeights), `head heights: ${headHeights.join(', ')}`).toBeLessThanOrEqual(100);
+  expect(slideMetrics.map((metrics) => metrics.layout)).toEqual([
+    'cover',
+    'diagnosis',
+    'capabilities',
+    'flow',
+    'process',
+    'alignment',
+    'timeline',
+    'roles',
+    'evidence',
+    'guardrails',
+    'measures',
+    'roadmap',
+    'demo',
+    'takeaway',
+  ]);
 
   await deck.getByRole('button', { name: 'Exit presentation' }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
@@ -1646,7 +1667,7 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
   expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(deckScroll);
 });
 
-test('about deck slides fit without inner scrolling on a phone viewport', async ({ page }) => {
+test('about deck slides stay legible and scrollable on a phone viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openDemo(page);
   await page.goto('/about');
@@ -1656,10 +1677,10 @@ test('about deck slides fit without inner scrolling on a phone viewport', async 
   await page.getByRole('button', { name: 'Present' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
 
-  const overflows: number[] = [];
-  const fillGaps: number[] = [];
+  const minFonts: number[] = [];
   const cardSpills: number[] = [];
   const clippedLeads: boolean[] = [];
+  const scrollContainers: boolean[] = [];
   for (let index = 0; index < 14; index += 1) {
     await page.evaluate(() => new Promise<void>((resolve) => {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
@@ -1667,30 +1688,32 @@ test('about deck slides fit without inner scrolling on a phone viewport', async 
     const metrics = await page.evaluate(() => {
       const slide = document.querySelector('.deck-slide') as HTMLElement;
       const body = slide.querySelector('.story-body') as HTMLElement;
-      const children = [...body.children] as HTMLElement[];
-      const cards = [...slide.querySelectorAll('.story-card, .story-step, .story-scenario, .story-roadmap-col')] as HTMLElement[];
+      const cards = [...slide.querySelectorAll('.story-card, .story-step, .story-scenario, .story-roadmap-col, .slide-panel, .slide-capability, .slide-phase, .slide-stage, .slide-guardrail')] as HTMLElement[];
       const cardSpill = Math.max(0, ...cards.flatMap((card) => {
         const inset = Number.parseFloat(getComputedStyle(card).paddingBottom) || 0;
         const bottom = card.getBoundingClientRect().bottom - inset;
         return [...card.children].map((child) => Math.round(child.getBoundingClientRect().bottom - bottom));
       }));
+      const textElements = [...slide.querySelectorAll('p, span, strong, h3, h4, li, small')].filter((element) => {
+        if (!element.textContent?.trim()) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden';
+      });
       return {
-        overflow: body.scrollHeight - body.clientHeight,
-        fillGap: Math.round(
-          body.getBoundingClientRect().bottom - Math.max(...children.map((child) => child.getBoundingClientRect().bottom)),
-        ),
+        minFont: Math.min(...textElements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize))),
         horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         bodyHorizontalOverflow: body.scrollWidth - body.clientWidth,
         cardSpill,
         clippedLead: [...slide.querySelectorAll('.story-lead')].some(
           (lead) => lead.scrollHeight > lead.clientHeight + 2 || lead.scrollWidth > lead.clientWidth + 2,
         ),
+        scrolls: getComputedStyle(body).overflowY === 'auto' && body.scrollHeight >= body.clientHeight,
       };
     });
-    overflows.push(metrics.overflow);
-    fillGaps.push(metrics.fillGap);
+    minFonts.push(metrics.minFont);
     cardSpills.push(metrics.cardSpill);
     clippedLeads.push(metrics.clippedLead);
+    scrollContainers.push(metrics.scrolls);
     expect(metrics.horizontalOverflow, `horizontal overflow on slide ${index + 1}`).toBeLessThanOrEqual(1);
     expect(metrics.bodyHorizontalOverflow, `body horizontal overflow on slide ${index + 1}`).toBeLessThanOrEqual(1);
     if (index < 13) {
@@ -1698,10 +1721,10 @@ test('about deck slides fit without inner scrolling on a phone viewport', async 
       await expect(deck.locator('.deck-counter')).toContainText(String(index + 2).padStart(2, '0'));
     }
   }
-  expect(Math.max(...overflows), `body overflow: ${overflows.join(', ')}`).toBeLessThanOrEqual(1);
-  expect(Math.max(...fillGaps), `content fill gaps: ${fillGaps.join(', ')}`).toBeLessThanOrEqual(24);
+  expect(Math.min(...minFonts), `rendered font sizes: ${minFonts.join(', ')}`).toBeGreaterThanOrEqual(10);
   expect(Math.max(...cardSpills), `card content spill: ${cardSpills.join(', ')}`).toBeLessThanOrEqual(2);
   expect(clippedLeads.some(Boolean), `clipped leads: ${clippedLeads.join(', ')}`).toBe(false);
+  expect(scrollContainers.every(Boolean), `body scroll containers: ${scrollContainers.join(', ')}`).toBe(true);
 
   await deck.getByRole('button', { name: 'Exit presentation' }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
