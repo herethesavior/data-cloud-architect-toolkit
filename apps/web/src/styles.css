@@ -1945,6 +1945,10 @@ html[data-theme='dark'] .dcat-mark {
     .deck-slide .story-roadmap-col > .story-card-text,
     .deck-slide .story-roadmap-item span,
     .deck-slide .story-mock-flow { display: none; }
+    .deck-slide [data-chapter='alignment'] .story-grid-2 { grid-template-columns: 1fr; }
+    .deck-slide [data-chapter='alignment'] .story-quote { font-size: var(--story-body); }
+    .deck-slide [data-chapter='alignment'] .story-card-text,
+    .deck-slide [data-chapter='alignment'] .story-check:nth-child(n + 4) { display: none; }
     .deck-hint { display: none; }
   }
 
