@@ -241,6 +241,21 @@ describe('live Data 360 discovery', () => {
     expect(inventory.warnings).toHaveLength(0);
   });
 
+  it('does not follow a continuation into an unrelated REST endpoint', async () => {
+    const crossFamilyPath = 'services/data/v65.0/query/01gABC?locator=abc%2B123';
+    const cli = fakeCli({
+      [`${base}/data-lake-objects`]: JSON.stringify({
+        records: [{ apiName: 'Only_DLO__dll', fields: [] }],
+        nextPageUrl: `/${crossFamilyPath}`,
+      }),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+
+    expect(pathCalls(cli, crossFamilyPath)).toBe(0);
+    expect(inventory.dlos).toHaveLength(1);
+    expect(inventory.warnings.some((warning) => warning.message.includes('different REST endpoint'))).toBe(true);
+  });
+
   it('queries mappings only for source-enabled DMOs and leaves disabled DMOs as explicit gaps', async () => {
     const enabledPath = buildMappingPath('Enabled_DMO__dlm', '65.0', 'default');
     const cli = fakeCli({

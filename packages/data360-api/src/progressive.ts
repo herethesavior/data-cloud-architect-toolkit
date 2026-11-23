@@ -90,13 +90,14 @@ interface CursorState {
   errorStatus: RetrievalStatus;
   retried: number;
   skipped: number;
-  seenKeys: string[];
+  seenKeys: Set<string>;
 }
 
 interface FamilyState extends CursorState {
   family: NonMappingFamily;
   items: unknown[];
   relationships: RelationshipEdge[];
+  relationshipIds: Set<string>;
 }
 
 interface MappingTask extends CursorState {
@@ -107,7 +108,7 @@ interface MappingState extends CursorState {
   family: 'mappings';
   items: unknown[];
   tasks: MappingTask[];
-  queuedDmos: string[];
+  queuedDmos: Set<string>;
   failedQueries: number;
   limitHit: boolean;
 }
@@ -118,8 +119,9 @@ interface RelationshipTask extends CursorState {
 
 interface RelationshipQueryState extends CursorState {
   tasks: RelationshipTask[];
-  queuedDmos: string[];
+  queuedDmos: Set<string>;
   edges: RelationshipEdge[];
+  edgeIds: Set<string>;
   failedQueries: number;
   limitHit: boolean;
 }
@@ -226,7 +228,7 @@ function makeCursor(basePath: string): CursorState {
     errorStatus: 'error',
     retried: 0,
     skipped: 0,
-    seenKeys: [],
+    seenKeys: new Set<string>(),
   };
 }
 
@@ -236,6 +238,7 @@ function makeFamily(family: NonMappingFamily, apiVersion: string): FamilyState {
     family,
     items: [],
     relationships: [],
+    relationshipIds: new Set<string>(),
   };
 }
 
@@ -251,8 +254,9 @@ function makeRelationshipQueries(apiVersion: string): RelationshipQueryState {
   return {
     ...makeCursor(buildData360Path('dmos', apiVersion)),
     tasks: [],
-    queuedDmos: [],
+    queuedDmos: new Set<string>(),
     edges: [],
+    edgeIds: new Set<string>(),
     failedQueries: 0,
     limitHit: false,
   };
@@ -269,6 +273,7 @@ function unavailableFamily(family: NonMappingFamily): FamilyState {
     family,
     items: [],
     relationships: [],
+    relationshipIds: new Set<string>(),
   };
 }
 
@@ -323,8 +328,8 @@ function mergeNormalized<T>(
   const seenKeys = family === 'mappings' ? state.mappings.seenKeys : cursor.seenKeys;
   for (const item of normalized.items) {
     const key = identityFor(family, item);
-    if (seenKeys.includes(key)) continue;
-    seenKeys.push(key);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
     items.push(item);
   }
   cursor.skipped += normalized.skipped;
@@ -384,6 +389,11 @@ function applyContinuation(
   }
 
   const nextPath = buildNextPath(cursor.path, continuation);
+  if (continuation.nextPath && nextPath === cursor.path) {
+    stopWithWarning(state, family, cursor, 'CONTINUATION_CROSS_FAMILY',
+      'The response pointed to a different REST endpoint; that continuation was ignored.');
+    return;
+  }
   if (nextPath.length > MAX_REST_PATH_LENGTH) {
     stopWithWarning(state, family, cursor, 'CONTINUATION_TOO_LONG',
       'The continuation path exceeded the Salesforce CLI REST path limit; earlier results were kept.');
@@ -425,7 +435,8 @@ async function requestPage<T>(
       const relationships = (normalized as NormalizedCollection<unknown> as NormalizedDmos).relationships ?? [];
       const familyState = state.families.dmos;
       for (const edge of relationships) {
-        if (!familyState.relationships.some((existing) => existing.id === edge.id)) {
+        if (!familyState.relationshipIds.has(edge.id)) {
+          familyState.relationshipIds.add(edge.id);
           familyState.relationships.push(edge);
         }
       }
@@ -479,7 +490,7 @@ function syncMappingTasks(state: ProgressiveDiscoveryState): void {
   const fallback = defaultDataspace(state);
   for (const dmo of candidates) {
     const name = dmo.apiName?.trim();
-    if (!name || state.mappings.queuedDmos.includes(name)) continue;
+    if (!name || state.mappings.queuedDmos.has(name)) continue;
     if (state.mappings.tasks.length >= state.options.maxMappingQueries) {
       if (!state.mappings.limitHit) {
         state.mappings.limitHit = true;
@@ -489,7 +500,7 @@ function syncMappingTasks(state: ProgressiveDiscoveryState): void {
       }
       break;
     }
-    state.mappings.queuedDmos.push(name);
+    state.mappings.queuedDmos.add(name);
     state.mappings.tasks.push(makeMappingTask(name, state.apiVersion ?? '', dmo.dataSpace ?? fallback));
   }
 
@@ -526,10 +537,10 @@ function syncRelationshipTasks(state: ProgressiveDiscoveryState): void {
   const fallback = defaultDataspace(state);
   for (const dmo of candidates) {
     const name = dmo.apiName?.trim();
-    if (!name || state.relationshipQueries.queuedDmos.includes(name)) continue;
+    if (!name || state.relationshipQueries.queuedDmos.has(name)) continue;
     const dataspace = dmo.dataSpace ?? fallback;
     if (!isValidDmoDeveloperName(name) || !isValidDataspace(dataspace)) {
-      state.relationshipQueries.queuedDmos.push(name);
+      state.relationshipQueries.queuedDmos.add(name);
       pushWarning(state, 'dmos', 'RELATIONSHIP_QUERY_SKIPPED',
         `Relationship lookup skipped for DMO ${name}: its name or data space cannot be used safely in a REST path.`,
         'warning');
@@ -544,7 +555,7 @@ function syncRelationshipTasks(state: ProgressiveDiscoveryState): void {
       }
       break;
     }
-    state.relationshipQueries.queuedDmos.push(name);
+    state.relationshipQueries.queuedDmos.add(name);
     state.relationshipQueries.tasks.push(makeRelationshipTask(name, state.apiVersion ?? '', dataspace));
   }
 }
@@ -566,7 +577,8 @@ async function fetchRelationshipTaskPage(
     const entries = extractCollection(decoded, 'relationships');
     const normalized = normalizeDmoRelationships(entries, contextForRelationshipTask(state, task));
     for (const edge of normalized.items) {
-      if (!state.relationshipQueries.edges.some((existing) => existing.id === edge.id)) {
+      if (!state.relationshipQueries.edgeIds.has(edge.id)) {
+        state.relationshipQueries.edgeIds.add(edge.id);
         state.relationshipQueries.edges.push(edge);
       }
     }
@@ -848,7 +860,7 @@ function unavailableState(
       family: 'mappings',
       items: [],
       tasks: [],
-      queuedDmos: [],
+      queuedDmos: new Set<string>(),
       failedQueries: 0,
       limitHit: false,
       done: true,
@@ -859,8 +871,9 @@ function unavailableState(
     relationshipQueries: {
       ...makeCursor(unavailablePath('dmos')),
       tasks: [],
-      queuedDmos: [],
+      queuedDmos: new Set<string>(),
       edges: [],
+      edgeIds: new Set<string>(),
       failedQueries: 0,
       limitHit: false,
       done: true,
@@ -958,7 +971,7 @@ export async function createProgressiveDiscovery(
       family: 'mappings',
       items: [],
       tasks: [],
-      queuedDmos: [],
+      queuedDmos: new Set<string>(),
       failedQueries: 0,
       limitHit: false,
     },

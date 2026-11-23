@@ -135,7 +135,12 @@ export async function fetchCollection(
       warnings.push(`Pagination stopped after ${maxPages} page(s); results may be incomplete.`);
       break;
     }
-    requestPath = buildNextPath(requestPath, continuation);
+    const nextPath = buildNextPath(requestPath, continuation);
+    if (continuation.nextPath && nextPath === requestPath) {
+      warnings.push('The response pointed to a different REST endpoint; that continuation was ignored.');
+      break;
+    }
+    requestPath = nextPath;
   }
 
   return { entries, warnings };

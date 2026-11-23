@@ -17,7 +17,6 @@ export interface DiscoverySessionRecord {
   state: ProgressiveDiscoveryState;
   latest: InventorySnapshot;
   controller: AbortController;
-  firstBatch: Promise<void>;
   running: boolean;
 }
 

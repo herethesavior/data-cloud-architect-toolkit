@@ -283,9 +283,23 @@ export function offsetContinuation(
   };
 }
 
-/** Append or replace a cursor on an already allowlisted Data 360 REST path. */
+function endpointOf(path: string): string {
+  try {
+    return new URL(path, 'https://dcat.local').pathname.replace(/\/+$/, '').toLowerCase();
+  } catch {
+    return (path.split('?')[0] ?? path).replace(/\/+$/, '').toLowerCase();
+  }
+}
+
+/**
+ * Append or replace a cursor on an already allowlisted Data 360 REST path.
+ * A URL-style cursor that leaves the current endpoint is ignored: following it
+ * would let one family's response redirect a read into an unrelated REST path.
+ */
 export function buildNextPath(path: string, continuation: Continuation): string {
-  if (continuation.nextPath) return continuation.nextPath;
+  if (continuation.nextPath) {
+    return endpointOf(continuation.nextPath) === endpointOf(path) ? continuation.nextPath : path;
+  }
   if (!continuation.cursor) return path;
   const param = continuation.param ?? 'nextToken';
   try {

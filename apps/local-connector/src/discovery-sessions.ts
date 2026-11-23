@@ -127,7 +127,6 @@ export async function startDiscoverySession(
   if (reusedId && !options.refresh) {
     const existing = state.discoverySessions.get(reusedId);
     if (existing && existing.alias === org.alias && !isExpired(existing)) {
-      await existing.firstBatch;
       return resultOf(existing);
     }
   }
@@ -165,7 +164,6 @@ export async function startDiscoverySession(
     state: progressive,
     latest: progressiveSnapshot(progressive),
     controller,
-    firstBatch: Promise.resolve(),
     running: false,
   };
   state.discoverySessions.set(sessionId, record);
@@ -194,7 +192,6 @@ export async function getDiscoverySession(
     record.latest = progressiveSnapshot(record.state);
     record.updatedAt = Date.now();
   }
-  await record.firstBatch;
   ensureRunner(state, record);
   return resultOf(record);
 }
