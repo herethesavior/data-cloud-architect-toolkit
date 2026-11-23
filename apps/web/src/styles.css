@@ -2530,6 +2530,7 @@ html[data-theme='dark'] .dcat-mark {
     .deck-slide .story-body {
       overflow-y: auto;
       overflow-x: hidden;
+      scrollbar-width: none;
       overscroll-behavior: contain;
       padding-right: 0.25rem;
     }
