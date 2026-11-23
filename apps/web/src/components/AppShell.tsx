@@ -263,13 +263,19 @@ export function AppShell({
         data-collapsed={sidebarCollapsed}
         className="sidebar hidden shrink-0 flex-col border-r border-line bg-surface lg:flex"
       >
-        <div className="sidebar-header flex items-center gap-3 px-5 py-5">
+        <a
+          href={pageHref('dashboard')}
+          onClick={(event) => navigateFromLink(event, 'dashboard', navigate)}
+          aria-label="DCAT home"
+          title="DCAT home"
+          className="sidebar-header flex items-center gap-3 px-5 py-5"
+        >
           <DcatMark size={40} />
           <div className="sidebar-label min-w-0">
             <p className="font-semibold tracking-tight">DCAT</p>
             <p className="truncate text-xs text-ink-soft">Data Cloud Architect Toolkit</p>
           </div>
-        </div>
+        </a>
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
           <NavigationList page={page} onNavigate={navigate} label="Main navigation" collapsed={sidebarCollapsed} />
         </div>

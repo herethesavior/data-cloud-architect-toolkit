@@ -1287,10 +1287,16 @@ test('header stays compact and groups workspace controls', async ({ page }) => {
   await expect(header.getByRole('button', { name: 'Search metadata' })).toBeVisible();
   await expect(header.getByLabel('Selected organization')).toBeVisible();
   await expect(header.getByText('DEMO DATA', { exact: true })).toBeVisible();
+  await expect(header.getByRole('button', { name: 'Open org connection details' })).toContainText('Details');
+  await expect(header.getByRole('button', { name: 'Help' })).toContainText('Help');
+  await expect(header.locator('h1')).toHaveAttribute('title', 'Dashboard');
+  await expect(header.getByRole('link', { name: 'DCAT home' })).toBeHidden();
+  await expect(page.locator('#desktop-sidebar').getByRole('link', { name: 'DCAT home' })).toHaveAttribute('href', '/');
 
   await page.setViewportSize({ width: 390, height: 844 });
   const phoneHeight = (await header.boundingBox())?.height ?? 0;
   expect(phoneHeight).toBeLessThanOrEqual(112);
+  await expect(header.getByRole('link', { name: 'DCAT home' })).toBeVisible();
 });
 
 test('desktop sidebar collapses to an icon rail and persists the choice', async ({ page }) => {

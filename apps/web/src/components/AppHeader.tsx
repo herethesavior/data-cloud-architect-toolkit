@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react';
 import { NAV_GROUPS, PAGE_TITLES } from '../navigation.ts';
 import type { Page } from '../navigation.ts';
 import { isHosted } from '../lib/hosted.ts';
@@ -5,6 +6,7 @@ import type { ThemeController } from '../lib/useTheme.ts';
 import type { WorkspaceContext, WorkspaceMode } from '../lib/workspace.ts';
 import { workspaceBadge } from '../lib/workspace.ts';
 import type { OrgSummary } from '@dcat/core';
+import { DcatMark } from './DcatMark.tsx';
 import { Icon } from './Icon.tsx';
 import { Badge, Button } from './ui/index.ts';
 
@@ -90,6 +92,12 @@ export function AppHeader({
   const selectedOrg = orgs.find((org) => org.alias === selectedAlias) ?? null;
   const groupLabel = NAV_GROUPS.find((group) => group.items.some((item) => item.id === page))?.label ?? 'Workspace';
 
+  const onBrandClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onNavigate('dashboard');
+  };
+
   return (
     <header className="app-header sticky top-0 z-30 border-b border-line bg-surface">
       <div className="app-header-inner mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
@@ -102,6 +110,15 @@ export function AppHeader({
           >
             <Icon name="menu" />
           </button>
+          <a
+            href="/"
+            onClick={onBrandClick}
+            aria-label="DCAT home"
+            title="DCAT home"
+            className="grid size-9 shrink-0 place-items-center rounded-lg hover:bg-surface-alt lg:hidden"
+          >
+            <DcatMark size={28} />
+          </a>
           <button
             type="button"
             onClick={onToggleSidebar}
@@ -129,7 +146,7 @@ export function AppHeader({
 
         <div className="app-header-identity">
           <p className="label-xs hidden sm:block">{groupLabel}</p>
-          <h1 className="truncate text-base leading-6 font-semibold tracking-tight text-ink sm:text-lg">{PAGE_TITLES[page]}</h1>
+          <h1 title={PAGE_TITLES[page]} className="truncate text-base leading-6 font-semibold tracking-tight text-ink 2xl:text-lg">{PAGE_TITLES[page]}</h1>
           <p className="hidden truncate text-xs leading-4 text-ink-soft sm:block">
             {context
               ? `${context.alias} · ${context.environment === 'demo' ? 'sample metadata' : selectedOrg?.connectedStatus ?? 'Status unknown'}`
@@ -138,41 +155,45 @@ export function AppHeader({
         </div>
 
         <div className="app-header-context" role="group" aria-label="Workspace context">
-          <div className="w-28 shrink-0 sm:w-36 xl:w-44 2xl:w-52">
-            <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
+          <div className="flex items-center gap-1.5">
+            <div className="w-28 shrink-0 sm:w-30 xl:w-40 2xl:w-52">
+              <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
+            </div>
+            <Button
+              variant="quiet"
+              onClick={onGoToOrgs}
+              aria-label="Open org connection details"
+              className="shrink-0 px-2"
+            >
+              <Icon name="plug" size={17} />
+              <span className="hidden xl:inline">Details</span>
+            </Button>
           </div>
-          <Button
-            variant="quiet"
-            onClick={onGoToOrgs}
-            aria-label="Open org connection details"
-            className="shrink-0 px-2"
-          >
-            <Icon name="plug" size={17} />
-            <span className="hidden 2xl:inline">Details</span>
-          </Button>
-          <Badge
-            tone={badge.tone}
-            dot
-            title={mode === 'demo' ? 'Sample metadata only - no Salesforce org is connected.' : undefined}
-          >
-            {badge.label}
-          </Badge>
-          <Button
-            variant="secondary"
-            onClick={onToggleMode}
-            disabled={isTogglingMode}
-            icon={<Icon name={mode === 'demo' ? 'plug' : 'database'} size={15} />}
-            className="shrink-0 px-2 xl:px-3"
-            aria-label={`Switch to ${mode === 'demo' ? 'live' : 'demo'} mode`}
-            aria-busy={isTogglingMode}
-            title={mode === 'demo'
-              ? hosted
-                ? 'Live mode reads metadata through your local SF CLI bridge.'
-                : 'Live mode reads metadata through your local Salesforce CLI.'
-              : 'Demo mode uses sample metadata; no Salesforce org is connected.'}
-          >
-            <span className="hidden xl:inline">{isTogglingMode ? 'Switching...' : `Use ${mode === 'demo' ? 'live' : 'demo'}`}</span>
-          </Button>
+          <div className="flex items-center gap-1.5 border-l border-line pl-1.5">
+            <Badge
+              tone={badge.tone}
+              dot
+              title={mode === 'demo' ? 'Sample metadata only - no Salesforce org is connected.' : undefined}
+            >
+              {badge.label}
+            </Badge>
+            <Button
+              variant="secondary"
+              onClick={onToggleMode}
+              disabled={isTogglingMode}
+              icon={<Icon name={mode === 'demo' ? 'plug' : 'database'} size={15} />}
+              className="shrink-0 px-2 xl:px-3"
+              aria-label={`Switch to ${mode === 'demo' ? 'live' : 'demo'} mode`}
+              aria-busy={isTogglingMode}
+              title={mode === 'demo'
+                ? hosted
+                  ? 'Live mode reads metadata through your local SF CLI bridge.'
+                  : 'Live mode reads metadata through your local Salesforce CLI.'
+                : 'Demo mode uses sample metadata; no Salesforce org is connected.'}
+            >
+              <span className="hidden xl:inline">{isTogglingMode ? 'Switching...' : `Use ${mode === 'demo' ? 'live' : 'demo'}`}</span>
+            </Button>
+          </div>
         </div>
 
         <div className="app-header-utilities" role="group" aria-label="Utilities">
@@ -184,7 +205,7 @@ export function AppHeader({
             className="shrink-0 px-2"
           >
             <Icon name="info" size={17} />
-            <span className="hidden 2xl:inline">Help</span>
+            <span className="hidden xl:inline">Help</span>
           </Button>
           <Button
             variant="quiet"
