@@ -154,7 +154,7 @@ export function AppHeader({
 
         <div className="app-header-context" role="group" aria-label="Workspace context">
           <div className="flex min-w-0 items-center gap-1.5">
-            <div className="w-20 shrink-0 sm:w-28 lg:w-32 xl:w-40 2xl:w-52">
+            <div className="w-28 shrink-0 lg:w-32 xl:w-40 2xl:w-52">
               <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
             </div>
           </div>
