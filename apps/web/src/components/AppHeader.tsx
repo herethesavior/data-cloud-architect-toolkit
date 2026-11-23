@@ -117,7 +117,7 @@ export function AppHeader({
             title="DCAT home"
             className="grid size-9 shrink-0 place-items-center rounded-lg hover:bg-surface-alt lg:hidden"
           >
-            <DcatMark size={28} />
+            <DcatMark size={32} />
           </a>
           <button
             type="button"
@@ -156,7 +156,7 @@ export function AppHeader({
 
         <div className="app-header-context" role="group" aria-label="Workspace context">
           <div className="flex items-center gap-1.5">
-            <div className="w-28 shrink-0 sm:w-30 xl:w-40 2xl:w-52">
+            <div className="w-24 shrink-0 sm:w-26 xl:w-40 2xl:w-52">
               <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
             </div>
             <Button

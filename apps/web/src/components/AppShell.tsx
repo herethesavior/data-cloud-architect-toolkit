@@ -270,7 +270,7 @@ export function AppShell({
           title="DCAT home"
           className="sidebar-header flex items-center gap-3 px-5 py-5"
         >
-          <DcatMark size={40} />
+          <DcatMark size={44} />
           <div className="sidebar-label min-w-0">
             <p className="font-semibold tracking-tight">DCAT</p>
             <p className="truncate text-xs text-ink-soft">Data Cloud Architect Toolkit</p>

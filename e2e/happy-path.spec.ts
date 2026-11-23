@@ -1299,6 +1299,48 @@ test('header stays compact and groups workspace controls', async ({ page }) => {
   await expect(header.getByRole('link', { name: 'DCAT home' })).toBeVisible();
 });
 
+test('brand mark is transparent and the header adapts across screen sizes', async ({ page }) => {
+  const markResponse = await page.request.get('/dcat-mark.svg');
+  expect(markResponse.ok()).toBeTruthy();
+  const markSvg = await markResponse.text();
+  expect(markSvg).toContain('viewBox="0 0 512 512"');
+  expect(markSvg).not.toContain('<rect');
+  expect(markSvg).not.toContain('linearGradient');
+
+  await openDemo(page);
+  const header = page.locator('header').first();
+  await expect(header.locator('img.dcat-mark').first()).toHaveAttribute('src', '/dcat-icon-192.png');
+
+  for (const width of [320, 390, 768, 1024, 1440, 2560]) {
+    await page.setViewportSize({ width, height: 900 });
+    const metrics = await page.evaluate(() => {
+      const bar = document.querySelector('header')!;
+      const buttons = [...bar.querySelectorAll('button')].filter((button) => button.getBoundingClientRect().width > 0);
+      return {
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        headerHeight: bar.getBoundingClientRect().height,
+        contextHeight: bar.querySelector('.app-header-context')!.getBoundingClientRect().height,
+        minButtonHeight: Math.min(...buttons.map((button) => button.getBoundingClientRect().height)),
+      };
+    });
+    expect(metrics.overflow, `horizontal overflow at ${width}px`).toBe(0);
+    expect(metrics.headerHeight, `header height at ${width}px`).toBeLessThanOrEqual(width < 640 ? 112 : 80);
+    expect(metrics.contextHeight, `context height at ${width}px`).toBeLessThanOrEqual(56);
+    expect(metrics.minButtonHeight, `touch target at ${width}px`).toBeGreaterThanOrEqual(36);
+  }
+
+  await page.setViewportSize({ width: 768, height: 900 });
+  await page.goto('/change-impact');
+  await expect(header.locator('h1')).toHaveText('Change Impact Analyzer');
+  const titleFits = await header.locator('h1').evaluate((element) => element.scrollWidth <= element.clientWidth);
+  expect(titleFits).toBe(true);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+  const markFilter = await page.locator('#desktop-sidebar img.dcat-mark').evaluate((element) => getComputedStyle(element).filter);
+  expect(markFilter).toContain('brightness');
+});
+
 test('desktop sidebar collapses to an icon rail and persists the choice', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openDemo(page);
