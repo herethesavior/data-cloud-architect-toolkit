@@ -1798,11 +1798,6 @@ html[data-theme='dark'] .dcat-mark {
     flex: 1 1 auto;
   }
 
-  .deck-slide .story-body > .slide-measures {
-    flex: 1;
-    min-height: 0;
-  }
-
   .deck-slide .story-grid,
   .deck-slide .story-rows,
   .deck-slide .story-pipeline,
@@ -2238,7 +2233,7 @@ html[data-theme='dark'] .dcat-mark {
 
   .slide-measures {
     display: grid;
-    align-content: start;
+    flex: 1;
     gap: 0.3rem;
     width: 100%;
     max-width: 56rem;
@@ -2317,6 +2312,8 @@ html[data-theme='dark'] .dcat-mark {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
     align-items: start;
+    align-content: start;
+    flex: 1;
     gap: 0.5rem;
     height: 100%;
   }
