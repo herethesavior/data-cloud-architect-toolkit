@@ -237,6 +237,32 @@ describe('hosted bridge relay', () => {
     expect(kv.puts).toContain(`relay:response:${created.id}`);
   });
 
+  it('serves current agent CLI state and cancels relayed requests when the mode changes', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    const updatedCli = { installed: true, version: '2.159.7', error: null };
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli: updatedCli }, {}, env);
+
+    const cliStatus = await app.request('/api/cli/status', { headers: session.headers }, env);
+    expect(await cliStatus.json()).toEqual(updatedCli);
+    const health = await app.request('/api/health', { headers: session.headers }, env);
+    expect((await health.json() as { cli: { version: string } }).cli.version).toBe('2.159.7');
+
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/mode', { mode: 'demo' }, session.headers, env);
+    const cancelled = await app.request(`/api/relay/requests/${created.id}`, {
+      headers: session.headers,
+    }, env);
+    expect(cancelled.status).toBe(404);
+  });
+
   it('keeps a concurrent mode change when a browser queues a request', async () => {
     const env = makeEnv();
     const session = await startSession(env);

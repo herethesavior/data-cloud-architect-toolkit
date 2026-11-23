@@ -309,6 +309,15 @@ async function resolveRequestState(
       ? { id: record.id, status: 'completed', result: response.response.result, error: null }
       : { id: record.id, status: 'failed', result: null, error: response.response.error };
   }
+  // Sessions created before the split may still hold a terminal inline request.
+  if (record.status === 'completed' || record.status === 'failed') {
+    return {
+      id: record.id,
+      status: record.status,
+      result: record.result,
+      error: record.error,
+    };
+  }
   if (record.expiresAt <= Date.now()) {
     return {
       id: record.id,
@@ -319,19 +328,29 @@ async function resolveRequestState(
   }
   return {
     id: record.id,
-    status: claim?.sessionId === session.id ? 'running' : 'pending',
+    status: record.status === 'running' || claim?.sessionId === session.id ? 'running' : 'pending',
     result: null,
     error: null,
   };
 }
 
-async function bridgeStatusForSession(
+export async function bridgeStatusForSession(
   env: Env,
   session: SessionRecord,
   origin: string,
 ): Promise<BridgeStatus> {
   const agent = await loadAgentState(env, session);
   return getBridgeUpdateStatus({ ...session, relay: { ...session.relay, ...agent } }, origin);
+}
+
+/** Browser-owned cancellation used by both unpair and workspace mode changes. */
+export async function clearRelayRequest(env: Env, session: SessionRecord): Promise<void> {
+  const record = await loadRequest(env, session);
+  await env.DCAT_SESSIONS.delete(requestKey(session.id));
+  if (record) {
+    await env.DCAT_SESSIONS.delete(claimKey(record.id));
+    await env.DCAT_SESSIONS.delete(responseKey(record.id));
+  }
 }
 
 async function sessionForAgent(env: Env, token: string): Promise<SessionRecord | null> {
@@ -580,7 +599,6 @@ export function relayRoutes() {
         return sendError(context, 401, 'INVALID_SESSION_TOKEN', 'Refresh the page and try again.');
       }
       const oldToken = session.relay.agentToken;
-      const active = await loadRequest(context.env, session);
       session.relay = {
         agentToken: null,
         pairedAt: null,
@@ -593,11 +611,7 @@ export function relayRoutes() {
       };
       if (oldToken) await context.env.DCAT_SESSIONS.delete(`agent:${oldToken}`);
       await context.env.DCAT_SESSIONS.delete(agentStateKey(session.id));
-      await context.env.DCAT_SESSIONS.delete(requestKey(session.id));
-      if (active) {
-        await context.env.DCAT_SESSIONS.delete(claimKey(active.id));
-        await context.env.DCAT_SESSIONS.delete(responseKey(active.id));
-      }
+      await clearRelayRequest(context.env, session);
       await saveSession(context.env, session);
       return context.json({ paired: false });
     } catch (error) {
