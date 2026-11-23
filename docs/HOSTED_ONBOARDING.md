@@ -31,7 +31,7 @@ No Salesforce app registration, callback URL, consumer key/secret, `SF_CLIENT_ID
      The installer installs Salesforce CLI if needed, pairs this browser session, and starts the bridge immediately. Later restarts use `npx -y @dcat-toolkit/bridge@latest start` with saved config. Bridge storage holds only the relay URL, token, and version (mode `600`), never credentials. If a newer npm release exists, Step 1 shows **Update bridge** for 0.1.4+ agents; older agents show a fixed copyable install command.
    - **Step 2 — Connect org.** Enter a local alias and an optional HTTPS sandbox instance URL. The bridge runs the fixed `sf org login web --alias <alias> --set-default [--instance-url <https Salesforce URL>]` command locally; Salesforce CLI opens the browser for login.
    - **Step 3 — View inventory.** Select the authenticated org in the site; the browser sends typed requests through the Worker relay and the agent returns redacted results.
-4. The agent polls `/api/relay/poll` with an agent token and answers via `/api/relay/respond`. Only `cli.status`, `org.list`, `org.connect`, `inventory.get`, `transform.get`, `mode.set`, and `bridge.update` are allowed. No arbitrary URL, command, shell, SOQL, or record data crosses the relay.
+4. The agent polls `/api/relay/poll` with an agent token and answers via `/api/relay/respond`. Only `cli.status`, `org.list`, `org.connect`, `inventory.get`, `inventory.start`, `inventory.status`, `transform.get`, `mode.set`, and `bridge.update` are allowed. No arbitrary URL, command, shell, SOQL, or record data crosses the relay.
 5. Unpairing (or creating a new pairing code) invalidates the previous agent token. DCAT never receives a username, password, security token, or SFDX auth URL.
 
 ## Troubleshooting

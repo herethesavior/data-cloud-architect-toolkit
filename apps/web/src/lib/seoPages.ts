@@ -85,11 +85,11 @@ export const PAGE_SEO: Record<SeoPage, PageSeo> = {
   },
   help: {
     title: 'Help & documentation | DCAT',
-    description: 'Find setup guidance, privacy and status details, terminology, and contact information for DCAT.',
+    description: 'Find setup guidance, after-Hypercare support steps, privacy and status details, terminology, and contact information for DCAT.',
   },
   about: {
     title: 'About DCAT | Data Cloud Architect Toolkit',
-    description: `${BASE_DESCRIPTION} Read the product story, from discovery and evidence to boundaries and next steps.`,
+    description: `${BASE_DESCRIPTION} Read the product story: discovery, business alignment, post-Hypercare handover, evidence, and boundaries.`,
   },
 };
 

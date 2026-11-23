@@ -50,7 +50,6 @@ interface AppShellProps {
   orgsLoading: boolean;
   selectedAlias: string | null;
   onSelectOrg: (alias: string) => void;
-  onGoToOrgs: () => void;
   theme: ThemeController;
   localDataEpoch?: number;
   inventory: InventorySnapshot | null;
@@ -187,7 +186,6 @@ export function AppShell({
   orgsLoading,
   selectedAlias,
   onSelectOrg,
-  onGoToOrgs,
   theme,
   localDataEpoch = 0,
   inventory,
@@ -318,7 +316,6 @@ export function AppShell({
           orgsLoading={orgsLoading}
           selectedAlias={selectedAlias}
           onSelectOrg={onSelectOrg}
-          onGoToOrgs={onGoToOrgs}
           theme={theme}
           onOpenNavigation={() => setMenuOpen(true)}
           sidebarCollapsed={sidebarCollapsed}

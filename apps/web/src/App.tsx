@@ -638,7 +638,6 @@ export function App() {
         orgsLoading={orgsQuery.isFetching}
         selectedAlias={selectedAlias}
         onSelectOrg={selectOrg}
-        onGoToOrgs={goToOrgs}
         theme={theme}
         inventory={inventoryQuery.data ?? null}
         onSelectSearchResult={selectSearchResult}

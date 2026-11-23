@@ -349,6 +349,33 @@ const chapters: Chapter[] = [
     note: 'DCAT helps inspect metadata paths; it does not validate individual customer records or guarantee downstream business availability.',
   },
   {
+    id: 'handover',
+    eyebrow: 'Use case 03 · After Hypercare',
+    shortTitle: 'Handover',
+    title: <>Carry the architecture forward <Accent>after Hypercare.</Accent></>,
+    lead: 'When the support period ends, the customer owns the org. DCAT gives the incoming team a read-only way to confirm what was built, answer questions, and review changes without relying on the delivery team’s memory.',
+    body: (
+      <>
+        <div className="story-grid story-grid-3">
+          <Step number="01" title="Confirm the handover">
+            Compare the documented design with the metadata actually present before the delivery team steps away.
+          </Step>
+          <Step number="02" title="Bring new owners up to speed">
+            Follow a source-to-target path and inspect DLOs, DMOs, mappings, and transforms in one place.
+          </Step>
+          <Step number="03" title="Support the org with confidence">
+            Review dependencies before a change, refresh the snapshot as the org evolves, and export diagrams for internal runbooks.
+          </Step>
+        </div>
+        <OutcomeStrip
+          title="Outcome: the customer team can explain and support its own data architecture."
+          detail="Repeatable discovery, grounded evidence, and shareable artifacts beyond the Hypercare window."
+        />
+      </>
+    ),
+    note: 'DCAT reads metadata only. It does not replace runbooks, monitoring, or change approvals, and it never shows customer or transaction records.',
+  },
+  {
     id: 'audiences',
     eyebrow: 'Designed for the people around the data',
     shortTitle: 'Audiences',
@@ -705,7 +732,7 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
               onClick={() => openChapter(chapter.id)}
               className="chapter-index-link"
             >
-              <span>{String(index + 1).padStart(2, '0')}</span>
+              <span>{String(index + 1).padStart(2, '0')}</span>{' '}
               {chapter.shortTitle}
             </button>
           ))}

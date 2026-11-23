@@ -471,7 +471,7 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   await mockHostedWorker(page, state);
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
   await expect(page.getByRole('heading', { name: 'Set up SF CLI' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Create pairing code' })).toBeVisible();
 
@@ -525,7 +525,7 @@ test('hosted connect detects a sandbox from its Salesforce instance URL', async 
   await mockHostedWorker(page, state);
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
   await page.getByRole('button', { name: 'Create pairing code' }).click();
   await startFakeBridge(page, 'PAIR12345678');
   await page.getByRole('button', { name: 'Refresh status' }).click();
@@ -535,7 +535,7 @@ test('hosted connect detects a sandbox from its Salesforce instance URL', async 
   await page.getByRole('button', { name: 'Connect org' }).click();
 
   await expect(page.locator('h1')).toHaveText('Dashboard');
-  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
 
   const row = page.getByRole('row', { name: /uat-org/ });
   await expect(row).toBeVisible();
@@ -558,7 +558,7 @@ test('hosted bridge update button queues the allowlisted self-update operation',
   await mockHostedWorker(page, state);
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Open org connection details' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
   await page.getByRole('button', { name: 'Create pairing code' }).click();
   await startFakeBridge(page, 'PAIR12345678');
   await page.getByRole('button', { name: 'Refresh status' }).click();
