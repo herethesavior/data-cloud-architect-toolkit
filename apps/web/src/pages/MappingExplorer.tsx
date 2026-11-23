@@ -118,7 +118,7 @@ export function MappingExplorer({ context }: { context: WorkspaceContext | null 
             {message ? <p className="mb-4 text-xs text-ink-soft" role="status">{message}</p> : null}
 
             {mappings.length === 0 ? (
-              <Panel className="text-center text-sm text-ink-soft">No mappings match that search.</Panel>
+              <Panel role="status" className="text-center text-sm text-ink-soft">No mappings match that search.</Panel>
             ) : (
               <div className="grid gap-4 xl:grid-cols-2">
                 {mappings.map((mapping, index) => (

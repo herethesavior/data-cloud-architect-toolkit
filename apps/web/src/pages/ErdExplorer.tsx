@@ -622,7 +622,7 @@ function ErdExplorerView({ context, inventory, freshness, onNavigate }: ErdViewP
                 <p className="text-sm font-semibold text-ink">{selectedNode.data.label}</p>
                 <p className="mono mt-0.5 text-xs text-ink-faint">{selectedObject.apiName}</p>
                 <p className="mt-2 text-xs text-ink-soft">
-                  {selectedObject.fields.length} fields · {selectedRelationships.length} relationships
+                  <span className="tabular-nums">{selectedObject.fields.length}</span> fields · <span className="tabular-nums">{selectedRelationships.length}</span> relationships
                 </p>
               </div>
               <div className="max-h-64 overflow-auto rounded-lg border border-line">

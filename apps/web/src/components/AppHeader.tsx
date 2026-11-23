@@ -146,7 +146,7 @@ export function AppHeader({
 
         <div className="app-header-identity">
           <p className="label-xs hidden sm:block">{groupLabel}</p>
-          <h1 title={PAGE_TITLES[page]} className="truncate text-base leading-6 font-semibold tracking-tight text-ink 2xl:text-lg">{PAGE_TITLES[page]}</h1>
+          <h1 title={PAGE_TITLES[page]} className="truncate text-[15px] leading-6 font-semibold tracking-tight text-ink lg:text-base 2xl:text-lg">{PAGE_TITLES[page]}</h1>
           <p className="hidden truncate text-xs leading-4 text-ink-soft sm:block">
             {context
               ? `${context.alias} · ${context.environment === 'demo' ? 'sample metadata' : selectedOrg?.connectedStatus ?? 'Status unknown'}`
@@ -156,7 +156,7 @@ export function AppHeader({
 
         <div className="app-header-context" role="group" aria-label="Workspace context">
           <div className="flex items-center gap-1.5">
-            <div className="w-24 shrink-0 xl:w-40 2xl:w-52">
+            <div className="w-20 shrink-0 lg:w-24 xl:w-40 2xl:w-52">
               <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
             </div>
             <Button

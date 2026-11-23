@@ -5,6 +5,7 @@ export interface DataTableColumn<T> {
   header: ReactNode;
   render: (row: T) => ReactNode;
   hideBelow?: 'sm' | 'md' | 'lg';
+  align?: 'start' | 'end';
   cellClassName?: string;
 }
 
@@ -25,7 +26,10 @@ const hiddenClasses: Record<NonNullable<DataTableColumn<unknown>['hideBelow']>, 
 export function DataTable<T>({ columns, rows, getRowKey, ariaLabel, emptyMessage = 'No matching records.' }: DataTableProps<T>) {
   if (rows.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-line bg-surface-alt px-5 py-10 text-center text-sm text-ink-soft">
+      <div
+        role="status"
+        className="rounded-lg border border-dashed border-line bg-surface-alt px-5 py-10 text-center text-sm text-ink-soft"
+      >
         {emptyMessage}
       </div>
     );
@@ -37,7 +41,10 @@ export function DataTable<T>({ columns, rows, getRowKey, ariaLabel, emptyMessage
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column.key} className={`relative ${column.hideBelow ? hiddenClasses[column.hideBelow] : ''}`}>
+              <th
+                key={column.key}
+                className={`relative ${column.align === 'end' ? 'text-right tabular-nums' : 'text-left'} ${column.hideBelow ? hiddenClasses[column.hideBelow] : ''}`}
+              >
                 {column.header}
               </th>
             ))}
@@ -49,7 +56,7 @@ export function DataTable<T>({ columns, rows, getRowKey, ariaLabel, emptyMessage
               {columns.map((column) => (
                 <td
                   key={column.key}
-                  className={`${column.hideBelow ? hiddenClasses[column.hideBelow] : ''} ${column.cellClassName ?? ''}`}
+                  className={`${column.align === 'end' ? 'text-right tabular-nums' : 'text-left'} ${column.hideBelow ? hiddenClasses[column.hideBelow] : ''} ${column.cellClassName ?? ''}`}
                 >
                   {column.render(row)}
                 </td>

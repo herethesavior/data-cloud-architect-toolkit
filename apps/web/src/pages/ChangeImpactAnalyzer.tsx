@@ -320,19 +320,19 @@ function AnalyzerView({
                 <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-lg border border-line bg-surface-alt px-3 py-2">
                     <dt className="text-xs text-ink-soft">Direct dependencies</dt>
-                    <dd className="mt-1 text-lg font-semibold text-ink">{analysis.directCount}</dd>
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-ink">{analysis.directCount}</dd>
                   </div>
                   <div className="rounded-lg border border-line bg-surface-alt px-3 py-2">
                     <dt className="text-xs text-ink-soft">All reviewed paths</dt>
-                    <dd className="mt-1 text-lg font-semibold text-ink">{analysis.totalCount}</dd>
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-ink">{analysis.totalCount}</dd>
                   </div>
                   <div className="rounded-lg border border-line bg-surface-alt px-3 py-2">
                     <dt className="text-xs text-ink-soft">Downstream / Upstream</dt>
-                    <dd className="mt-1 text-lg font-semibold text-ink">{analysis.downstreamCount} / {analysis.upstreamCount}</dd>
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-ink">{analysis.downstreamCount} / {analysis.upstreamCount}</dd>
                   </div>
                   <div className="rounded-lg border border-line bg-surface-alt px-3 py-2">
                     <dt className="text-xs text-ink-soft">Exact field links</dt>
-                    <dd className="mt-1 text-lg font-semibold text-ink">{analysis.exactFieldMatchCount}</dd>
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-ink">{analysis.exactFieldMatchCount}</dd>
                   </div>
                 </dl>
                 <p className="mt-3 text-xs text-ink-soft">

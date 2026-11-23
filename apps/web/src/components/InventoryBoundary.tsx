@@ -205,7 +205,7 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           onClick={actions.cancelRefresh}
           aria-label="Cancel refresh"
           title="Cancel this refresh"
-          className="grid size-7 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
+          className="grid size-8 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
         >
           <Icon name="close" size={13} />
         </button>
@@ -216,7 +216,7 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           disabled={!context.alias}
           aria-label="Refresh inventory"
           title="Refresh this inventory from the local connector"
-          className="grid size-7 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-40"
+          className="grid size-8 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-40"
         >
           <Icon name="refresh" size={13} />
         </button>
