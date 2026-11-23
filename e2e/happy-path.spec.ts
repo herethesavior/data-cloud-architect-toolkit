@@ -1335,23 +1335,29 @@ test('brand mark is transparent and the header adapts across screen sizes', asyn
     const metrics = await page.evaluate(() => {
       const bar = document.querySelector('header')!;
       const barRect = bar.getBoundingClientRect();
+      const context = bar.querySelector('.app-header-context')!;
       const picker = bar.querySelector('select')!.getBoundingClientRect();
+      const contextControls = context.lastElementChild!.getBoundingClientRect();
       const buttons = [...bar.querySelectorAll('button')].filter((button) => button.getBoundingClientRect().width > 0);
       return {
         overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         headerHeight: barRect.height,
-        contextHeight: bar.querySelector('.app-header-context')!.getBoundingClientRect().height,
+        contextHeight: context.getBoundingClientRect().height,
         minButtonHeight: Math.min(...buttons.map((button) => button.getBoundingClientRect().height)),
         orgPickerWidth: picker.width,
         orgPickerInsideHeader: picker.left >= barRect.left && picker.right <= barRect.right && picker.bottom <= barRect.bottom,
+        pickerGapToControls: contextControls.left - picker.right,
       };
     });
     expect(metrics.overflow, `horizontal overflow at ${width}px`).toBe(0);
     expect(metrics.headerHeight, `header height at ${width}px`).toBeLessThanOrEqual(width < 640 ? 112 : 80);
     expect(metrics.contextHeight, `context height at ${width}px`).toBeLessThanOrEqual(56);
     expect(metrics.minButtonHeight, `touch target at ${width}px`).toBeGreaterThanOrEqual(36);
-    expect(metrics.orgPickerWidth, `org picker width at ${width}px`).toBeGreaterThanOrEqual(72);
+    expect(metrics.orgPickerWidth, `org picker width at ${width}px`).toBeGreaterThanOrEqual(width < 768 ? 140 : 72);
     expect(metrics.orgPickerInsideHeader, `org picker inside header at ${width}px`).toBe(true);
+    if (width < 768) {
+      expect(metrics.pickerGapToControls, `org picker gap to Demo Data at ${width}px`).toBeLessThanOrEqual(24);
+    }
   }
 
   await page.setViewportSize({ width: 768, height: 900 });
