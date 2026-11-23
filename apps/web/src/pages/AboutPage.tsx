@@ -531,7 +531,7 @@ const chapters: Chapter[] = [
         </div>
       </div>
     ),
-    presentNote: 'Frame the demo around an architect question, then show the evidence path.',
+    presentNote: 'Illustrative layout only. Counts and visual indicators are sample/demo values, not a live org.',
   },
   {
     id: 'takeaway',

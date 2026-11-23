@@ -1772,6 +1772,11 @@ html[data-theme='dark'] .dcat-mark {
     align-items: center;
   }
 
+  /* The footer owns the footnote in Present mode; body notes duplicate it. */
+  .deck-slide .story-body .story-note {
+    display: none;
+  }
+
   .deck-slide .story-body {
     flex: initial;
     min-height: 0;
@@ -1939,8 +1944,7 @@ html[data-theme='dark'] .dcat-mark {
     .deck-slide .story-roadmap-kicker,
     .deck-slide .story-roadmap-col > .story-card-text,
     .deck-slide .story-roadmap-item span,
-    .deck-slide .story-mock-flow,
-    .deck-slide .story-grid-demo .story-note { display: none; }
+    .deck-slide .story-mock-flow { display: none; }
     .deck-hint { display: none; }
   }
 
