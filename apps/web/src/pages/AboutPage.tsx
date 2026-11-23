@@ -30,7 +30,8 @@ interface Chapter {
   lead?: string;
   body: ReactNode;
   note?: string;
-  /** Shorter footnote used only in the full-screen deck when the story note is absent. */
+  /** Shorter copy used in Present mode so the fixed slide frame stays readable. */
+  presentLead?: string;
   presentNote?: string;
 }
 
@@ -221,6 +222,7 @@ const chapters: Chapter[] = [
     shortTitle: 'Big idea',
     title: <>See the <Accent>architecture</Accent> behind the data.</>,
     lead: 'DCAT helps Salesforce Data Cloud architects discover how an environment is put together, trace how data moves, and explain the architecture with confidence.',
+    presentLead: 'See how a Data Cloud org fits together.',
     body: (
       <div className="story-cover">
         <div>
@@ -245,6 +247,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Problem',
     title: <>The architecture exists. <Accent>Understanding it takes work.</Accent></>,
     lead: 'Data Cloud brings together many connected building blocks. Understanding the whole picture often means moving between screens, metadata, queries, spreadsheets, and tribal knowledge.',
+    presentLead: 'Metadata is scattered; understanding it takes work.',
+    presentNote: 'Architects need connected metadata, not another screen to search.',
     body: (
       <div className="story-rows">
         <NumberedRow number="01" title="Fragmented visibility across components" detail="Scattered views" />
@@ -262,6 +266,8 @@ const chapters: Chapter[] = [
     shortTitle: 'What it is',
     title: <>One workbench. <Accent>A connected view.</Accent></>,
     lead: 'DCAT is a local-first, read-only discovery workbench for Salesforce Data Cloud / Data 360 metadata. It helps teams inspect the structure and relationships behind an implementation.',
+    presentLead: 'A read-only workbench for connected metadata.',
+    presentNote: 'Built for discovery and assessment, not org configuration.',
     body: (
       <div className="story-grid story-grid-3">
         <StoryCard icon="layers" tag="Discover" title="See what is there">
@@ -283,6 +289,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Flow',
     title: <>Follow the data. <Accent>Understand the model.</Accent></>,
     lead: 'DCAT brings key metadata families into a connected exploration experience.',
+    presentLead: 'Bring metadata families into one connected view.',
+    presentNote: 'Conceptual flow; available paths depend on the org.',
     body: (
       <>
         <div className="story-pipeline">
@@ -307,6 +315,7 @@ const chapters: Chapter[] = [
     shortTitle: 'Workflow',
     title: <>Understand an unfamiliar <Accent>Data Cloud org faster.</Accent></>,
     lead: 'Useful when joining a project, taking over an implementation, preparing an assessment, or reviewing an existing design.',
+    presentLead: 'Faster discovery for an unfamiliar org.',
     body: (
       <>
         <div className="story-grid story-grid-5">
@@ -330,6 +339,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Alignment',
     title: <>Translate a business need <Accent>into a traceable data path.</Accent></>,
     lead: 'Turn a business request into an inspectable chain of sources, streams, mappings, and model objects.',
+    presentLead: 'Turn a business request into a traceable data path.',
+    presentNote: 'Paths are inspectable; customer records are not validated.',
     body: (
       <div className="story-grid story-grid-2">
         <div className="story-scenario">
@@ -359,6 +370,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Handover',
     title: <>Carry the architecture forward <Accent>after Hypercare.</Accent></>,
     lead: 'When the support period ends, the customer owns the org. DCAT gives the incoming team a read-only way to confirm what was built, answer questions, and review changes without relying on the delivery team’s memory.',
+    presentLead: 'Give the incoming team a read-only handover view.',
+    presentNote: 'Reads metadata only; runbooks and approvals still matter.',
     body: (
       <>
         <div className="story-grid story-grid-3">
@@ -386,6 +399,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Audiences',
     title: <>One architecture view. <Accent>Different team outcomes.</Accent></>,
     lead: 'The same architecture view answers different questions for each role around the data.',
+    presentLead: 'One view, different answers for each role.',
+    presentNote: 'Outputs help everyone; the workbench is architect-oriented.',
     body: (
       <div className="story-grid story-grid-5">
         <StoryCard tag="Architects" title="Explore the model">Models, relationships, lineage, and implementation structure.</StoryCard>
@@ -403,6 +418,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Trust',
     title: <>Visibility is useful. <Accent>Trust makes it valuable.</Accent></>,
     lead: 'DCAT’s strongest distinction is not simply showing more metadata. It is showing relationships with context, boundaries, and evidence.',
+    presentLead: 'Show relationships with context and evidence.',
+    presentNote: 'Evidence and boundaries make diagrams honest.',
     body: (
       <div className="story-grid story-grid-2">
         <div>
@@ -424,6 +441,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Boundaries',
     title: <>Useful visibility. <Accent>Careful boundaries.</Accent></>,
     lead: 'DCAT is designed to inspect metadata without becoming another system that operates on the Salesforce org.',
+    presentLead: 'Inspect metadata without operating on the org.',
+    presentNote: 'Metadata can be sensitive; this is not a security review.',
     body: (
       <>
         <div className="story-grid story-grid-3">
@@ -455,6 +474,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Value',
     title: <>Less time piecing things together. <Accent>More time making decisions.</Accent></>,
     lead: 'DCAT creates a practical starting point for discovery, investigation, architecture reviews, and knowledge transfer.',
+    presentLead: 'A starting point for discovery, reviews, and handovers.',
+    presentNote: 'Suggested measures, not claimed performance results.',
     body: (
       <div className="story-rows">
         <NumberedRow number="01" title="Time to understand an unfamiliar org" detail="Efficiency" />
@@ -472,6 +493,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Roadmap',
     title: <>From discovery <Accent>to architecture intelligence.</Accent></>,
     lead: 'Build on the current metadata foundation. Prioritize capabilities that turn visibility into better decisions.',
+    presentLead: 'Turn visibility into better decisions.',
+    presentNote: 'Concepts are proposals, not shipped features.',
     body: (
       <div className="story-grid story-grid-3">
         <RoadmapColumn
@@ -516,6 +539,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Demo',
     title: <>Lead with a question. <Accent>Let DCAT answer it.</Accent></>,
     lead: 'Rather than touring every menu, anchor the demo in the problems architects and delivery teams actually face.',
+    presentLead: 'Anchor the demo in real architect problems.',
+    presentNote: 'Illustrative layout; counts and indicators are sample values.',
     body: (
       <div className="story-grid story-grid-demo">
         <div className="story-rows">
@@ -531,7 +556,6 @@ const chapters: Chapter[] = [
         </div>
       </div>
     ),
-    presentNote: 'Illustrative layout only. Counts and visual indicators are sample/demo values, not a live org.',
   },
   {
     id: 'takeaway',
@@ -539,6 +563,8 @@ const chapters: Chapter[] = [
     shortTitle: 'Takeaway',
     title: <>Don’t just see the data. <Accent>Understand the architecture.</Accent></>,
     lead: 'DCAT can become the architect’s workbench for discovering what exists, understanding how it connects, and making better-informed decisions.',
+    presentLead: 'Discover what exists, understand how it connects.',
+    presentNote: 'Created in a personal capacity; not an official Salesforce product.',
     body: (
       <div className="story-grid story-grid-2">
         <div>
@@ -568,6 +594,7 @@ const chapters: Chapter[] = [
 
 function ChapterView({ chapter, mode }: { chapter: Chapter; mode: 'story' | 'present' }) {
   const headingId = `${mode}-chapter-${chapter.id}`;
+  const lead = mode === 'present' ? (chapter.presentLead ?? chapter.lead) : chapter.lead;
   const note = mode === 'present' ? (chapter.presentNote ?? chapter.note) : chapter.note;
   return (
     <section
@@ -579,7 +606,7 @@ function ChapterView({ chapter, mode }: { chapter: Chapter; mode: 'story' | 'pre
       <div className="story-chapter-head">
         <p className="story-eyebrow">{chapter.eyebrow}</p>
         <h3 id={headingId} className="story-title">{chapter.title}</h3>
-        {chapter.lead ? <p className="story-lead">{chapter.lead}</p> : null}
+        {lead ? <p className="story-lead">{lead}</p> : null}
       </div>
       <div className="story-body">{chapter.body}</div>
       {note ? <Note>{note}</Note> : null}

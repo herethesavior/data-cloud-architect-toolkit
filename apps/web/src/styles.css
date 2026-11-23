@@ -1540,6 +1540,7 @@ html[data-theme='dark'] .dcat-mark {
 
   .story-links a {
     display: flex;
+    min-width: 0;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
@@ -1551,6 +1552,10 @@ html[data-theme='dark'] .dcat-mark {
     text-decoration: none;
     transition: border-color var(--duration-fast) var(--ease-standard),
       background var(--duration-fast) var(--ease-standard);
+  }
+
+  .story-links a > span {
+    min-width: 0;
   }
 
   .story-links a:hover {
@@ -1567,6 +1572,7 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .story-links strong {
+    overflow-wrap: anywhere;
     font-size: var(--story-body);
   }
 
@@ -1726,16 +1732,6 @@ html[data-theme='dark'] .dcat-mark {
     justify-content: center;
   }
 
-  .deck-slide .story-title,
-  .deck-slide .story-lead {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .deck-slide .story-title { -webkit-line-clamp: 2; }
-  .deck-slide .story-lead { -webkit-line-clamp: 2; }
-
   /* Temporarily remove stretching so the fit pass can read natural height. */
   .deck-slide.is-measuring .story-chapter {
     width: 100%;
@@ -1754,6 +1750,12 @@ html[data-theme='dark'] .dcat-mark {
   .deck-slide.is-measuring .story-scenario,
   .deck-slide.is-measuring .story-roadmap-col {
     height: auto;
+  }
+
+  .deck-slide.is-measuring .story-grid > *,
+  .deck-slide.is-measuring .story-pipeline > *,
+  .deck-slide.is-measuring .story-cover > * {
+    max-height: none;
   }
 
   .deck-slide.is-measuring .story-body > * {
@@ -1810,20 +1812,24 @@ html[data-theme='dark'] .dcat-mark {
     min-height: 0;
   }
 
+  /* Fill the frame without inflating short cards into empty boxes. */
+  .deck-slide .story-grid > *,
+  .deck-slide .story-pipeline > *,
+  .deck-slide .story-cover > * {
+    align-self: center;
+    max-height: max(22rem, 52cqh);
+  }
+
   .deck-slide .story-card,
   .deck-slide .story-step,
   .deck-slide .story-scenario,
   .deck-slide .story-roadmap-col {
     display: flex;
     flex-direction: column;
+    justify-content: center;
   }
 
-  .deck-slide .story-card-text,
-  .deck-slide .story-step-text {
-    margin-top: auto;
-  }
-
-  .deck-slide .story-roadmap-items {
+  .deck-slide .story-scenario-result {
     margin-top: auto;
   }
 
