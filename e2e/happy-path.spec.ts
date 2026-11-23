@@ -1275,6 +1275,24 @@ test('theme toggle switches to dark and persists across reloads', async ({ page 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
 
+test('header stays compact and groups workspace controls', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openDemo(page);
+
+  const header = page.locator('header').first();
+  const desktopHeight = (await header.boundingBox())?.height ?? 0;
+  expect(desktopHeight).toBeLessThanOrEqual(80);
+  await expect(header.getByRole('group', { name: 'Workspace context' })).toBeVisible();
+  await expect(header.getByRole('group', { name: 'Utilities' })).toBeVisible();
+  await expect(header.getByRole('button', { name: 'Search metadata' })).toBeVisible();
+  await expect(header.getByLabel('Selected organization')).toBeVisible();
+  await expect(header.getByText('DEMO DATA', { exact: true })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const phoneHeight = (await header.boundingBox())?.height ?? 0;
+  expect(phoneHeight).toBeLessThanOrEqual(112);
+});
+
 test('desktop sidebar collapses to an icon rail and persists the choice', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openDemo(page);
