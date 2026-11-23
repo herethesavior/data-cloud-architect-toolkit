@@ -1574,16 +1574,8 @@ html[data-theme='dark'] .dcat-mark {
     color: var(--color-brand);
   }
 
-  /* Present mode: the same chapters, scaled up inside the Fullscreen API. */
+  /* Present mode: the frame stays fixed while each slide fits its content. */
   .deck-shell {
-    --story-title: clamp(2rem, 4.4vw, 3.5rem);
-    --story-lead: clamp(1.0625rem, 1.4vw, 1.375rem);
-    --story-body: clamp(1rem, 1.1vw, 1.125rem);
-    --story-small: clamp(1rem, 1vw, 1.0625rem);
-    --story-note-size: 0.8125rem;
-    --story-eyebrow-size: 0.8125rem;
-    --story-gap: clamp(0.75rem, 1.4vw, 1.25rem);
-    --story-pad: clamp(1rem, 2.75vw, 2.75rem);
     position: fixed;
     inset: 0;
     z-index: 50;
@@ -1690,9 +1682,21 @@ html[data-theme='dark'] .dcat-mark {
     padding: clamp(0.5rem, 1.5vw, 1.25rem);
   }
 
-  /* Every slide occupies the same stage box. Only the body scrolls, so the
-     frame, title, and controls stay put as chapters change length. */
+  /* Every slide owns the same stage box. Type and spacing respond to that box,
+     and --slide-fit is a measured last resort so no slide scrolls internally. */
   .deck-slide {
+    --story-title: clamp(1.6rem, min(7cqh, 7cqw), 3.25rem);
+    --story-lead: clamp(0.95rem, min(2.3cqh, 2.1cqw), 1.25rem);
+    --story-body: clamp(0.9rem, min(2.1cqh, 1.9cqw), 1.0625rem);
+    --story-small: clamp(0.875rem, min(1.9cqh, 1.8cqw), 1rem);
+    --story-note-size: clamp(0.68rem, min(1.5cqh, 1.4cqw), 0.8125rem);
+    --story-eyebrow-size: clamp(0.68rem, min(1.5cqh, 1.4cqw), 0.8125rem);
+    --story-gap: clamp(0.6rem, min(1.9cqh, 1.3cqw), 1.15rem);
+    --story-pad: clamp(0.85rem, min(3.2cqh, 2.6cqw), 2.25rem);
+    --slide-fit: 1;
+    position: relative;
+    container-type: size;
+    container-name: deck-slide;
     display: flex;
     flex: 1;
     min-width: 0;
@@ -1703,25 +1707,167 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .story-chapter {
-    width: 100%;
-    max-width: 96rem;
-    height: 100%;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: calc(100% / var(--slide-fit));
+    max-width: none;
+    height: calc(100% / var(--slide-fit));
     min-height: 0;
     margin: 0 auto;
+    transform: scale(var(--slide-fit));
+    transform-origin: top center;
+    row-gap: var(--story-gap);
   }
 
-  .deck-slide .story-chapter-head,
+  .deck-slide .story-chapter-head {
+    display: flex;
+    min-height: clamp(4.75rem, 12cqh, 7rem);
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .deck-slide .story-title,
+  .deck-slide .story-lead {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .deck-slide .story-title { -webkit-line-clamp: 2; }
+  .deck-slide .story-lead { -webkit-line-clamp: 2; }
+
+  /* Temporarily remove stretching so the fit pass can read natural height. */
+  .deck-slide.is-measuring .story-chapter {
+    width: 100%;
+    height: auto;
+    align-self: flex-start;
+    transform: none;
+  }
+
+  .deck-slide.is-measuring .story-body,
+  .deck-slide.is-measuring .story-grid,
+  .deck-slide.is-measuring .story-rows,
+  .deck-slide.is-measuring .story-pipeline,
+  .deck-slide.is-measuring .story-cover,
+  .deck-slide.is-measuring .story-card,
+  .deck-slide.is-measuring .story-step,
+  .deck-slide.is-measuring .story-scenario,
+  .deck-slide.is-measuring .story-roadmap-col {
+    height: auto;
+  }
+
+  .deck-slide.is-measuring .story-body > * {
+    flex: none;
+  }
+
+  .deck-slide.is-measuring .story-art {
+    width: 100%;
+    max-width: 34rem;
+    height: auto;
+  }
+
   .deck-slide .story-note {
-    flex: 0 0 auto;
+    display: flex;
+    min-height: clamp(1.75rem, 4cqh, 2.5rem);
+    align-items: center;
   }
 
   .deck-slide .story-body {
-    flex: 1 1 auto;
+    flex: initial;
     min-height: 0;
-    overflow: auto;
-    overscroll-behavior: contain;
-    padding-right: 0.25rem;
-    scrollbar-gutter: stable;
+    justify-content: stretch;
+    overflow: hidden;
+  }
+
+  .deck-slide .story-body > * {
+    min-height: 0;
+  }
+
+  .deck-slide .story-body > .story-grid,
+  .deck-slide .story-body > .story-rows,
+  .deck-slide .story-body > .story-cover,
+  .deck-slide .story-body > .story-pipeline {
+    flex: 1 1 auto;
+  }
+
+  .deck-slide .story-grid,
+  .deck-slide .story-rows,
+  .deck-slide .story-pipeline,
+  .deck-slide .story-cover {
+    height: 100%;
+    align-content: stretch;
+  }
+
+  .deck-slide .story-grid > *,
+  .deck-slide .story-rows > *,
+  .deck-slide .story-pipeline > *,
+  .deck-slide .story-cover > * {
+    min-height: 0;
+  }
+
+  .deck-slide .story-card,
+  .deck-slide .story-step,
+  .deck-slide .story-scenario,
+  .deck-slide .story-roadmap-col {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .deck-slide .story-card-text,
+  .deck-slide .story-step-text {
+    margin-top: auto;
+  }
+
+  .deck-slide .story-roadmap-items {
+    margin-top: auto;
+  }
+
+  .deck-slide .story-roadmap-item {
+    padding-block: clamp(0.35rem, 1cqh, 0.65rem);
+  }
+
+  .deck-slide .story-legend {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .deck-slide .story-legend-row {
+    flex: 1;
+  }
+
+  .deck-slide [data-chapter='trust'] .story-body > div:first-child {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .deck-slide [data-chapter='boundaries'] .story-body > .story-grid:first-child { flex: 3; }
+  .deck-slide [data-chapter='boundaries'] .story-body > .story-grid:last-child { flex: 2; }
+
+  .deck-slide .story-grid-demo {
+    align-items: stretch;
+  }
+
+  .deck-slide .story-grid-demo > * {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: var(--story-gap);
+  }
+
+  .deck-slide .story-grid-demo .story-rows,
+  .deck-slide .story-grid-demo .story-mock {
+    flex: 1;
+  }
+
+  .deck-slide .story-art {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+  }
+
+  .deck-slide .story-flow-node {
+    min-height: 0;
   }
 
   /* Six stages fit two readable rows instead of six narrow columns. */
@@ -1771,6 +1917,9 @@ html[data-theme='dark'] .dcat-mark {
     .story-grid-demo,
     .story-cover { grid-template-columns: 1fr; }
     .story-art { max-width: 24rem; }
+    .deck-slide .story-grid-2,
+    .deck-slide .story-grid-3,
+    .deck-slide .story-grid-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
 
   @media (max-width: 620px) {
@@ -1784,16 +1933,14 @@ html[data-theme='dark'] .dcat-mark {
     .story-row { grid-template-columns: 2rem minmax(0, 1fr); }
     .story-row-detail { grid-column: 2; text-align: left; }
     .story-mock-kpis { grid-template-columns: repeat(2, 1fr); }
-    .deck-shell {
-      --story-title: clamp(1.5rem, 6vw, 2rem);
-      --story-lead: 1rem;
-      --story-body: 0.9375rem;
-      --story-small: 0.9375rem;
-      --story-note-size: 0.75rem;
-      --story-eyebrow-size: 0.75rem;
-      --story-gap: 0.75rem;
-      --story-pad: 0.75rem;
-    }
+    .deck-slide .story-grid-demo,
+    .deck-slide .story-cover { grid-template-columns: 1fr; }
+    .deck-slide .story-outcome span,
+    .deck-slide .story-roadmap-kicker,
+    .deck-slide .story-roadmap-col > .story-card-text,
+    .deck-slide .story-roadmap-item span,
+    .deck-slide .story-mock-flow,
+    .deck-slide .story-grid-demo .story-note { display: none; }
     .deck-hint { display: none; }
   }
 

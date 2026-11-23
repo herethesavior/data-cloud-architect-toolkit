@@ -1588,10 +1588,82 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
   await recordSlideHeight();
   expect(new Set(slideHeights).size, `slide heights: ${slideHeights.join(', ')}`).toBe(1);
 
+  await page.keyboard.press('Home');
+  await expect(deck.locator('.deck-counter')).toContainText('01');
+  const slideMetrics: { overflow: number; headHeight: number; hasFooterNote: boolean; fillGap: number; fit: number }[] = [];
+  for (let index = 0; index < 14; index += 1) {
+    slideMetrics.push(await page.evaluate(() => {
+      const slide = document.querySelector('.deck-slide') as HTMLElement;
+      const body = slide.querySelector('.story-body') as HTMLElement;
+      const head = slide.querySelector('.story-chapter-head') as HTMLElement;
+      const children = [...body.children] as HTMLElement[];
+      const bodyBottom = body.getBoundingClientRect().bottom;
+      return {
+        overflow: body.scrollHeight - body.clientHeight,
+        headHeight: Math.round(head.getBoundingClientRect().height),
+        hasFooterNote: Boolean(slide.querySelector(':scope > .story-chapter > .story-note')),
+        fillGap: Math.round(bodyBottom - Math.max(...children.map((child) => child.getBoundingClientRect().bottom))),
+        fit: Number(slide.style.getPropertyValue('--slide-fit') || '1'),
+      };
+    }));
+    if (index < 13) {
+      await page.keyboard.press('ArrowRight');
+      await expect(deck.locator('.deck-counter')).toContainText(String(index + 2).padStart(2, '0'));
+    }
+  }
+  for (const [index, metrics] of slideMetrics.entries()) {
+    expect(metrics.overflow, `slide ${index + 1} body overflow`).toBeLessThanOrEqual(1);
+    expect(metrics.hasFooterNote, `slide ${index + 1} footer note`).toBe(true);
+    expect(metrics.fillGap, `slide ${index + 1} content fill gap`).toBeLessThanOrEqual(24);
+    expect(metrics.fit, `slide ${index + 1} fit floor`).toBeGreaterThanOrEqual(0.8);
+  }
+  const headHeights = slideMetrics.map((metrics) => metrics.headHeight);
+  expect(Math.max(...headHeights) - Math.min(...headHeights), `head heights: ${headHeights.join(', ')}`).toBeLessThanOrEqual(100);
+
   await deck.getByRole('button', { name: 'Exit presentation' }).click();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
   await expect(page.getByRole('button', { name: 'Present' })).toBeFocused();
   expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(deckScroll);
+});
+
+test('about deck slides fit without inner scrolling on a phone viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openDemo(page);
+  await page.goto('/about');
+  await expect(page.getByRole('button', { name: 'Present' })).toBeVisible();
+
+  const deck = page.locator('.deck-shell');
+  await page.getByRole('button', { name: 'Present' }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+
+  const overflows: number[] = [];
+  const fillGaps: number[] = [];
+  for (let index = 0; index < 14; index += 1) {
+    const metrics = await page.evaluate(() => {
+      const slide = document.querySelector('.deck-slide') as HTMLElement;
+      const body = slide.querySelector('.story-body') as HTMLElement;
+      const children = [...body.children] as HTMLElement[];
+      return {
+        overflow: body.scrollHeight - body.clientHeight,
+        fillGap: Math.round(
+          body.getBoundingClientRect().bottom - Math.max(...children.map((child) => child.getBoundingClientRect().bottom)),
+        ),
+        horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+    overflows.push(metrics.overflow);
+    fillGaps.push(metrics.fillGap);
+    expect(metrics.horizontalOverflow, `horizontal overflow on slide ${index + 1}`).toBeLessThanOrEqual(1);
+    if (index < 13) {
+      await page.keyboard.press('ArrowRight');
+      await expect(deck.locator('.deck-counter')).toContainText(String(index + 2).padStart(2, '0'));
+    }
+  }
+  expect(Math.max(...overflows), `body overflow: ${overflows.join(', ')}`).toBeLessThanOrEqual(1);
+  expect(Math.max(...fillGaps), `content fill gaps: ${fillGaps.join(', ')}`).toBeLessThanOrEqual(24);
+
+  await deck.getByRole('button', { name: 'Exit presentation' }).click();
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
 });
 
 test('about chapter deep links restore the target section on a direct load', async ({ page }) => {

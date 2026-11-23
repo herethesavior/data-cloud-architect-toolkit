@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Icon } from '../components/Icon.tsx';
@@ -30,6 +30,8 @@ interface Chapter {
   lead?: string;
   body: ReactNode;
   note?: string;
+  /** Shorter footnote used only in the full-screen deck when the story note is absent. */
+  presentNote?: string;
 }
 
 function Accent({ children }: { children: ReactNode }) {
@@ -235,6 +237,7 @@ const chapters: Chapter[] = [
         <ArchitectureArt />
       </div>
     ),
+    presentNote: 'A local-first, read-only way to see how a Data Cloud org fits together.',
   },
   {
     id: 'problem',
@@ -319,12 +322,14 @@ const chapters: Chapter[] = [
         />
       </>
     ),
+    presentNote: 'Read-only discovery using metadata already available through the Salesforce CLI.',
   },
   {
     id: 'alignment',
     eyebrow: 'Use case 02 · Business-to-technical alignment',
     shortTitle: 'Alignment',
     title: <>Translate a business need <Accent>into a traceable data path.</Accent></>,
+    lead: 'Turn a business request into an inspectable chain of sources, streams, mappings, and model objects.',
     body: (
       <div className="story-grid story-grid-2">
         <div className="story-scenario">
@@ -380,6 +385,7 @@ const chapters: Chapter[] = [
     eyebrow: 'Designed for the people around the data',
     shortTitle: 'Audiences',
     title: <>One architecture view. <Accent>Different team outcomes.</Accent></>,
+    lead: 'The same architecture view answers different questions for each role around the data.',
     body: (
       <div className="story-grid story-grid-5">
         <StoryCard tag="Architects" title="Explore the model">Models, relationships, lineage, and implementation structure.</StoryCard>
@@ -525,6 +531,7 @@ const chapters: Chapter[] = [
         </div>
       </div>
     ),
+    presentNote: 'Frame the demo around an architect question, then show the evidence path.',
   },
   {
     id: 'takeaway',
@@ -561,21 +568,28 @@ const chapters: Chapter[] = [
 
 function ChapterView({ chapter, mode }: { chapter: Chapter; mode: 'story' | 'present' }) {
   const headingId = `${mode}-chapter-${chapter.id}`;
+  const note = mode === 'present' ? (chapter.presentNote ?? chapter.note) : chapter.note;
   return (
-    <section className={`story-chapter ${mode === 'story' ? 'story-chapter-scroll' : ''}`} aria-labelledby={headingId}>
+    <section
+      className={`story-chapter ${mode === 'story' ? 'story-chapter-scroll' : ''}`}
+      data-chapter={chapter.id}
+      data-mode={mode}
+      aria-labelledby={headingId}
+    >
       <div className="story-chapter-head">
         <p className="story-eyebrow">{chapter.eyebrow}</p>
         <h3 id={headingId} className="story-title">{chapter.title}</h3>
         {chapter.lead ? <p className="story-lead">{chapter.lead}</p> : null}
       </div>
       <div className="story-body">{chapter.body}</div>
-      {chapter.note ? <Note>{chapter.note}</Note> : null}
+      {note ? <Note>{note}</Note> : null}
     </section>
   );
 }
 
 export function AboutPage({ onNavigate }: AboutPageProps) {
   const deckRef = useRef<HTMLDivElement>(null);
+  const slideRef = useRef<HTMLDivElement>(null);
   const touchStartX = useRef<number | null>(null);
   const restoreFrame = useRef<number | null>(null);
   const wasFullscreen = useRef(false);
@@ -620,6 +634,41 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
       document.documentElement.style.overflow = previousHtmlOverflow;
     };
   }, [isFullscreen]);
+
+  // The deck frame is fixed; fit each chapter's natural height into it instead
+  // of letting a dense slide scroll behind a title that never moves.
+  useLayoutEffect(() => {
+    if (!isFullscreen) return;
+    const slide = slideRef.current;
+    if (!slide) return;
+    let frame = 0;
+
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const chapter = slide.querySelector<HTMLElement>('.story-chapter');
+        if (!chapter) return;
+        slide.style.setProperty('--slide-fit', '1');
+        slide.classList.add('is-measuring');
+        const naturalHeight = chapter.getBoundingClientRect().height;
+        slide.classList.remove('is-measuring');
+        const availableHeight = slide.clientHeight;
+        const fit = Math.max(0.82, Math.min(1, availableHeight / Math.max(naturalHeight, 1)));
+        slide.style.setProperty('--slide-fit', fit.toFixed(4));
+      });
+    };
+
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(slide);
+    window.addEventListener('resize', measure);
+    void document.fonts?.ready.then(measure).catch(() => undefined);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [isFullscreen, slideIndex]);
 
   useEffect(() => {
     const restoreChapter = () => {
@@ -798,7 +847,7 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
 
         <div className="deck-stage">
           {activeChapter ? (
-            <div className="deck-slide is-active" key={activeChapter.id}>
+            <div className="deck-slide is-active" key={activeChapter.id} ref={slideRef}>
               <ChapterView chapter={activeChapter} mode="present" />
             </div>
           ) : null}
