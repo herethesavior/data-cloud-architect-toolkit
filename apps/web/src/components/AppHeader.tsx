@@ -153,10 +153,8 @@ export function AppHeader({
         </div>
 
         <div className="app-header-context" role="group" aria-label="Workspace context">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <div className="w-28 shrink-0 lg:w-32 xl:w-40 2xl:w-52">
-              <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
-            </div>
+          <div className="min-w-0 flex-1 md:w-28 md:flex-none lg:w-32 xl:w-40 2xl:w-52">
+            <OrgPicker orgs={orgs} loading={orgsLoading} selectedAlias={selectedAlias} onSelectOrg={onSelectOrg} />
           </div>
           <div className="flex items-center gap-1.5 border-l border-line pl-1.5">
             <Badge
