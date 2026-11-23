@@ -2452,7 +2452,7 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .slide-demo-screen {
-    min-height: 16rem;
+    min-height: 10rem;
   }
 
   .deck-slide .story-mock {
