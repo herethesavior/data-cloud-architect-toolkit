@@ -20,7 +20,7 @@ import {
 } from '@dcat/test-fixtures';
 import { executeRelayOperation, runBridge, type RelayHttp } from './bridge.ts';
 import { loadConfig } from './config.ts';
-import { createAppState, type AppState } from './state.ts';
+import { createAppState, type AppState, type DiscoverySessionRecord } from './state.ts';
 
 const restBodies: Record<string, string> = {
   '/services/data/': versionsJson,
@@ -146,6 +146,45 @@ describe('executeRelayOperation', () => {
 
     await expect(operation<{ mode: string }>(state, { operation: 'mode.set', mode: 'demo' })).resolves.toEqual({ mode: 'demo' });
     expect(state.mode).toBe('demo');
+  });
+
+  it('drops org-scoped caches and sessions when an alias is reconnected', async () => {
+    const state = createState();
+    state.inventoryCache = {
+      at: Date.now(),
+      alias: 'demo-uat',
+      inventory: { mode: 'live' } as InventorySnapshot,
+    };
+    state.discoverySessions.set('old-session', {
+      id: 'old-session',
+      alias: 'demo-uat',
+      controller: new AbortController(),
+    } as unknown as DiscoverySessionRecord);
+    state.discoveryByAlias.set('demo-uat', 'old-session');
+
+    await operation(state, { operation: 'org.connect', alias: 'demo-uat' });
+
+    expect(state.orgsCache).toBeNull();
+    expect(state.inventoryCache).toBeNull();
+    expect(state.discoverySessions.size).toBe(0);
+    expect(state.discoveryByAlias.size).toBe(0);
+  });
+
+  it('refuses a caller-supplied session id that belongs to another org', async () => {
+    const state = createState();
+    await expect(operation(state, {
+      operation: 'inventory.start',
+      alias: 'demo-uat',
+      sessionId: 'shared',
+    })).resolves.toMatchObject({ sessionId: 'shared' });
+
+    await expect(operation(state, {
+      operation: 'inventory.start',
+      alias: 'demo-alt',
+      sessionId: 'shared',
+    })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+
+    await operation(state, { operation: 'mode.set', mode: 'demo' });
   });
 
   it('runs a bridge update only through the injected CLI hook', async () => {

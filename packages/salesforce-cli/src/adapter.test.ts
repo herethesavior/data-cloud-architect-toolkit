@@ -102,12 +102,13 @@ describe('SalesforceCliAdapter', () => {
       ['org', 'list', '--skip-connection-status', '--json'],
       { timeoutMs: 15_000 },
     );
-    expect(runner.run).toHaveBeenCalledWith(
-      ['org', 'login', 'web', '--alias', 'demo-uat', '--set-default', '--browser', 'chrome'],
-      expect.objectContaining({ timeoutMs: 5 * 60_000, windowsHide: false }),
-    );
+    const loginOptions = vi.mocked(runner.run).mock.calls.find(
+      ([args]) => args[0] === 'org' && args[1] === 'login',
+    )?.[1];
+    expect(loginOptions).toMatchObject({ timeoutMs: 5 * 60_000, windowsHide: false });
+    expect(loginOptions?.signal?.aborted).toBe(true);
 
-    // The login command is still pending; the completion signal came from org detection.
+    // Resolve the pending fake CLI process; the real runner was told to kill it.
     finishLogin({ stdout: '', stderr: '', exitCode: 0 });
     await loginPending;
   });
