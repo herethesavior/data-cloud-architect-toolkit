@@ -279,11 +279,13 @@ html[data-theme='dark'] {
   }
 }
 
-@media (max-width: 639px) {
+@media (max-width: 1023px) {
   .app-header-inner {
     column-gap: 0.5rem;
   }
+}
 
+@media (max-width: 639px) {
   .app-header-lead {
     gap: 0.25rem;
   }
