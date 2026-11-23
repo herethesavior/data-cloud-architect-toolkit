@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveSfShim } from './run.ts';
 
@@ -27,6 +27,7 @@ describe('resolveSfShim', () => {
     const activeDir = mkdtempSync(join(tmpdir(), 'dcat-cli-active-'));
     const envName = 'DCAT_TEST_SF_HOME';
     process.env[envName] = activeDir;
+    const redirect = `%${envName}%${sep}sf.cmd`;
     try {
       const versionDir = join(activeDir, '2.0.0');
       mkdirSync(versionDir, { recursive: true });
@@ -52,8 +53,8 @@ describe('resolveSfShim', () => {
         shim,
         [
           '@echo off',
-          `if exist "%${envName}%\\sf.cmd" (`,
-          `  "%${envName}%\\sf.cmd" %*`,
+          `if exist "${redirect}" (`,
+          `  "${redirect}" %*`,
           ') else (',
           `  "${legacyNode}" --no-deprecation "${legacyRun}" %*`,
           ')',
