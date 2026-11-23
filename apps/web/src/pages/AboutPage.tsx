@@ -909,7 +909,6 @@ const chapters: Chapter[] = [
             { label: 'Validate', tone: 'warning' },
             { label: 'Share', tone: 'neutral' },
           ]} />
-          <p className="slide-takeaway-note">Created in a personal capacity. DCAT is not an official Salesforce product.</p>
         </div>
         <div className="story-links">
           <a href={WORKBENCH_URL} target="_blank" rel="noopener noreferrer" aria-label="Open the DCAT workbench (opens in a new tab)">
