@@ -13,10 +13,12 @@ interface AboutPageProps {
 const REPOSITORY_URL = 'https://github.com/herethesavior/data-cloud-architect-toolkit';
 const WORKBENCH_URL = 'https://sfdcat.pages.dev';
 
-type PillTone = 'brand' | 'success' | 'warning' | 'neutral';
+type PillTone = 'brand' | 'info' | 'violet' | 'success' | 'warning' | 'neutral';
 
 const pillTones: Record<PillTone, string> = {
   brand: 'story-pill-brand',
+  info: 'story-pill-info',
+  violet: 'story-pill-violet',
   success: 'story-pill-success',
   warning: 'story-pill-warning',
   neutral: 'story-pill-neutral',
@@ -235,12 +237,22 @@ function ArchitectureArt() {
 
   return (
     <svg className="story-art" viewBox="0 0 620 500" fill="none" aria-hidden="true">
-      <g stroke="var(--color-brand)" strokeWidth="1.5" opacity="0.55">
+      <defs>
+        <linearGradient id="dcat-architecture-edge" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stopColor="var(--color-brand)" />
+          <stop offset="100%" stopColor="var(--color-violet)" />
+        </linearGradient>
+        <linearGradient id="dcat-architecture-node" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stopColor="var(--color-brand)" />
+          <stop offset="100%" stopColor="var(--color-info)" />
+        </linearGradient>
+      </defs>
+      <g stroke="url(#dcat-architecture-edge)" strokeWidth="1.5" opacity="0.65">
         <path d="M310 74 165 157 165 310 310 393 455 310 455 157 310 74Z" />
         <path d="M165 157 310 240 455 157M310 240v153M165 310l145-70 145 70" opacity="0.6" />
         <path d="M92 242 165 200 238 242M382 242l73-42 73 42M238 326l72 42 72-42" opacity="0.4" strokeDasharray="5 7" />
       </g>
-      <g fill="var(--color-surface)" stroke="var(--color-brand)" strokeWidth="1.5">
+      <g fill="var(--color-surface)" stroke="url(#dcat-architecture-node)" strokeWidth="1.5">
         {nodes.map((node) => (
           <rect key={node.label} x={node.x} y={node.y} width="116" height="70" rx="15" />
         ))}
@@ -253,8 +265,8 @@ function ArchitectureArt() {
           </g>
         ))}
       </g>
-      <circle cx="310" cy="240" r="7" fill="var(--color-brand)" />
-      <circle cx="310" cy="240" r="17" stroke="var(--color-brand)" strokeOpacity="0.4" />
+      <circle cx="310" cy="240" r="8" fill="var(--color-brand)" />
+      <circle cx="310" cy="240" r="17" stroke="var(--color-brand)" strokeOpacity="0.35" />
     </svg>
   );
 }
@@ -288,15 +300,15 @@ const chapters: Chapter[] = [
     shortTitle: 'Big idea',
     title: <>See the <Accent>architecture</Accent> behind the data.</>,
     lead: 'DCAT helps Salesforce Data Cloud architects discover how an environment is put together, trace how data moves, and explain the architecture with confidence.',
-    presentLead: 'See how a Data Cloud org fits together.',
+    presentLead: 'DCAT helps Salesforce Data Cloud architects discover how an environment is put together, trace how data moves, and explain the architecture with confidence.',
     body: (
       <div className="story-cover">
         <div>
           <p className="story-tagline">See the architecture. Understand the connections. Make better decisions.</p>
           <Pills items={[
             { label: 'Local-first', tone: 'brand' },
-            { label: 'Read-only', tone: 'success' },
-            { label: 'Evidence-led', tone: 'warning' },
+            { label: 'Read-only', tone: 'info' },
+            { label: 'Evidence-led', tone: 'violet' },
           ]} />
           <div className="story-cover-foot">
             <span>Discover</span><i /><span>Understand</span><i /><span>Validate</span>
@@ -310,17 +322,16 @@ const chapters: Chapter[] = [
     presentBody: (
       <div className="slide-cover">
         <div className="slide-cover-copy">
-          <p className="slide-cover-statement">See the architecture. Understand the connections. Make better decisions.</p>
           <Pills items={[
             { label: 'Local-first', tone: 'brand' },
-            { label: 'Read-only', tone: 'success' },
-            { label: 'Evidence-led', tone: 'warning' },
+            { label: 'Read-only', tone: 'info' },
+            { label: 'Evidence-led', tone: 'violet' },
           ]} />
           <div className="slide-cover-steps">
             <span>Discover</span><span>Understand</span><span>Validate</span>
           </div>
         </div>
-        <ArchitectureArt />
+        <div className="slide-visual"><ArchitectureArt /></div>
       </div>
     ),
   },
@@ -335,9 +346,9 @@ const chapters: Chapter[] = [
     presentLayout: 'diagnosis',
     presentBody: (
       <div className="slide-diagnosis">
-        <SlidePanel label="The real gap" title="The architecture exists. Connection does not.">
+        <SlidePanel label="The real gap" title="Architects need more than another screen.">
           <p>Screens, metadata, queries, spreadsheets, and tribal knowledge become the working map.</p>
-          <p className="slide-panel-emphasis">Architects need connected metadata, not another screen to search.</p>
+          <p className="slide-panel-emphasis">They need a connected view that turns metadata into understanding.</p>
         </SlidePanel>
         <div className="slide-diagnosis-list">
           <SlideLine index="01" title="Fragmented visibility across components" detail="Scattered views" />
@@ -905,9 +916,9 @@ const chapters: Chapter[] = [
           <p className="slide-takeaway-statement">Don’t just see the data. <Accent>Understand the architecture.</Accent></p>
           <Pills items={[
             { label: 'Discover', tone: 'brand' },
-            { label: 'Understand', tone: 'success' },
-            { label: 'Validate', tone: 'warning' },
-            { label: 'Share', tone: 'neutral' },
+            { label: 'Understand', tone: 'info' },
+            { label: 'Validate', tone: 'violet' },
+            { label: 'Share', tone: 'success' },
           ]} />
         </div>
         <div className="story-links">
@@ -927,9 +938,9 @@ const chapters: Chapter[] = [
         <div>
           <Pills items={[
             { label: 'Discover', tone: 'brand' },
-            { label: 'Understand', tone: 'success' },
-            { label: 'Validate', tone: 'warning' },
-            { label: 'Share', tone: 'neutral' },
+            { label: 'Understand', tone: 'info' },
+            { label: 'Validate', tone: 'violet' },
+            { label: 'Share', tone: 'success' },
           ]} />
           <p className="story-card-text">Created in a personal capacity. DCAT is not an official Salesforce product.</p>
         </div>
@@ -1201,7 +1212,8 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
         ref={deckRef}
         className="deck-shell"
         role="region"
-        aria-label="Product story presentation"
+        aria-roledescription="presentation"
+        aria-label="DCAT presentation"
         tabIndex={-1}
         aria-hidden={!isFullscreen}
         inert={!isFullscreen}
@@ -1215,39 +1227,63 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
         }}
       >
         <div className="deck-topbar">
-          <div className="flex items-center gap-2.5">
-            <span className="deck-brand">
-              <Icon name="presentation" size={15} />
-              DCAT · Product story
+          <div className="deck-brand">
+            <span className="deck-brand-mark" aria-hidden="true"><Icon name="presentation" size={20} /></span>
+            <span>
+              <span className="deck-brand-name">DCAT</span>
+              <span className="deck-brand-sub">Data Cloud Architect Toolkit</span>
             </span>
-            <span className="deck-counter"><strong>{String(slideIndex + 1).padStart(2, '0')}</strong> / {String(chapters.length).padStart(2, '0')}</span>
           </div>
-          <button type="button" className="deck-icon-btn" onClick={() => void stopPresenting()} aria-label="Exit presentation" title="Exit presentation (Esc)">
-            <Icon name="close" size={18} />
-          </button>
-        </div>
-
-        <div className="deck-progress" aria-hidden="true">
-          <span style={{ width: `${((slideIndex + 1) / chapters.length) * 100}%` }} />
+          <div className="deck-top-meta">
+            <span className="deck-status">Architectural discovery workbench</span>
+            <a className="deck-top-link" href={WORKBENCH_URL} target="_blank" rel="noopener noreferrer">
+              Open DCAT ↗
+            </a>
+          </div>
         </div>
 
         <div className="deck-stage">
           {activeChapter ? (
-            <div className="deck-slide is-active" key={activeChapter.id} ref={slideRef}>
-              <ChapterView chapter={activeChapter} mode="present" />
+            <div className="deck-frame">
+              <div className="deck-slide is-active" key={activeChapter.id} ref={slideRef}>
+                <ChapterView chapter={activeChapter} mode="present" />
+              </div>
             </div>
           ) : null}
         </div>
 
         <div className="deck-controls">
-          <span className="deck-hint"><span className="key">←</span><span className="key">→</span> to navigate · Esc to exit</span>
-          <div className="deck-current-title">{activeChapter.shortTitle}</div>
-          <div className="deck-nav">
+          <div className="deck-control-left">
+            <span className="deck-counter" aria-live="polite" aria-atomic="true">
+              <strong>{String(slideIndex + 1).padStart(2, '0')}</strong> / {String(chapters.length).padStart(2, '0')}
+            </span>
+            <div className="deck-progress" aria-hidden="true">
+              <span style={{ width: `${((slideIndex + 1) / chapters.length) * 100}%` }} />
+            </div>
+          </div>
+          <div className="deck-dots" aria-label="Go to slide">
+            {chapters.map((chapter, index) => (
+              <button
+                key={chapter.id}
+                type="button"
+                className={`deck-dot ${index === slideIndex ? 'is-active' : ''}`}
+                onClick={() => goToSlide(index)}
+                aria-label={`Go to slide ${index + 1}: ${chapter.shortTitle}`}
+                aria-current={index === slideIndex ? 'step' : undefined}
+              />
+            ))}
+          </div>
+          <div className="deck-control-right">
+            <span className="deck-hint"><span className="key">←</span><span className="key">→</span> to navigate · Esc to exit</span>
+            <span className="deck-current-title">{activeChapter.shortTitle}</span>
+            <button type="button" className="deck-icon-btn" onClick={() => void stopPresenting()} aria-label="Exit presentation" title="Exit presentation (Esc)">
+              <Icon name="close" size={18} />
+            </button>
             <button type="button" className="deck-icon-btn" onClick={() => stepSlide(-1)} disabled={slideIndex === 0} aria-label="Previous slide">
-              <Icon name="arrowRight" size={17} className="rotate-180" />
+              <Icon name="arrowRight" size={18} className="rotate-180" />
             </button>
             <button type="button" className="deck-icon-btn" onClick={() => stepSlide(1)} disabled={slideIndex === chapters.length - 1} aria-label="Next slide">
-              <Icon name="arrowRight" size={17} />
+              <Icon name="arrowRight" size={18} />
             </button>
           </div>
         </div>
