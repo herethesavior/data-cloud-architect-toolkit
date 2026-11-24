@@ -225,24 +225,35 @@ function SlidePhase({ kicker, title, description, items, current = false }: {
 }
 
 function ArchitectureArt({ present = false }: { present?: boolean }) {
-  // The Present viewBox trims empty canvas below the diagram so the nodes read
-  // larger in the fixed slide frame.
-  const nodeWidth = present ? 122 : 116;
-  const nodeHeight = present ? 72 : 70;
-  const nodes = [
-    { x: 252, y: 38, label: 'SOURCE', sub: 'Systems' },
-    { x: 107, y: 137, label: 'STREAMS', sub: 'Ingestion' },
-    { x: 397, y: 137, label: 'DLOS', sub: 'Landing data' },
-    { x: 252, y: 205, label: 'MAPPINGS', sub: 'Transforms' },
-    { x: 107, y: 288, label: 'DMOS', sub: 'Data model' },
-    { x: 397, y: 288, label: 'LINEAGE', sub: 'Dependencies' },
-    { x: 252, y: 372, label: 'INSIGHT', sub: 'Architecture view' },
-  ];
+  // The Present viewBox and node layout are tuned for the landscape slide frame.
+  const nodeWidth = present ? 140 : 116;
+  const nodeHeight = present ? 104 : 70;
+  // Present uses a wider 5+2 composition so the same seven stages fill the
+  // landscape slide frame instead of leaving large empty gutters.
+  const nodes = present
+    ? [
+      { x: 30, y: 36, label: 'SOURCE', sub: 'Systems' },
+      { x: 205, y: 36, label: 'STREAMS', sub: 'Ingestion' },
+      { x: 380, y: 36, label: 'DLOS', sub: 'Landing data' },
+      { x: 555, y: 36, label: 'MAPPINGS', sub: 'Transforms' },
+      { x: 730, y: 36, label: 'DMOS', sub: 'Data model' },
+      { x: 380, y: 268, label: 'LINEAGE', sub: 'Dependencies' },
+      { x: 730, y: 268, label: 'INSIGHT', sub: 'Architecture view' },
+    ]
+    : [
+      { x: 252, y: 38, label: 'SOURCE', sub: 'Systems' },
+      { x: 107, y: 137, label: 'STREAMS', sub: 'Ingestion' },
+      { x: 397, y: 137, label: 'DLOS', sub: 'Landing data' },
+      { x: 252, y: 205, label: 'MAPPINGS', sub: 'Transforms' },
+      { x: 107, y: 288, label: 'DMOS', sub: 'Data model' },
+      { x: 397, y: 288, label: 'LINEAGE', sub: 'Dependencies' },
+      { x: 252, y: 372, label: 'INSIGHT', sub: 'Architecture view' },
+    ];
 
   return (
     <svg
       className="story-art"
-      viewBox={present ? '0 28 620 424' : '0 0 620 500'}
+      viewBox={present ? '20 24 860 360' : '0 0 620 500'}
       fill="none"
       aria-hidden="true"
     >
@@ -256,11 +267,21 @@ function ArchitectureArt({ present = false }: { present?: boolean }) {
           <stop offset="100%" stopColor="var(--color-info)" />
         </linearGradient>
       </defs>
-      <g transform={present ? 'translate(-12.4 -9.6) scale(1.04)' : undefined}>
+      <g>
         <g stroke="url(#dcat-architecture-edge)" strokeWidth="1.5" opacity="0.65">
-          <path d="M310 74 165 157 165 310 310 393 455 310 455 157 310 74Z" />
-          <path d="M165 157 310 240 455 157M310 240v153M165 310l145-70 145 70" opacity="0.6" />
-          <path d="M92 242 165 200 238 242M382 242l73-42 73 42M238 326l72 42 72-42" opacity="0.4" strokeDasharray="5 7" />
+          {present ? (
+            <>
+              <path d="M170 88H205M345 88H380M520 88H555M695 88H730" />
+              <path d="M450 140V268M800 140V268M520 320H730" opacity="0.6" />
+              <path d="M625 140V204H450" opacity="0.4" strokeDasharray="5 7" />
+            </>
+          ) : (
+            <>
+              <path d="M310 74 165 157 165 310 310 393 455 310 455 157 310 74Z" />
+              <path d="M165 157 310 240 455 157M310 240v153M165 310l145-70 145 70" opacity="0.6" />
+              <path d="M92 242 165 200 238 242M382 242l73-42 73 42M238 326l72 42 72-42" opacity="0.4" strokeDasharray="5 7" />
+            </>
+          )}
         </g>
         <g fill="var(--color-surface)" stroke="url(#dcat-architecture-node)" strokeWidth="1.5">
           {nodes.map((node) => (
@@ -272,16 +293,16 @@ function ArchitectureArt({ present = false }: { present?: boolean }) {
             <g key={node.label}>
               <text
                 x={node.x + nodeWidth / 2}
-                y={node.y + (present ? 30 : 28)}
-                fontSize={present ? 12 : 11}
+                y={node.y + (present ? 44 : 28)}
+                fontSize={present ? 14 : 11}
                 fontWeight="700"
               >
                 {node.label}
               </text>
               <text
                 x={node.x + nodeWidth / 2}
-                y={node.y + (present ? 48 : 45)}
-                fontSize={present ? 10 : 9}
+                y={node.y + (present ? 68 : 45)}
+                fontSize={present ? 12 : 9}
                 fill="var(--color-ink-soft)"
               >
                 {node.sub}
@@ -289,8 +310,8 @@ function ArchitectureArt({ present = false }: { present?: boolean }) {
             </g>
           ))}
         </g>
-        <circle cx="310" cy="240" r="8" fill="var(--color-brand)" />
-        <circle cx="310" cy="240" r="17" stroke="var(--color-brand)" strokeOpacity="0.35" />
+        <circle cx={present ? 450 : 310} cy={present ? 204 : 240} r="8" fill="var(--color-brand)" />
+        <circle cx={present ? 450 : 310} cy={present ? 204 : 240} r="17" stroke="var(--color-brand)" strokeOpacity="0.35" />
       </g>
     </svg>
   );

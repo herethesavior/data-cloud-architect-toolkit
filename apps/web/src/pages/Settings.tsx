@@ -296,7 +296,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
               </div>
               <select
                 id="appearance-font-size"
-                className="input h-9 w-32"
+                className="input min-h-9 py-1.5 sm:w-40"
                 value={theme.fontSize}
                 onChange={(event) => theme.chooseFontSize(event.target.value as FontSizePreference)}
               >
@@ -312,7 +312,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
               </div>
               <select
                 id="appearance-density"
-                className="input h-9 w-32"
+                className="input min-h-9 py-1.5 sm:w-40"
                 value={theme.density}
                 onChange={(event) => theme.chooseDensity(event.target.value as DensityPreference)}
               >

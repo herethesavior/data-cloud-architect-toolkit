@@ -504,6 +504,12 @@ html[data-theme='dark'] .dcat-mark {
     @apply w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-brand focus:ring-2 focus:ring-brand/20;
   }
 
+  /* Native selects paint their arrow over the value. Reserve room for it so the
+     selection stays readable at every global font-size preference. */
+  select.input {
+    @apply min-w-0 pr-8;
+  }
+
   .badge {
     @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap;
   }
