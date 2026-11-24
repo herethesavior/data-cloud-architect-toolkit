@@ -569,6 +569,11 @@ test('hosted bridge update guidance offers a copyable command without queuing a 
   await expect(page.getByRole('button', { name: 'Copy command' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Update bridge' })).toHaveCount(0);
 
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+  const versionFact = page.locator('dt').filter({ hasText: 'Bridge version' }).locator('..');
+  await expect(versionFact).toContainText('0.1.4');
+  await expect(versionFact).not.toContainText('0.1.0');
+
   expect(state.operationBodies.some((operation) => operation.operation === 'bridge.update')).toBe(false);
   expect(state.authCalls).toEqual([]);
   expect(state.operations.some((operation) => operation.operation === 'shell.exec')).toBe(false);

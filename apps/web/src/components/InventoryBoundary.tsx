@@ -13,8 +13,13 @@ import { NoticeDismissButton } from './NoticeDismissButton.tsx';
 import { DiscoveryProgress, ResourceStatusNotice } from './ResourceStatusPanel.tsx';
 import { NoOrgState } from './NoOrgState.tsx';
 
-function countLabel(loaded: number, total: number | null): string {
-  return total === null ? `${loaded} loaded` : `${loaded}/${total}`;
+function hasUsableTotal(loaded: number, total: number | null, hasMore: boolean): boolean {
+  if (total === null) return false;
+  return hasMore ? total > loaded : total >= loaded;
+}
+
+function countLabel(loaded: number, total: number | null, hasMore = false): string {
+  return hasUsableTotal(loaded, total, hasMore) ? `${loaded}/${total}` : `${loaded} loaded`;
 }
 
 function stalledFamilies(inventory: InventorySnapshot): boolean {
@@ -37,9 +42,10 @@ function InventoryProgressBanner({
     : progress.state === 'complete'
       ? 'Inventory complete'
       : 'Loading inventory in batches';
-  const detail = progress.total === null
-    ? `${progress.loaded} records loaded so far`
-    : `${progress.loaded} of ${progress.total} records loaded`;
+  const moreToLoad = progress.families.some((family) => family.hasMore);
+  const detail = hasUsableTotal(progress.loaded, progress.total, moreToLoad)
+    ? `${progress.loaded} of ${progress.total} records loaded`
+    : `${progress.loaded} records loaded so far`;
 
   if (progress.state === 'complete') {
     return (
@@ -77,7 +83,7 @@ function InventoryProgressBanner({
           <li key={family.family} data-testid={`inventory-progress-${family.family}`} className="flex items-center justify-between gap-2 rounded-md bg-surface/70 px-2.5 py-1.5">
             <span className="truncate font-medium text-ink">{humanizeResource(family.family)}</span>
             <span className="whitespace-nowrap tabular-nums">
-              {countLabel(family.loaded, family.total)}
+              {countLabel(family.loaded, family.total, family.hasMore)}
               {family.hasMore ? ' · more' : ''}
               {family.status === 'failed' ? ' · stopped' : ''}
             </span>

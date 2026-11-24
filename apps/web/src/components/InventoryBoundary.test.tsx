@@ -54,6 +54,21 @@ function snapshotFor(state: DiscoveryProgress['state']): InventorySnapshot {
   };
 }
 
+function snapshotWithExhaustedTotal(): InventorySnapshot {
+  const snapshot = snapshotFor('running');
+  const progress = snapshot.progress!;
+  return {
+    ...snapshot,
+    progress: {
+      ...progress,
+      total: 2,
+      families: progress.families.map((family) => family.family === 'dlos'
+        ? { ...family, total: 2 }
+        : family),
+    },
+  };
+}
+
 function renderExplorer(snapshot: InventorySnapshot, resumeDiscovery = vi.fn(), seedCache = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   if (seedCache) queryClient.setQueryData(['inventory', context.contextId], snapshot);
@@ -95,6 +110,16 @@ describe('InventoryBoundary progressive state', () => {
     expect(screen.getByTestId('inventory-progress-dlos')).toHaveTextContent('2/100');
     expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
     expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
+  });
+
+  it('does not show an exhausted page total as complete while discovery continues', async () => {
+    renderExplorer(snapshotWithExhaustedTotal());
+
+    const banner = await screen.findByTestId('inventory-progress');
+    expect(banner).toHaveTextContent('2 records loaded so far');
+    expect(banner).not.toHaveTextContent('2 of 2 records loaded');
+    expect(screen.getByTestId('inventory-progress-dlos')).toHaveTextContent('2 loaded');
+    expect(screen.getByTestId('inventory-progress-dlos')).not.toHaveTextContent('2/2');
   });
 
   it('offers resume on a failed family without hiding earlier rows', async () => {
