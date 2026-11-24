@@ -227,6 +227,8 @@ function SlidePhase({ kicker, title, description, items, current = false }: {
 function ArchitectureArt({ present = false }: { present?: boolean }) {
   // The Present viewBox trims empty canvas below the diagram so the nodes read
   // larger in the fixed slide frame.
+  const nodeWidth = present ? 122 : 116;
+  const nodeHeight = present ? 72 : 70;
   const nodes = [
     { x: 252, y: 38, label: 'SOURCE', sub: 'Systems' },
     { x: 107, y: 137, label: 'STREAMS', sub: 'Ingestion' },
@@ -240,7 +242,7 @@ function ArchitectureArt({ present = false }: { present?: boolean }) {
   return (
     <svg
       className="story-art"
-      viewBox={present ? '0 12 620 440' : '0 0 620 500'}
+      viewBox={present ? '0 28 620 424' : '0 0 620 500'}
       fill="none"
       aria-hidden="true"
     >
@@ -254,26 +256,42 @@ function ArchitectureArt({ present = false }: { present?: boolean }) {
           <stop offset="100%" stopColor="var(--color-info)" />
         </linearGradient>
       </defs>
-      <g stroke="url(#dcat-architecture-edge)" strokeWidth="1.5" opacity="0.65">
-        <path d="M310 74 165 157 165 310 310 393 455 310 455 157 310 74Z" />
-        <path d="M165 157 310 240 455 157M310 240v153M165 310l145-70 145 70" opacity="0.6" />
-        <path d="M92 242 165 200 238 242M382 242l73-42 73 42M238 326l72 42 72-42" opacity="0.4" strokeDasharray="5 7" />
+      <g transform={present ? 'translate(-12.4 -9.6) scale(1.04)' : undefined}>
+        <g stroke="url(#dcat-architecture-edge)" strokeWidth="1.5" opacity="0.65">
+          <path d="M310 74 165 157 165 310 310 393 455 310 455 157 310 74Z" />
+          <path d="M165 157 310 240 455 157M310 240v153M165 310l145-70 145 70" opacity="0.6" />
+          <path d="M92 242 165 200 238 242M382 242l73-42 73 42M238 326l72 42 72-42" opacity="0.4" strokeDasharray="5 7" />
+        </g>
+        <g fill="var(--color-surface)" stroke="url(#dcat-architecture-node)" strokeWidth="1.5">
+          {nodes.map((node) => (
+            <rect key={node.label} x={node.x} y={node.y} width={nodeWidth} height={nodeHeight} rx="15" />
+          ))}
+        </g>
+        <g fill="var(--color-ink)" textAnchor="middle" fontFamily="inherit">
+          {nodes.map((node) => (
+            <g key={node.label}>
+              <text
+                x={node.x + nodeWidth / 2}
+                y={node.y + (present ? 30 : 28)}
+                fontSize={present ? 12 : 11}
+                fontWeight="700"
+              >
+                {node.label}
+              </text>
+              <text
+                x={node.x + nodeWidth / 2}
+                y={node.y + (present ? 48 : 45)}
+                fontSize={present ? 10 : 9}
+                fill="var(--color-ink-soft)"
+              >
+                {node.sub}
+              </text>
+            </g>
+          ))}
+        </g>
+        <circle cx="310" cy="240" r="8" fill="var(--color-brand)" />
+        <circle cx="310" cy="240" r="17" stroke="var(--color-brand)" strokeOpacity="0.35" />
       </g>
-      <g fill="var(--color-surface)" stroke="url(#dcat-architecture-node)" strokeWidth="1.5">
-        {nodes.map((node) => (
-          <rect key={node.label} x={node.x} y={node.y} width="116" height="70" rx="15" />
-        ))}
-      </g>
-      <g fill="var(--color-ink)" textAnchor="middle" fontFamily="inherit">
-        {nodes.map((node) => (
-          <g key={node.label}>
-            <text x={node.x + 58} y={node.y + 28} fontSize="11" fontWeight="700">{node.label}</text>
-            <text x={node.x + 58} y={node.y + 45} fontSize="9" fill="var(--color-ink-soft)">{node.sub}</text>
-          </g>
-        ))}
-      </g>
-      <circle cx="310" cy="240" r="8" fill="var(--color-brand)" />
-      <circle cx="310" cy="240" r="17" stroke="var(--color-brand)" strokeOpacity="0.35" />
     </svg>
   );
 }
@@ -334,6 +352,9 @@ const chapters: Chapter[] = [
             { label: 'Read-only', tone: 'info' },
             { label: 'Evidence-led', tone: 'violet' },
           ]} />
+          <p className="slide-cover-summary">
+            Trace the Data Cloud architecture from source to insight, with the evidence behind every connection.
+          </p>
           <div className="slide-cover-steps">
             <span>Discover</span><span>Understand</span><span>Validate</span>
           </div>
