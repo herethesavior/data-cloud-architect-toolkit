@@ -224,7 +224,9 @@ function SlidePhase({ kicker, title, description, items, current = false }: {
   );
 }
 
-function ArchitectureArt() {
+function ArchitectureArt({ present = false }: { present?: boolean }) {
+  // The Present viewBox trims empty canvas below the diagram so the nodes read
+  // larger in the fixed slide frame.
   const nodes = [
     { x: 252, y: 38, label: 'SOURCE', sub: 'Systems' },
     { x: 107, y: 137, label: 'STREAMS', sub: 'Ingestion' },
@@ -236,7 +238,12 @@ function ArchitectureArt() {
   ];
 
   return (
-    <svg className="story-art" viewBox="0 0 620 500" fill="none" aria-hidden="true">
+    <svg
+      className="story-art"
+      viewBox={present ? '0 12 620 440' : '0 0 620 500'}
+      fill="none"
+      aria-hidden="true"
+    >
       <defs>
         <linearGradient id="dcat-architecture-edge" x1="0" x2="1" y1="0" y2="1">
           <stop offset="0%" stopColor="var(--color-brand)" />
@@ -331,7 +338,7 @@ const chapters: Chapter[] = [
             <span>Discover</span><span>Understand</span><span>Validate</span>
           </div>
         </div>
-        <div className="slide-visual"><ArchitectureArt /></div>
+        <div className="slide-visual"><ArchitectureArt present /></div>
       </div>
     ),
   },

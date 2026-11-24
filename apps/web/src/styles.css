@@ -1928,6 +1928,9 @@ html[data-theme='dark'] .dcat-mark {
     --story-gap: clamp(0.5rem, min(1.5cqh, 1.1cqw), 1.125rem);
     --story-pad: clamp(1.5rem, min(4cqh, 3.5cqw), 3rem);
     --slide-fit: 1;
+    --deck-icon-sm: 1rem;
+    --deck-icon-md: 1.75rem;
+    --deck-icon-lg: 2.5rem;
     position: relative;
     z-index: 1;
     container-type: size;
@@ -2234,7 +2237,7 @@ html[data-theme='dark'] .dcat-mark {
     z-index: 1;
     color: var(--color-brand);
     content: '›';
-    font-size: 1.2rem;
+    font-size: 1.35rem;
   }
 
   .slide-stage-icon {
@@ -2947,8 +2950,10 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-capabilities .slide-capability > svg {
-    width: clamp(2.25rem, 4cqh, 2.75rem);
-    height: auto;
+    width: var(--deck-icon-lg);
+    height: var(--deck-icon-lg);
+    flex: 0 0 auto;
+    align-self: center;
     margin-bottom: 0.25rem;
   }
 
@@ -2978,33 +2983,38 @@ html[data-theme='dark'] .dcat-mark {
 
   .deck-slide .present-layout-flow .slide-stage {
     justify-content: center;
-    gap: clamp(0.35rem, 1cqh, 0.65rem);
-    padding: clamp(0.8rem, 2cqh, 1.25rem);
+    gap: clamp(0.25rem, 0.75cqh, 0.5rem);
+    padding: clamp(0.65rem, 1.6cqh, 1rem);
   }
 
   .deck-slide .present-layout-flow .slide-stage-icon {
-    width: clamp(1.5rem, 3cqh, 1.875rem);
-    height: auto;
+    width: var(--deck-icon-md);
+    height: var(--deck-icon-md);
+    flex: 0 0 auto;
+    align-self: center;
   }
 
   .deck-slide .present-layout-flow .slide-stage strong {
-    font-size: clamp(1.05rem, 2.2cqh, 1.25rem);
+    font-size: clamp(1.15rem, 2.35cqh, 1.35rem);
   }
 
   .deck-slide .present-layout-flow .slide-stage span {
-    font-size: clamp(0.95rem, 2cqh, 1.1rem);
+    font-size: clamp(1.05rem, 2.15cqh, 1.2rem);
   }
 
-  .deck-slide .present-layout-flow .story-outcome {
+  .deck-slide .present-layout-flow .story-outcome,
+  .deck-slide .present-layout-timeline .story-outcome {
     flex: 0 0 auto;
     padding: clamp(0.8rem, 1.9cqh, 1.2rem) clamp(1rem, 2cqw, 1.5rem);
   }
 
-  .deck-slide .present-layout-flow .story-outcome strong {
+  .deck-slide .present-layout-flow .story-outcome strong,
+  .deck-slide .present-layout-timeline .story-outcome strong {
     font-size: clamp(1.1rem, 2.4cqh, 1.3rem);
   }
 
-  .deck-slide .present-layout-flow .story-outcome span {
+  .deck-slide .present-layout-flow .story-outcome span,
+  .deck-slide .present-layout-timeline .story-outcome span {
     font-size: clamp(1rem, 2.1cqh, 1.15rem);
   }
 
@@ -3082,14 +3092,14 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-alignment .story-check-mark {
-    width: 1.4rem;
-    height: 1.4rem;
-    flex-basis: 1.4rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    flex-basis: 1.5rem;
   }
 
   .deck-slide .present-layout-alignment .story-check-mark svg {
-    width: 0.9rem;
-    height: 0.9rem;
+    width: var(--deck-icon-sm);
+    height: var(--deck-icon-sm);
   }
 
   .deck-slide .present-layout-alignment .slide-checklist .story-check {
@@ -3202,8 +3212,9 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-evidence .story-legend-line {
-    width: clamp(3rem, 5cqw, 4rem);
-    flex-basis: clamp(3rem, 5cqw, 4rem);
+    width: clamp(3.5rem, 5.5cqw, 4.5rem);
+    flex-basis: clamp(3.5rem, 5.5cqw, 4.5rem);
+    border-top-width: 3px;
   }
 
   /* Boundaries: pair three guardrails with the two execution modes. Both sides
@@ -3229,8 +3240,9 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-guardrails .slide-guardrail > svg {
-    width: clamp(1.5rem, 3.4cqh, 1.875rem);
-    height: auto;
+    width: var(--deck-icon-md);
+    height: var(--deck-icon-md);
+    margin-top: 0;
   }
 
   .deck-slide .present-layout-guardrails .slide-guardrail:last-child {
@@ -3395,8 +3407,8 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-takeaway .story-links svg {
-    width: clamp(1.35rem, 3cqh, 1.75rem);
-    height: auto;
+    width: var(--deck-icon-md);
+    height: var(--deck-icon-md);
   }
 
   /* On compact presentation viewports, preserve readable type and let the
