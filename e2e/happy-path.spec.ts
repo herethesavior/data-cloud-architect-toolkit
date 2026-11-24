@@ -1680,6 +1680,7 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
     stageSpan: number | null;
   };
 
+  await openDemo(page);
   await page.goto('/about');
   await expect(page.getByRole('button', { name: 'Present' })).toBeVisible();
   await page.getByRole('button', { name: 'Present' }).click();
