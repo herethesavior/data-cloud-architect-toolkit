@@ -131,16 +131,17 @@ export async function startDiscoverySession(
     }
   }
 
+  // Validate a caller-supplied id before stopping any existing work: a rejected
+  // request must not abort the target org's current discovery session.
+  const conflicting = options.sessionId ? state.discoverySessions.get(options.sessionId) : undefined;
+  if (conflicting && conflicting.alias !== org.alias) {
+    throw new CliError('INVALID_ARGUMENT', 'This discovery session belongs to another org.');
+  }
+
   const previousId = state.discoveryByAlias.get(org.alias);
   if (previousId) {
     const previous = state.discoverySessions.get(previousId);
     if (previous) stopSession(state, previous);
-  }
-
-  // A caller-supplied id must not silently replace another org's live session.
-  const conflicting = options.sessionId ? state.discoverySessions.get(options.sessionId) : undefined;
-  if (conflicting && conflicting.alias !== org.alias) {
-    throw new CliError('INVALID_ARGUMENT', 'This discovery session belongs to another org.');
   }
   if (conflicting) stopSession(state, conflicting);
 

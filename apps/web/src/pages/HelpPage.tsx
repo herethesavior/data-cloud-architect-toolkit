@@ -72,7 +72,7 @@ const quickAnswers = [
   },
   {
     question: 'Can DCAT change anything in my org?',
-    answer: 'No. Every command it runs is read-only. DCAT never writes, deploys, ingests, or activates metadata, and all exports are generated locally.',
+    answer: 'No. Metadata discovery is read-only. DCAT never writes, deploys, ingests, or activates metadata, and exports are generated locally. Org login is handled by Salesforce CLI on your machine.',
   },
   {
     question: 'Where should I begin?',
@@ -80,7 +80,7 @@ const quickAnswers = [
   },
   {
     question: 'What do I use after Hypercare?',
-    answer: 'When the customer owns the org, use DCAT to confirm the current metadata, trace source-to-target paths, review changes, and export diagrams for internal runbooks. Discovery stays read-only.',
+    answer: 'Use DCAT to confirm current metadata, trace source-to-target paths, review changes, and export diagrams for internal runbooks. Discovery stays read-only.',
   },
   {
     question: 'Will I see customer or transaction records?',
@@ -132,7 +132,7 @@ const editions: { title: string; description: string; icon: IconName }[] = [
   },
   {
     title: 'Hosted edition',
-    description: 'The public site is paired with a small local bridge. Salesforce login still happens in Salesforce CLI on the machine running that bridge.',
+    description: 'The public site pairs with a small local bridge. Salesforce login still happens in Salesforce CLI on the machine running that bridge. Check the paired bridge version in Settings & Diagnostics.',
     icon: 'plug',
   },
 ];
@@ -148,22 +148,34 @@ const connectSteps = [
   },
   {
     title: 'Check Discovery Health',
-    body: 'Each metadata family reports its own status. A failure in one family never hides successful results from another.',
+    body: 'Each metadata family reports its own retrieval status. A failure in one family never hides successful results from another.',
   },
 ];
 
 const statusRows: { status: string; tone: BadgeTone; meaning: string; action: string }[] = [
   {
-    status: 'Complete',
+    status: 'Not Started',
+    tone: 'neutral',
+    meaning: 'Discovery has not reached this family yet.',
+    action: 'Wait for the inventory to finish. If it remains, refresh and check diagnostics.',
+  },
+  {
+    status: 'Available',
     tone: 'success',
-    meaning: 'Every object in the family was retrieved.',
+    meaning: 'The family returned metadata successfully.',
     action: 'No action needed.',
   },
   {
     status: 'Partial',
     tone: 'warning',
-    meaning: 'Some objects were retrieved and the rest are listed as gaps.',
-    action: 'Review the gaps, then retry that family.',
+    meaning: 'Some metadata was returned; the rest may be missing.',
+    action: 'Read the item message, then refresh the inventory.',
+  },
+  {
+    status: 'Unsupported',
+    tone: 'warning',
+    meaning: 'The endpoint or Data 360 feature is unavailable for this org or user.',
+    action: 'Confirm Data 360 is enabled, then check the API version in Settings & Diagnostics.',
   },
   {
     status: 'Forbidden',
@@ -172,22 +184,10 @@ const statusRows: { status: string; tone: BadgeTone; meaning: string; action: st
     action: 'Ask your admin for metadata API access. Other families keep their results.',
   },
   {
-    status: 'Unsupported',
-    tone: 'neutral',
-    meaning: 'This API version does not expose the endpoint.',
-    action: 'Check the supported API version in Settings & Diagnostics.',
-  },
-  {
-    status: 'Failed',
+    status: 'Error',
     tone: 'danger',
-    meaning: 'The request errored before it could finish.',
-    action: 'Retry from the inventory, then check diagnostics if it repeats.',
-  },
-  {
-    status: 'Stale',
-    tone: 'warning',
-    meaning: 'The saved snapshot is older than expected.',
-    action: 'Use Refresh to retrieve it again.',
+    meaning: 'The request failed before it could finish.',
+    action: 'Refresh the inventory, then check diagnostics if it repeats.',
   },
 ];
 
@@ -251,7 +251,7 @@ const linkLegend = [
   {
     className: 'border-dashed',
     label: 'Derived by DCAT',
-    detail: 'DCAT joined grounded references into a relationship. It is labelled as derived, never presented as a declared edge.',
+    detail: 'DCAT connected grounded references or name patterns into a relationship. It is labelled as derived, never presented as a declared edge.',
   },
   {
     className: 'border-dotted',
@@ -266,7 +266,8 @@ const navigationTips = [
   'Filter and search inside each explorer instead of scanning every row.',
   'Use Change Impact Analyzer to review direct and all-path dependencies before a change; the result is limited to metadata named in the current snapshot.',
   'On the canvases, drag nodes, zoom, pan, and use Fit to frame the graph.',
-  'Filters, layout, positions, and viewport persist per org, so returning to a view keeps your place.',
+  'ERD and Lineage filters, layout, node positions, and viewport persist per org. Change Impact settings stay in the URL, so a copied link reopens the same review.',
+  'Adjust palette, text size, and density in Settings & Diagnostics without changing metadata.',
   'Exports are generated locally and only when you choose a format.',
 ];
 
@@ -291,7 +292,7 @@ const evidenceItems = [
 const privacyItems: { title: string; body: string; icon: IconName }[] = [
   {
     title: 'Salesforce CLI owns login',
-    body: 'DCAT never asks for or stores usernames, passwords, security tokens, SFDX auth URLs, client IDs, client secrets, or encryption keys.',
+    body: 'DCAT never asks for passwords, security tokens, SFDX auth URLs, client IDs, client secrets, or encryption keys. Salesforce CLI stores the authorization on your machine; DCAT displays and caches the non-secret username that CLI returns.',
     icon: 'lock',
   },
   {
@@ -301,7 +302,7 @@ const privacyItems: { title: string; body: string; icon: IconName }[] = [
   },
   {
     title: 'Typed operations only',
-    body: 'The relay accepts only cli.status, org.list, org.connect, inventory.get, inventory.start, inventory.status, transform.get, mode.set, and bridge.update. There is no arbitrary command, URL proxy, shell, or SOQL.',
+    body: 'The relay accepts only cli.status, org.list, org.connect, inventory.get, inventory.start, inventory.status, transform.get, mode.set, and bridge.update. Metadata reads are GET-only, with no arbitrary command, URL proxy, shell, or SOQL.',
     icon: 'route',
   },
   {
@@ -364,7 +365,7 @@ const glossaryGroups: { title: string; terms: { term: string; definition: string
       },
       {
         term: 'Change Impact Analyzer',
-        definition: 'A review of upstream and downstream dependencies for one selected DLO, DMO, field, or relationship. It reuses the same grounded snapshot and labels direct, transitive, derived, and missing paths separately instead of guessing.',
+        definition: 'A review of upstream and downstream dependencies for one selected DLO, DMO, field, or relationship. Choose 1 hop or all paths, see hop counts, and read labels that separate source-named, derived, inferred, and missing results.',
       },
     ],
   },
@@ -373,7 +374,7 @@ const glossaryGroups: { title: string; terms: { term: string; definition: string
     terms: [
       {
         term: 'Discovery Health',
-        definition: 'The per-family status summary that distinguishes complete, partial, forbidden, unsupported, and failed retrievals.',
+        definition: 'The per-family retrieval summary. It uses Available, Partial, Unsupported, Forbidden, Error, and Not Started labels instead of treating an empty result as success.',
       },
       {
         term: 'Provenance',
@@ -553,12 +554,14 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
             <PanelTitle
               icon="refresh"
               title="Refresh and caching"
-              description="DCAT first asks Salesforce CLI for the latest supported API version. If that fails, it requests no metadata and explains the gap."
+              description="DCAT reads the current Salesforce API version first. If that probe fails, it requests no metadata and explains the gap."
             />
             <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-soft">
-              Loaded orgs and inventories are saved in this browser and restored after a reload, so menu navigation does not
-              retrieve them again. The Updated chip shows their age. Use Refresh for a token-protected retrieval; you can
-              cancel an in-flight refresh, and a failure in one metadata family never erases another family's results.
+              Org lists and inventory snapshots are saved in this browser and restored after a reload, so menu navigation does
+              not retrieve them again. The Updated chip shows the inventory snapshot's age; a warning dot means a live snapshot
+              is old. Use Refresh to retrieve current metadata. Cancel stops the browser wait; in hosted mode the bridge task
+              continues and keeps the relay busy until it finishes. A failure in one metadata family never erases another
+              family's results.
             </p>
           </Panel>
 
@@ -566,7 +569,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
             <PanelTitle
               icon="warning"
               title="Statuses, explained"
-              description="Find the label in Discovery Health, then use the last column as your next step."
+              description="Find the label in Discovery Health on the Dashboard, then use the last column as your next step."
             />
             <ul className="mt-4 space-y-2">
               {statusRows.map((row) => (
@@ -592,7 +595,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
             <PanelTitle
               icon="graph"
               title="Pick the view for your question"
-              description="Every view reads the same snapshot, so a finding in one explorer matches the others."
+              description="Most views use the same inventory snapshot. Transform details are fetched on demand and may include references that are not in the snapshot."
             />
             <ul className="mt-4 space-y-2">
               {explorerRows.map((row) => (
@@ -614,7 +617,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
             <PanelTitle
               icon="route"
               title="Read the links honestly"
-              description="Line style tells you how strongly a connection is grounded. DCAT never joins objects just because their names look alike."
+              description="Line style tells you how strongly a connection is grounded. Some links are inferred from metadata patterns and field names, but they are always labelled as derived."
             />
             <ul className="mt-4 space-y-3">
               {linkLegend.map((item) => (
@@ -804,7 +807,7 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
               <ExternalLink
                 href={REPOSITORY_URL}
                 label="View the repository"
-                description="Source, setup instructions, and release notes."
+                description="Source and setup instructions."
               />
               <ExternalLink
                 href={LINKEDIN_URL}

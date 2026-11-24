@@ -408,7 +408,7 @@ export const api = {
         status: status.mode === 'demo' || status.relay === 'connected' ? 'ok' : 'degraded',
         mode: status.mode,
         version: status.version,
-        time: status.lastSeenAt ?? new Date().toISOString(),
+        time: new Date().toISOString(),
         cli: status.cli,
       };
     }

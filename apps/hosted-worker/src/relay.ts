@@ -412,10 +412,16 @@ export function relayRoutes() {
       }
       const session = await loadSession(context.env, sessionId);
       if (!session) {
+        await context.env.DCAT_SESSIONS.delete(`pairing:${parsed.data.code}`);
         return sendError(context, 400, 'INVALID_PAIRING_CODE', 'The pairing code is invalid or has expired.');
       }
       if (session.relay.agentToken) {
         return sendError(context, 409, 'BRIDGE_ALREADY_PAIRED', 'This browser is already paired with a bridge.');
+      }
+      const { pairingCode, pairingExpiresAt } = session.relay;
+      if (!pairingCode || pairingCode !== parsed.data.code || !pairingExpiresAt || pairingExpiresAt <= Date.now()) {
+        await context.env.DCAT_SESSIONS.delete(`pairing:${parsed.data.code}`);
+        return sendError(context, 400, 'INVALID_PAIRING_CODE', 'The pairing code is invalid or has expired.');
       }
 
       const oldToken = session.relay.agentToken;
@@ -599,6 +605,7 @@ export function relayRoutes() {
         return sendError(context, 401, 'INVALID_SESSION_TOKEN', 'Refresh the page and try again.');
       }
       const oldToken = session.relay.agentToken;
+      const pairingCode = session.relay.pairingCode;
       session.relay = {
         agentToken: null,
         pairedAt: null,
@@ -610,6 +617,7 @@ export function relayRoutes() {
         request: null,
       };
       if (oldToken) await context.env.DCAT_SESSIONS.delete(`agent:${oldToken}`);
+      if (pairingCode) await context.env.DCAT_SESSIONS.delete(`pairing:${pairingCode}`);
       await context.env.DCAT_SESSIONS.delete(agentStateKey(session.id));
       await clearRelayRequest(context.env, session);
       await saveSession(context.env, session);

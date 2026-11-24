@@ -20,7 +20,7 @@ describe('HelpPage', () => {
     expect(screen.getByRole('tab', { name: 'Start here' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('What do I need to get started?')).toBeInTheDocument();
     expect(screen.getByText('What do I use after Hypercare?')).toBeInTheDocument();
-    expect(screen.getByText(/When the customer owns the org, use DCAT/)).toBeInTheDocument();
+    expect(screen.getByText(/Use DCAT to confirm current metadata/)).toBeInTheDocument();
     expect(screen.getByText('After Hypercare: customer-owned support')).toBeInTheDocument();
     expect(screen.getByText(/Will I see customer or transaction records/)).toBeInTheDocument();
 
@@ -37,7 +37,14 @@ describe('HelpPage', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Connect & refresh' }));
     expect(await screen.findByText('Connect in three steps')).toBeInTheDocument();
+    expect(screen.getByText('Not Started')).toBeInTheDocument();
+    expect(screen.getByText('Available')).toBeInTheDocument();
+    expect(screen.getByText('Partial')).toBeInTheDocument();
+    expect(screen.getByText('Unsupported')).toBeInTheDocument();
     expect(screen.getByText('Forbidden')).toBeInTheDocument();
+    expect(screen.getByText('Error')).toBeInTheDocument();
+    expect(screen.queryByText('Failed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Stale')).not.toBeInTheDocument();
     expect(screen.getByText(/Ask your admin for metadata API access/)).toBeInTheDocument();
   });
 

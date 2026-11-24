@@ -18,7 +18,7 @@ import {
   transformScheduleJson,
   versionsJson,
 } from '@dcat/test-fixtures';
-import { executeRelayOperation, runBridge, type RelayHttp } from './bridge.ts';
+import { executeRelayOperation, FetchRelayHttp, RelayAuthError, runBridge, type RelayHttp } from './bridge.ts';
 import { loadConfig } from './config.ts';
 import { createAppState, type AppState, type DiscoverySessionRecord } from './state.ts';
 
@@ -184,6 +184,13 @@ describe('executeRelayOperation', () => {
       sessionId: 'shared',
     })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
 
+    // The rejected request must not abort the valid session it tried to borrow.
+    await expect(operation(state, {
+      operation: 'inventory.status',
+      alias: 'demo-uat',
+      sessionId: 'shared',
+    })).resolves.toMatchObject({ sessionId: 'shared' });
+
     await operation(state, { operation: 'mode.set', mode: 'demo' });
   });
 
@@ -301,5 +308,68 @@ describe('runBridge', () => {
   it('requires a pairing code for a new bridge', async () => {
     const state = createState();
     await expect(runBridge({ relayUrl: 'https://dcat.example', state })).rejects.toBeInstanceOf(CliError);
+  });
+
+  it('preserves a relay authentication failure from an HTTP response', async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+      error: { code: 'INVALID_AGENT_TOKEN', message: 'The site reset this bridge pairing.' },
+    }), { status: 401, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+    const http = new FetchRelayHttp('https://dcat.example', fetchFn);
+
+    await expect(http.post('/api/relay/poll', { agentToken: 'revoked-token' }))
+      .rejects.toBeInstanceOf(RelayAuthError);
+  });
+
+  it('stops polling when the relay reports an unpaired bridge', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const http: RelayHttp = {
+      async post<T>() {
+        calls += 1;
+        if (calls === 2) controller.abort();
+        return { status: 'unpaired', tasks: [] } as T;
+      },
+    };
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'revoked-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    expect(calls).toBe(1);
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge stopped'));
+  });
+
+  it('stops polling when the site invalidates the bridge pairing', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const http: RelayHttp = {
+      async post() {
+        calls += 1;
+        if (calls === 2) controller.abort();
+        throw new RelayAuthError('The site reset this bridge pairing. Run setup again.');
+      },
+    };
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'revoked-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    expect(calls).toBe(1);
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge stopped'));
+    expect(logger).not.toHaveBeenCalledWith(expect.stringContaining('Retrying'));
   });
 });

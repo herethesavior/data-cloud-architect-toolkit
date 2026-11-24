@@ -310,6 +310,84 @@ describe('hosted bridge relay', () => {
     expect((await status.json() as { paired: boolean }).paired).toBe(true);
   });
 
+  it('invalidates an unused pairing code when the browser unpairs', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const firstPairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson('/api/relay/unpair', {}, session.headers, env);
+
+    const stalePair = await app.request('/api/relay/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: firstPairing.code, version: '0.1.6', cli }),
+    }, env);
+    expect(stalePair.status).toBe(400);
+    expect((await stalePair.json() as { error: { code: string } }).error.code).toBe('INVALID_PAIRING_CODE');
+
+    const secondPairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: secondPairing.code,
+      version: '0.1.6',
+      cli,
+    }, {}, env);
+    expect(paired.agentToken).toMatch(/\S/);
+  });
+
+  it('uses the shared transform-id validator for relayed requests', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const invalid = await app.request('/api/relay/requests', {
+      method: 'POST',
+      headers: { ...session.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ operation: 'transform.get', alias: 'demo-uat', id: 'a..b' }),
+    }, env);
+    expect(invalid.status).toBe(400);
+
+    const valid = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'transform.get',
+      alias: 'demo-uat',
+      id: 'Team~Transform',
+    }, session.headers, env);
+    expect(valid.id).toMatch(/\S/);
+  });
+
+  it('reports the health check time instead of the bridge heartbeat', async () => {
+    const kv = new FakeKV();
+    const env = makeEnv(kv);
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      version: '0.1.6',
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const sessionId = session.cookie.slice('dcat_session='.length).split(';')[0]!;
+    const oldHeartbeat = Date.now() - 60 * 60_000;
+    await kv.put(`relay:agent:${sessionId}`, JSON.stringify({
+      lastSeenAt: oldHeartbeat,
+      agentVersion: '0.1.6',
+      cli,
+    }));
+
+    const before = Date.now();
+    const response = await app.request('/api/health', { headers: session.headers }, env);
+    const after = Date.now();
+    const body = await response.json() as { time: string };
+
+    expect(Date.parse(body.time)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(body.time)).toBeLessThanOrEqual(after);
+    expect(Date.parse(body.time)).toBeGreaterThan(oldHeartbeat);
+  });
+
   it('surfaces npm update availability on relay status', async () => {
     const env = makeEnv();
     const session = await startSession(env);
