@@ -44,7 +44,7 @@
       }
     </script>
     <script>
-      // Resolve the theme before first paint so the page never flashes the wrong palette.
+      // Resolve appearance before first paint so the page never flashes the wrong palette or type scale.
       (function () {
         try {
           var preference = localStorage.getItem('dcat.theme');
@@ -54,6 +54,18 @@
           document.documentElement.dataset.theme = dark ? 'dark' : 'light';
         } catch (error) {
           document.documentElement.dataset.theme = 'light';
+        }
+        try {
+          var palette = localStorage.getItem('dcat.themePalette');
+          var fontSize = localStorage.getItem('dcat.fontSize');
+          var density = localStorage.getItem('dcat.density');
+          document.documentElement.dataset.palette = palette === 'midnight' ? 'midnight' : 'forest';
+          document.documentElement.dataset.fontSize = fontSize === 'small' || fontSize === 'large' ? fontSize : 'medium';
+          document.documentElement.dataset.density = density === 'compact' ? 'compact' : 'comfortable';
+        } catch (error) {
+          document.documentElement.dataset.palette = 'forest';
+          document.documentElement.dataset.fontSize = 'medium';
+          document.documentElement.dataset.density = 'comfortable';
         }
       })();
     </script>

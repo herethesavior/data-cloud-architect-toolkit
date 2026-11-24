@@ -154,7 +154,7 @@ Worker KV writes are kept small and expire because free-tier KV has write limits
 
 - **Navigation:** desktop users can collapse the sidebar to an icon rail; smaller screens use a burger menu. Both controls expose their state to screen readers.
 - **Search:** press `Ctrl/Cmd+K` to search the current context's Data Spaces, DLOs, DMOs, streams, mappings, and transforms. Results open the matching explorer or a read-only detail dialog.
-- **Themes:** follow the device preference or choose **Light**, **Dark**, or **System** in Settings. The choice is saved as `dcat.theme`.
+- **Appearance:** follow the device preference or choose **Light**, **Dark**, or **System** in Settings. Dark mode offers the greenish **Forest** palette (default) and the original navy **Midnight** palette. Font size (**Small**, **Medium**, **Large**) and interface density (**Comfortable**, **Compact**) apply across the workbench. Choices are saved as `dcat.theme`, `dcat.themePalette`, `dcat.fontSize`, and `dcat.density`.
 - **Detail drawers:** open from object rows. They have breadcrumbs, tabs, copy actions, no dimming scrim, a width cap of 640px, and scrolling inside the viewport.
 - **Freshness:** a compact chip beside each explorer's filters shows **Updated …** with an exact-time tooltip. Loaded org lists and inventories are restored from this browser after a reload, so navigation does not retrieve them again. A stale dot appears for live snapshots older than 15 minutes; use the token-protected refresh action to retrieve a new snapshot.
 - **No org selected:** inventory views show **Select an org** as the primary action and **Use demo mode** as the live-mode fallback.

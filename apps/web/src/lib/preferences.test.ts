@@ -1,12 +1,22 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  applyAppearance,
   applyTheme,
+  clearDensityPreference,
+  clearFontSizePreference,
+  clearThemePalette,
   clearThemePreference,
+  getDensityPreference,
+  getFontSizePreference,
   getHiddenOrgs,
+  getThemePalette,
   getThemePreference,
   resolveTheme,
+  setDensityPreference,
+  setFontSizePreference,
   setHiddenOrgs,
+  setThemePalette,
   setThemePreference,
 } from './preferences.ts';
 
@@ -48,6 +58,9 @@ describe('theme preferences', () => {
     Object.defineProperty(window, 'localStorage', { value: storage, configurable: true });
     store.clear();
     delete document.documentElement.dataset.theme;
+    delete document.documentElement.dataset.palette;
+    delete document.documentElement.dataset.fontSize;
+    delete document.documentElement.dataset.density;
   });
 
   afterEach(() => {
@@ -88,6 +101,41 @@ describe('theme preferences', () => {
   it('ignores malformed hidden org storage', () => {
     window.localStorage.setItem('dcat.hiddenOrgs', '{"alias":"prod-org"}');
     expect(getHiddenOrgs()).toEqual([]);
+  });
+
+  it('stores appearance preferences and falls back to safe defaults', () => {
+    expect(getThemePalette()).toBe('forest');
+    expect(getFontSizePreference()).toBe('medium');
+    expect(getDensityPreference()).toBe('comfortable');
+
+    setThemePalette('midnight');
+    setFontSizePreference('large');
+    setDensityPreference('compact');
+    expect(getThemePalette()).toBe('midnight');
+    expect(getFontSizePreference()).toBe('large');
+    expect(getDensityPreference()).toBe('compact');
+
+    window.localStorage.setItem('dcat.themePalette', 'neon');
+    window.localStorage.setItem('dcat.fontSize', 'huge');
+    window.localStorage.setItem('dcat.density', 'loose');
+    expect(getThemePalette()).toBe('forest');
+    expect(getFontSizePreference()).toBe('medium');
+    expect(getDensityPreference()).toBe('comfortable');
+
+    clearThemePalette();
+    clearFontSizePreference();
+    clearDensityPreference();
+    expect(window.localStorage.getItem('dcat.themePalette')).toBeNull();
+    expect(window.localStorage.getItem('dcat.fontSize')).toBeNull();
+    expect(window.localStorage.getItem('dcat.density')).toBeNull();
+  });
+
+  it('applies appearance preferences to the document root', () => {
+    applyAppearance({ palette: 'midnight', fontSize: 'large', density: 'compact' });
+
+    expect(document.documentElement.dataset.palette).toBe('midnight');
+    expect(document.documentElement.dataset.fontSize).toBe('large');
+    expect(document.documentElement.dataset.density).toBe('compact');
   });
 
   it('resolves explicit themes without consulting the system', () => {

@@ -11,12 +11,33 @@ import type { IconName } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, ConfirmDialog, Panel, SectionHeading } from '../components/ui/index.ts';
 import type { ThemeController } from '../lib/useTheme.ts';
-import type { ThemePreference } from '../lib/preferences.ts';
+import type {
+  DensityPreference,
+  FontSizePreference,
+  ThemePalette,
+  ThemePreference,
+} from '../lib/preferences.ts';
 
 const themeOptions: { value: ThemePreference; label: string; icon: IconName }[] = [
   { value: 'light', label: 'Light', icon: 'sun' },
   { value: 'dark', label: 'Dark', icon: 'moon' },
   { value: 'system', label: 'System', icon: 'monitor' },
+];
+
+const paletteOptions: { value: ThemePalette; label: string }[] = [
+  { value: 'forest', label: 'Forest' },
+  { value: 'midnight', label: 'Midnight' },
+];
+
+const fontSizeOptions: { value: FontSizePreference; label: string }[] = [
+  { value: 'small', label: 'Small' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'large', label: 'Large' },
+];
+
+const densityOptions: { value: DensityPreference; label: string }[] = [
+  { value: 'comfortable', label: 'Comfortable' },
+  { value: 'compact', label: 'Compact' },
 ];
 
 const privacyItems: { icon: IconName; text: string }[] = [
@@ -232,9 +253,73 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
             ))}
           </div>
           <p className="mt-3 text-xs text-ink-faint">
-            Currently showing the <span className="font-medium text-ink-soft">{theme.resolved}</span> theme.
+            Currently showing the <span className="font-medium text-ink-soft">{theme.resolved}</span> theme
+            {theme.resolved === 'dark' ? ` with the ${theme.palette === 'midnight' ? 'Midnight' : 'Forest'} palette` : ''}.
             {theme.preference === 'system' ? ' Follows your device preference automatically.' : ''}
           </p>
+          <div className="mt-4 divide-y divide-line rounded-lg border border-line">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink">Dark palette</p>
+                <p className="mt-1 text-xs text-ink-soft">
+                  Applies whenever dark mode is active, including a dark system preference.
+                </p>
+              </div>
+              <div
+                className="inline-flex rounded-lg border border-line bg-surface-alt p-0.5"
+                role="group"
+                aria-label="Dark palette"
+              >
+                {paletteOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => theme.choosePalette(option.value)}
+                    aria-pressed={theme.palette === option.value}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
+                      theme.palette === option.value
+                        ? 'bg-brand-soft text-brand'
+                        : 'text-ink-soft hover:bg-surface hover:text-ink'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+              <div className="min-w-0">
+                <label htmlFor="appearance-font-size" className="text-sm font-medium text-ink">Font size</label>
+                <p className="mt-1 text-xs text-ink-soft">
+                  Scales text across the workbench, not just this page.
+                </p>
+              </div>
+              <select
+                id="appearance-font-size"
+                className="input h-9 w-32"
+                value={theme.fontSize}
+                onChange={(event) => theme.chooseFontSize(event.target.value as FontSizePreference)}
+              >
+                {fontSizeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+              <div className="min-w-0">
+                <label htmlFor="appearance-density" className="text-sm font-medium text-ink">Interface density</label>
+                <p className="mt-1 text-xs text-ink-soft">
+                  Adjusts panel and control spacing throughout DCAT.
+                </p>
+              </div>
+              <select
+                id="appearance-density"
+                className="input h-9 w-32"
+                value={theme.density}
+                onChange={(event) => theme.chooseDensity(event.target.value as DensityPreference)}
+              >
+                {densityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+          </div>
         </Panel>
 
         <Panel className="xl:col-span-2">
@@ -244,7 +329,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
           />
           <p className="mt-1 text-sm text-ink-soft">
             DCAT caches org lists and loaded inventory snapshots here for up to 7 days so reloads are fast.
-            It also remembers your mode, selected org, hidden orgs, theme, sidebar state, and ERD/Lineage layouts.
+            It also remembers your mode, selected org, hidden orgs, theme, appearance settings, sidebar state, and ERD/Lineage layouts.
             Access tokens, pairing codes, and customer records are never persisted.
           </p>
           {dataNotice ? (
@@ -320,7 +405,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
               <ul className="mt-2 list-inside list-disc space-y-1">
                 <li>Cached org lists and inventory snapshots</li>
                 <li>Mode, selected org, and hidden orgs</li>
-                <li>Theme, sidebar state, and saved ERD/Lineage layouts</li>
+                <li>Theme, appearance settings, sidebar state, and saved ERD/Lineage layouts</li>
               </ul>
             </>
           }
