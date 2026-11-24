@@ -153,6 +153,20 @@ describe('progressive discovery', () => {
     expect(cli.calls.filter((path) => path.startsWith(dloPath))).toHaveLength(20);
   });
 
+  it('does not expose a page-local total as complete while another page remains', async () => {
+    const records = Array.from({ length: 8 }, (_, index) => ({
+      apiName: `Page_DLO_${String(index + 1).padStart(3, '0')}__dll`,
+      fields: [],
+    }));
+    const cli = fakeCli({
+      [dloPath]: JSON.stringify({ records, pagination: { pageToken: '2', total: records.length } }),
+    });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+
+    expect(progressiveSnapshot(state).progress?.families.find((family) => family.family === 'dlos'))
+      .toMatchObject({ status: 'partial', loaded: 8, total: null, hasMore: true });
+  });
+
   it('keeps earlier pages when a late page fails and resumes from the checkpoint', async () => {
     const page2 = `${dloPath}?pageToken=2`;
     const failures: Record<string, number> = { [page2]: retry.maxAttempts };

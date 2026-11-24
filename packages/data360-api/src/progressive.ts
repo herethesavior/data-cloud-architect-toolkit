@@ -757,14 +757,19 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
   const errorStatus = family === 'mappings'
     ? failedTask?.errorStatus ?? (state.mappings.failed ? state.mappings.errorStatus : null)
     : state.families[family].failed ? state.families[family].errorStatus : null;
+  const loaded = capability?.itemCount ?? (family === 'mappings'
+    ? state.mappings.items.length
+    : state.families[family].items.length);
+  // Some Data 360 endpoints report the current page size as `total`. A total
+  // that is already exhausted while more pages remain is not a denominator;
+  // exposing it would make an in-flight family look complete.
+  const total = cursor.total !== null && (!hasMore || cursor.total > loaded) ? cursor.total : null;
 
   return {
     family,
     status,
-    loaded: capability?.itemCount ?? (family === 'mappings'
-      ? state.mappings.items.length
-      : state.families[family].items.length),
-    total: cursor.total,
+    loaded,
+    total,
     pagesFetched: pages,
     hasMore,
     error,

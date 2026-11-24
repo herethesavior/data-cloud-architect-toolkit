@@ -1306,6 +1306,40 @@ test('appearance settings apply app-wide and persist across reloads', async ({ p
   const appearancePanel = page.locator('.panel').filter({ has: page.getByRole('heading', { name: 'Appearance' }) });
   const panelBox = await appearancePanel.boundingBox();
   expect(panelBox).not.toBeNull();
+
+  const expectSelectLabelsFit = async () => {
+    const selections = await page.evaluate(() => {
+      const measure = (id: string) => {
+        const select = document.getElementById(id) as HTMLSelectElement | null;
+        if (!select) return { label: id, fits: false, insidePanel: false };
+        const style = getComputedStyle(select);
+        const box = select.getBoundingClientRect();
+        const panel = select.closest('.panel')?.getBoundingClientRect();
+        const context = document.createElement('canvas').getContext('2d');
+        if (context) context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const label = select.options[select.selectedIndex]?.textContent?.trim() ?? '';
+        const available = box.width
+          - Number.parseFloat(style.paddingLeft)
+          - Number.parseFloat(style.paddingRight)
+          - Number.parseFloat(style.borderLeftWidth)
+          - Number.parseFloat(style.borderRightWidth);
+        return {
+          label,
+          fits: (context?.measureText(label).width ?? Infinity) <= available + 1,
+          insidePanel: panel
+            ? box.left >= panel.left - 1 && box.right <= panel.right + 1
+              && box.top >= panel.top - 1 && box.bottom <= panel.bottom + 1
+            : false,
+        };
+      };
+      return [measure('appearance-font-size'), measure('appearance-density')];
+    });
+    for (const selection of selections) {
+      expect(selection.fits, `${selection.label} fits its select`).toBe(true);
+      expect(selection.insidePanel, `${selection.label} stays inside Appearance`).toBe(true);
+    }
+  };
+
   for (const control of [
     page.getByRole('group', { name: 'Dark palette' }),
     page.getByLabel('Font size'),
@@ -1328,8 +1362,17 @@ test('appearance settings apply app-wide and persist across reloads', async ({ p
   await expect(page.locator('html')).toHaveAttribute('data-palette', 'midnight');
   expect(await brandColor(), 'midnight palette brand role').not.toBe(forestBrand);
 
-  await page.getByLabel('Font size').selectOption('large');
-  await expect(page.locator('html')).toHaveAttribute('data-font-size', 'large');
+  for (const size of ['small', 'medium', 'large'] as const) {
+    await page.getByLabel('Font size').selectOption(size);
+    await expect(page.locator('html')).toHaveAttribute('data-font-size', size);
+    await expectSelectLabelsFit();
+  }
+
+  const desktopViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectSelectLabelsFit();
+  await page.setViewportSize(desktopViewport);
+
   const largeFontSize = await bodyFontSize();
   expect(largeFontSize).toBeGreaterThan(defaultFontSize);
 
@@ -1736,6 +1779,9 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
   type IconMetrics = {
     layout: string;
     visualNodeWidth: number | null;
+    artClipped: boolean;
+    artWidthRatio: number;
+    artHeightRatio: number;
     iconWidths: number[];
     iconAlignments: string[];
     cardAlignments: string[];
@@ -1764,9 +1810,31 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
       const icons = [...slide.querySelectorAll('svg')].filter((svg) => !svg.classList.contains('story-art'));
       const stageStrong = slide.querySelector('.slide-stage strong');
       const stageSpan = slide.querySelector('.slide-stage span');
+      const art = slide.querySelector('.slide-visual .story-art');
+      let artClipped = false;
+      let artWidthRatio = 0;
+      let artHeightRatio = 0;
+      if (art) {
+        const artBox = art.getBoundingClientRect();
+        const shapes = [...art.querySelectorAll('rect, text, path, circle')].map((shape) => shape.getBoundingClientRect());
+        if (shapes.length > 0) {
+          const left = Math.min(...shapes.map((shape) => shape.left));
+          const right = Math.max(...shapes.map((shape) => shape.right));
+          const top = Math.min(...shapes.map((shape) => shape.top));
+          const bottom = Math.max(...shapes.map((shape) => shape.bottom));
+          artClipped = shapes.some((shape) =>
+            shape.left < artBox.left - 1 || shape.right > artBox.right + 1
+            || shape.top < artBox.top - 1 || shape.bottom > artBox.bottom + 1);
+          artWidthRatio = (right - left) / artBox.width;
+          artHeightRatio = (bottom - top) / artBox.height;
+        }
+      }
       return {
         layout: [...chapter.classList].find((name) => name.startsWith('present-layout-'))?.replace('present-layout-', '') ?? '',
         visualNodeWidth: slide.querySelector('.story-art rect') ? width(slide.querySelector('.story-art rect')!) : null,
+        artClipped,
+        artWidthRatio,
+        artHeightRatio,
         iconWidths: icons.map(width),
         iconAlignments: [...slide.querySelectorAll('.slide-stage-icon, .slide-capability > svg')]
           .map((icon) => getComputedStyle(icon).alignSelf),
@@ -1802,7 +1870,11 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
     expect(new Set(metrics.cardTextAlignments), `${layout} card text alignment`).toEqual(new Set(['center']));
   }
   expect(byLayout.get('cover')!.coverSummary, 'cover DCAT summary').toMatch(/Data Cloud architecture/i);
-  expect(byLayout.get('cover')!.visualNodeWidth, 'cover diagram node width').toBeGreaterThan(86);
+  const cover = byLayout.get('cover')!;
+  expect(cover.artClipped, 'cover diagram clipping').toBe(false);
+  expect(cover.artWidthRatio, 'cover diagram width use').toBeGreaterThan(0.9);
+  expect(cover.artHeightRatio, 'cover diagram height use').toBeGreaterThan(0.8);
+  expect(cover.visualNodeWidth, 'cover diagram node width').toBeGreaterThan(100);
   expect(byLayout.get('flow')!.stageStrong, 'flow stage title size').toBeGreaterThanOrEqual(20);
   expect(byLayout.get('flow')!.stageSpan, 'flow stage detail size').toBeGreaterThanOrEqual(18);
 });
@@ -1820,6 +1892,7 @@ test('about deck slides stay legible and scrollable on a phone viewport', async 
   const minFonts: number[] = [];
   const cardSpills: number[] = [];
   const clippedLeads: boolean[] = [];
+  const clippedArt: boolean[] = [];
   const scrollContainers: boolean[] = [];
   for (let index = 0; index < 14; index += 1) {
     await page.evaluate(() => new Promise<void>((resolve) => {
@@ -1839,7 +1912,17 @@ test('about deck slides stay legible and scrollable on a phone viewport', async 
         const rect = element.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden';
       });
+      const art = slide.querySelector('.slide-visual .story-art');
+      let artClipped = false;
+      if (art) {
+        const artBox = art.getBoundingClientRect();
+        const shapes = [...art.querySelectorAll('rect, text, path, circle')].map((shape) => shape.getBoundingClientRect());
+        artClipped = shapes.some((shape) =>
+          shape.left < artBox.left - 1 || shape.right > artBox.right + 1
+          || shape.top < artBox.top - 1 || shape.bottom > artBox.bottom + 1);
+      }
       return {
+        artClipped,
         minFont: Math.min(...textElements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize))),
         horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         bodyHorizontalOverflow: body.scrollWidth - body.clientWidth,
@@ -1853,6 +1936,7 @@ test('about deck slides stay legible and scrollable on a phone viewport', async 
     minFonts.push(metrics.minFont);
     cardSpills.push(metrics.cardSpill);
     clippedLeads.push(metrics.clippedLead);
+    clippedArt.push(metrics.artClipped);
     scrollContainers.push(metrics.scrolls);
     expect(metrics.horizontalOverflow, `horizontal overflow on slide ${index + 1}`).toBeLessThanOrEqual(1);
     expect(metrics.bodyHorizontalOverflow, `body horizontal overflow on slide ${index + 1}`).toBeLessThanOrEqual(1);
@@ -1864,6 +1948,7 @@ test('about deck slides stay legible and scrollable on a phone viewport', async 
   expect(Math.min(...minFonts), `rendered font sizes: ${minFonts.join(', ')}`).toBeGreaterThanOrEqual(10);
   expect(Math.max(...cardSpills), `card content spill: ${cardSpills.join(', ')}`).toBeLessThanOrEqual(2);
   expect(clippedLeads.some(Boolean), `clipped leads: ${clippedLeads.join(', ')}`).toBe(false);
+  expect(clippedArt.some(Boolean), `clipped cover diagram: ${clippedArt.join(', ')}`).toBe(false);
   expect(scrollContainers.every(Boolean), `body scroll containers: ${scrollContainers.join(', ')}`).toBe(true);
 
   await deck.getByRole('button', { name: 'Exit presentation' }).click();

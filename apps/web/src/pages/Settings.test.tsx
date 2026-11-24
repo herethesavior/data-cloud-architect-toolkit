@@ -24,8 +24,8 @@ const bridge: BridgeStatus = {
   lastSeenAt: '2026-01-01T00:00:00.000Z',
   relay: 'connected',
   pairing: null,
-  agentVersion: '0.1.4',
-  latestVersion: '0.1.4',
+  agentVersion: '0.1.6',
+  latestVersion: '0.1.6',
   updateAvailable: false,
   selfUpdateSupported: true,
 };
@@ -82,6 +82,10 @@ function renderSettings(options: RenderOptions = {}) {
   };
 }
 
+function diagnosticValue(label: string): HTMLElement | null {
+  return screen.getByText(label).parentElement?.querySelector('dd') ?? null;
+}
+
 describe('Settings bridge diagnostics', () => {
   beforeEach(() => {
     vi.spyOn(api, 'health').mockResolvedValue(health);
@@ -95,15 +99,17 @@ describe('Settings bridge diagnostics', () => {
   });
 
   it('shows local connector diagnostics in local mode', async () => {
+    vi.mocked(api.bridgeStatus).mockResolvedValue({ ...bridge, agentVersion: null });
     renderSettings();
 
     expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Re-check CLI/ })).toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(diagnosticValue('Bridge version')).toHaveTextContent('0.1.0');
     expect(screen.queryByText(/OAuth/i)).not.toBeInTheDocument();
   });
 
-  it('shows the same bridge diagnostics in hosted mode', async () => {
+  it('shows the paired bridge version instead of the relay version in hosted mode', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     renderSettings();
 
@@ -111,7 +117,23 @@ describe('Settings bridge diagnostics', () => {
     expect(screen.getByRole('button', { name: /Refresh status/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Re-check CLI/ })).not.toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(diagnosticValue('Bridge version')).toHaveTextContent('0.1.6');
+    expect(diagnosticValue('Bridge version')).not.toHaveTextContent('0.1.0');
     expect(screen.queryByRole('heading', { name: 'Salesforce OAuth' })).not.toBeInTheDocument();
+  });
+
+  it('does not show the relay version before a hosted bridge has paired', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue({
+      ...bridge,
+      paired: false,
+      relay: 'waiting',
+      agentVersion: null,
+    });
+    renderSettings();
+
+    expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
+    expect(diagnosticValue('Bridge version')).toHaveTextContent('—');
   });
 
   it('clears a stale CLI status error when switching to demo mode', async () => {
