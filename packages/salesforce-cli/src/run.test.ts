@@ -164,4 +164,24 @@ describe('NodeProcessRunner queue', () => {
     children[1]!.emit('close', 0);
     await expect(second).resolves.toMatchObject({ exitCode: 0 });
   });
+
+  it('unwedges the queue when a killed CLI never emits close', async () => {
+    const children: FakeChild[] = [];
+    const spawner = (() => {
+      const child = fakeChild();
+      child.kill = vi.fn(() => true);
+      children.push(child);
+      return child;
+    }) as unknown as SpawnFn;
+    const runner = new NodeProcessRunner('sf', spawner, localResolver);
+
+    await expect(runner.run(['stuck'], { timeoutMs: 5, closeGraceMs: 5 }))
+      .rejects.toMatchObject({ code: 'TIMEOUT' });
+
+    const next = runner.run(['next']);
+    await tick();
+    expect(children).toHaveLength(2);
+    children[1]!.emit('close', 0);
+    await expect(next).resolves.toMatchObject({ exitCode: 0 });
+  });
 });

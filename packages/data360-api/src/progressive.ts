@@ -69,6 +69,8 @@ const MAPPING_CONCURRENCY = 4;
 const RELATIONSHIP_CONCURRENCY = 4;
 /** Bounded count-repair passes prevent an inconsistent endpoint from looping forever. */
 const MAX_EXPECTED_COUNT_RETRIES = 2;
+/** A session must reach a terminal state even when a slow org cannot drain its queues. */
+export const DEFAULT_DISCOVERY_DURATION_MS = 8 * 60_000;
 
 type ExpectedTotalSource = 'preflight' | 'response';
 
@@ -140,6 +142,9 @@ export interface ProgressiveDiscoveryState {
   cli: RestClient;
   sessionId: string;
   generation: string;
+  createdAt: number;
+  deadlineAt: number;
+  timedOut: boolean;
   signal?: AbortSignal;
   alias: string;
   org: OrgSummary;
@@ -171,7 +176,14 @@ export interface ProgressiveDiscoveryOptions {
   maxPages?: number;
   maxMappingQueries?: number;
   maxRelationshipQueries?: number;
+  maxDurationMs?: number;
+  /** Called after every committed page so a caller can publish partial rows. */
+  onProgress?: (state: ProgressiveDiscoveryState) => void;
   retry?: Partial<PageRetryOptions>;
+}
+
+export interface AdvanceDiscoveryOptions {
+  onProgress?: (state: ProgressiveDiscoveryState) => void;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -457,6 +469,46 @@ function stopWithWarning(
   cursor.done = true;
   cursor.degraded = true;
   pushWarning(state, family, code, message, 'warning');
+}
+
+function deadlineReached(state: ProgressiveDiscoveryState): boolean {
+  return !state.timedOut && Date.now() >= state.deadlineAt;
+}
+
+function stopActiveCursors(state: ProgressiveDiscoveryState, code: string, message: string): void {
+  for (const family of NON_MAPPING_FAMILIES) {
+    const cursor = state.families[family];
+    if (cursor.failed) continue;
+    stopWithWarning(state, family, cursor, code, message);
+    // An unmet expected count would otherwise keep the cursor "active" even
+    // though it is done, so the browser would poll a terminal session forever.
+    cursor.countMismatch = true;
+  }
+  for (const task of state.mappings.tasks) {
+    if (task.failed) continue;
+    stopWithWarning(state, 'mappings', task, code, message);
+    task.countMismatch = true;
+  }
+  state.mappings.degraded = true;
+  for (const task of state.relationshipQueries.tasks) {
+    if (task.failed) continue;
+    stopWithWarning(state, 'dmos', task, code, message);
+    task.countMismatch = true;
+  }
+  state.relationshipQueries.degraded = true;
+  state.streamEnrichment.attempted = true;
+  state.timedOut = code === 'DISCOVERY_DEADLINE';
+}
+
+/** Terminalize a discovery state after a background runner exception. */
+export function interruptProgressiveDiscovery(state: ProgressiveDiscoveryState, reason: string): void {
+  stopActiveCursors(state, 'DISCOVERY_INTERRUPTED', `Background discovery stopped: ${reason}`);
+  recompute(state);
+}
+
+function notifyProgress(state: ProgressiveDiscoveryState, options: AdvanceDiscoveryOptions): void {
+  recompute(state);
+  options.onProgress?.(state);
 }
 
 function applyContinuation(
@@ -939,12 +991,16 @@ function unavailableState(
   status: RetrievalStatus,
 ): ProgressiveDiscoveryState {
   const generatedAt = new Date().toISOString();
+  const createdAt = Date.now();
   const sessionId = options.sessionId ?? `session-${Date.now().toString(36)}`;
   const generation = options.generation ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const state: ProgressiveDiscoveryState = {
     cli: options.cli,
     sessionId,
     generation,
+    createdAt,
+    deadlineAt: createdAt + (options.maxDurationMs ?? DEFAULT_DISCOVERY_DURATION_MS),
+    timedOut: false,
     signal: options.signal,
     alias: options.alias,
     org: options.org,
@@ -1039,11 +1095,15 @@ function unavailableState(
  * only reported its own size. One bounded probe per family keeps this honest
  * without delaying the first rows.
  */
-async function probeMissingExpectedTotals(state: ProgressiveDiscoveryState): Promise<void> {
-  if (!state.apiVersion || state.signal?.aborted) return;
+async function probeMissingExpectedTotals(
+  state: ProgressiveDiscoveryState,
+  options: AdvanceDiscoveryOptions,
+): Promise<void> {
+  if (!state.apiVersion || state.signal?.aborted || deadlineReached(state)) return;
   for (const family of NON_MAPPING_FAMILIES) {
+    if (deadlineReached(state)) return;
     const cursor = state.families[family];
-    if (cursor.pageIndex === 0 || cursor.done || cursor.failed || cursor.expectedTotal !== null) continue;
+    if (cursor.pageIndex === 0 || cursor.failed || cursor.expectedTotal !== null) continue;
     if (cursor.countProbeAttempts > 0) continue;
     const path = buildExpectedCountPath(family, state.apiVersion);
     if (!path) continue;
@@ -1077,14 +1137,20 @@ async function probeMissingExpectedTotals(state: ProgressiveDiscoveryState): Pro
         `Expected count unavailable for ${family}; progress will use batch completion. ${safeErrorMessage(error)}`,
         'info');
     }
+    notifyProgress(state, options);
   }
 }
 
-/** Start a session and await its first page so the caller can render rows immediately. */
-export async function createProgressiveDiscovery(
+/**
+ * Build the versioned state without issuing family requests. A caller that owns
+ * a background runner can return this immediately and publish each real page
+ * as it lands instead of making the first HTTP response wait for every family.
+ */
+export async function initializeProgressiveDiscovery(
   options: ProgressiveDiscoveryOptions,
 ): Promise<ProgressiveDiscoveryState> {
   const generatedAt = new Date().toISOString();
+  const createdAt = Date.now();
   const sessionId = options.sessionId ?? `session-${Date.now().toString(36)}`;
   const generation = options.generation ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const versionsPath = buildVersionsPath();
@@ -1103,6 +1169,9 @@ export async function createProgressiveDiscovery(
     cli: options.cli,
     sessionId,
     generation,
+    createdAt,
+    deadlineAt: createdAt + (options.maxDurationMs ?? DEFAULT_DISCOVERY_DURATION_MS),
+    timedOut: false,
     signal: options.signal,
     alias: options.alias,
     org: options.org,
@@ -1149,8 +1218,16 @@ export async function createProgressiveDiscovery(
     warnings: [],
     relationships: [],
   };
+  recompute(state);
+  return state;
+}
 
-  await advanceProgressiveDiscovery(state);
+/** Convenience path for callers that want the first family pages inline. */
+export async function createProgressiveDiscovery(
+  options: ProgressiveDiscoveryOptions,
+): Promise<ProgressiveDiscoveryState> {
+  const state = await initializeProgressiveDiscovery(options);
+  await advanceProgressiveDiscovery(state, { onProgress: options.onProgress });
   return state;
 }
 
@@ -1165,38 +1242,57 @@ async function fetchFamilyPageWithCountRepair(
   return fetchFamilyPage(state, family);
 }
 
-/** Fetch one page for each active family, then one page for a few mapping DMOs. */
+/**
+ * Advance primary families first, publish after every committed page, and only
+ * then spend time on per-DMO mapping/relationship lookups. A slow secondary
+ * subresource must never hide pages that are already available.
+ */
 export async function advanceProgressiveDiscovery(
   state: ProgressiveDiscoveryState,
+  options: AdvanceDiscoveryOptions = {},
 ): Promise<{ active: boolean; changed: boolean }> {
-  if (!state.apiVersion || state.signal?.aborted) return { active: false, changed: false };
+  if (!state.apiVersion || state.signal?.aborted || state.timedOut) {
+    return { active: false, changed: false };
+  }
+  if (deadlineReached(state)) {
+    stopActiveCursors(state, 'DISCOVERY_DEADLINE',
+      `Discovery stopped after ${Math.round((Date.now() - state.createdAt) / 1000)} second(s); earlier results were kept.`);
+    finalizeExpectedCounts(state);
+    notifyProgress(state, options);
+    return { active: false, changed: false };
+  }
 
-  // The first page has already been returned to the caller at this point, so
-  // count repair never blocks the initial render.
-  await probeMissingExpectedTotals(state);
-
-  const active = NON_MAPPING_FAMILIES.filter((family) => {
+  const changedFlags: boolean[] = [];
+  const activeFamilies = NON_MAPPING_FAMILIES.filter((family) => {
     const cursor = state.families[family];
     return (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family);
   });
-  const results = await Promise.all(active.map((family) => fetchFamilyPageWithCountRepair(state, family)));
+  for (const family of activeFamilies) {
+    if (deadlineReached(state)) break;
+    changedFlags.push(await fetchFamilyPageWithCountRepair(state, family));
+    notifyProgress(state, options);
+  }
 
-  syncMappingTasks(state);
-  const tasks = state.mappings.tasks
-    .filter((task) => !task.done && !task.failed)
-    .slice(0, MAPPING_CONCURRENCY);
-  const mappingResults = await Promise.all(tasks.map((task) => fetchMappingTaskPage(state, task)));
-
-  syncRelationshipTasks(state);
-  const relationshipTasks = state.relationshipQueries.tasks
-    .filter((task) => !task.done && !task.failed)
-    .slice(0, RELATIONSHIP_CONCURRENCY);
-  const relationshipResults = await Promise.all(relationshipTasks.map((task) => fetchRelationshipTaskPage(state, task)));
+  const primarySettled = NON_MAPPING_FAMILIES.every((family) =>
+    state.families[family].done || state.families[family].failed);
+  if (primarySettled && !deadlineReached(state)) {
+    await probeMissingExpectedTotals(state, options);
+    const repairFamilies = NON_MAPPING_FAMILIES.filter((family) => {
+      const cursor = state.families[family];
+      return cursor.done && !cursor.failed && canRetryExpectedCount(state, family);
+    });
+    for (const family of repairFamilies) {
+      if (deadlineReached(state)) break;
+      changedFlags.push(await fetchFamilyPageWithCountRepair(state, family));
+      notifyProgress(state, options);
+    }
+  }
 
   let enrichmentChanged = false;
   // Wait for the stream family to finish so every page is enriched in one lookup.
   const streamCursor = state.families['data-streams'];
-  if (!state.streamEnrichment.attempted && streamCursor.done && streamCursor.items.length > 0) {
+  if (!state.streamEnrichment.attempted && streamCursor.done && streamCursor.items.length > 0
+    && !deadlineReached(state)) {
     state.streamEnrichment.attempted = true;
     const enriched = await enrichStreamConnectors({
       cli: state.cli,
@@ -1216,14 +1312,40 @@ export async function advanceProgressiveDiscovery(
         warning.severity,
       );
     }
+    notifyProgress(state, options);
   }
 
-  const changed = results.some(Boolean) || mappingResults.some(Boolean)
-    || relationshipResults.some(Boolean) || enrichmentChanged;
+  if (primarySettled && !deadlineReached(state)) {
+    syncMappingTasks(state);
+    const tasks = state.mappings.tasks
+      .filter((task) => !task.done && !task.failed)
+      .slice(0, MAPPING_CONCURRENCY);
+    for (const task of tasks) {
+      if (deadlineReached(state)) break;
+      changedFlags.push(await fetchMappingTaskPage(state, task));
+      notifyProgress(state, options);
+    }
+
+    syncRelationshipTasks(state);
+    const relationshipTasks = state.relationshipQueries.tasks
+      .filter((task) => !task.done && !task.failed)
+      .slice(0, RELATIONSHIP_CONCURRENCY);
+    for (const task of relationshipTasks) {
+      if (deadlineReached(state)) break;
+      changedFlags.push(await fetchRelationshipTaskPage(state, task));
+      notifyProgress(state, options);
+    }
+  }
+
+  if (deadlineReached(state)) {
+    stopActiveCursors(state, 'DISCOVERY_DEADLINE',
+      `Discovery stopped after ${Math.round((Date.now() - state.createdAt) / 1000)} second(s); earlier results were kept.`);
+  }
+  const changed = changedFlags.some(Boolean) || enrichmentChanged;
   // Freshness follows the most recently loaded page, not the session start.
   if (changed) state.generatedAt = new Date().toISOString();
   finalizeExpectedCounts(state);
-  recompute(state);
+  notifyProgress(state, options);
   return {
     active: anyActive(state),
     changed,

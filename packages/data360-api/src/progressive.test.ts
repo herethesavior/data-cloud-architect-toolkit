@@ -25,6 +25,8 @@ import {
 import {
   advanceProgressiveDiscovery,
   createProgressiveDiscovery,
+  initializeProgressiveDiscovery,
+  interruptProgressiveDiscovery,
   isProgressiveDiscoveryActive,
   progressiveSnapshot,
   resumeProgressiveDiscovery,
@@ -471,5 +473,66 @@ describe('progressive discovery', () => {
     expect(result.attempts).toBe(3);
     expect(result.retried).toBe(true);
     expect(attempts).toBe(3);
+  });
+
+  it('publishes a snapshot after every committed page', async () => {
+    const loadedCounts: number[] = [];
+    await createProgressiveDiscovery({
+      cli: fakeCli(),
+      alias: org.alias,
+      org,
+      retry,
+      onProgress: (current) => {
+        const progress = progressiveSnapshot(current).progress;
+        if (progress) loadedCounts.push(progress.loaded);
+      },
+    });
+
+    expect(loadedCounts.length).toBeGreaterThan(1);
+    expect(loadedCounts.at(-1)).toBeGreaterThan(loadedCounts[0]!);
+  });
+
+  it('ends visibly when the discovery deadline is reached', async () => {
+    const state = await createProgressiveDiscovery({
+      cli: fakeCli(),
+      alias: org.alias,
+      org,
+      retry,
+      maxDurationMs: 0,
+    });
+    const snapshot = progressiveSnapshot(state);
+
+    expect(isProgressiveDiscoveryActive(state)).toBe(false);
+    expect(snapshot.progress?.state).toBe('complete');
+    expect(snapshot.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'DISCOVERY_DEADLINE' }),
+    ]));
+  });
+
+  it('does not keep polling a deadline-stopped family with an unmet expected count', async () => {
+    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+    const dlos = state.families.dlos;
+    dlos.expectedTotal = 999;
+    dlos.expectedTotalSource = 'response';
+    dlos.pageIndex = 1;
+    state.deadlineAt = Date.now() - 1;
+
+    const result = await advanceProgressiveDiscovery(state);
+
+    expect(result.active).toBe(false);
+    expect(isProgressiveDiscoveryActive(state)).toBe(false);
+    expect(progressiveSnapshot(state).progress?.state).toBe('complete');
+  });
+
+  it('terminalizes active cursors after a background interruption', async () => {
+    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+    interruptProgressiveDiscovery(state, 'test failure');
+    const snapshot = progressiveSnapshot(state);
+
+    expect(isProgressiveDiscoveryActive(state)).toBe(false);
+    expect(snapshot.progress?.state).toBe('complete');
+    expect(snapshot.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'DISCOVERY_INTERRUPTED' }),
+    ]));
   });
 });

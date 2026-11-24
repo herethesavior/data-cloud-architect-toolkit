@@ -3,7 +3,8 @@ import type { InventorySnapshot, OrgSummary, ResourceFamily } from '@dcat/core';
 import { CliError } from '@dcat/salesforce-cli';
 import {
   advanceProgressiveDiscovery,
-  createProgressiveDiscovery,
+  initializeProgressiveDiscovery,
+  interruptProgressiveDiscovery,
   isProgressiveDiscoveryActive,
   progressiveSnapshot,
   resumeProgressiveDiscovery,
@@ -78,32 +79,37 @@ function isCurrent(state: AppState, record: DiscoverySessionRecord): boolean {
   return state.discoverySessions.get(record.id) === record && !record.controller.signal.aborted;
 }
 
+function publish(
+  state: AppState,
+  record: DiscoverySessionRecord,
+  current = record.state,
+): void {
+  if (!isCurrent(state, record)) return;
+  record.latest = progressiveSnapshot(current);
+  record.updatedAt = Date.now();
+  state.inventoryCache = { at: Date.now(), alias: record.alias, inventory: record.latest };
+}
+
 async function runSession(state: AppState, record: DiscoverySessionRecord): Promise<void> {
   record.running = true;
   try {
     while (isCurrent(state, record) && isProgressiveDiscoveryActive(record.state)) {
-      await advanceProgressiveDiscovery(record.state);
-      // A refresh, mode switch, or TTL prune may have replaced this session while
-      // the CLI call was in flight. Never let an old worker overwrite new cache.
-      if (!isCurrent(state, record)) break;
-      record.latest = progressiveSnapshot(record.state);
-      record.updatedAt = Date.now();
-      state.inventoryCache = { at: Date.now(), alias: record.alias, inventory: record.latest };
+      await advanceProgressiveDiscovery(record.state, {
+        // Each committed page is visible immediately, even while the same batch
+        // continues with count probes or per-DMO lookups.
+        onProgress: (current) => publish(state, record, current),
+      });
+      publish(state, record);
       if (!isProgressiveDiscoveryActive(record.state)) break;
       await sleep(BATCH_DELAY_MS, record.controller.signal);
     }
   } catch (error) {
     if (!isCurrent(state, record)) return;
-    // A malformed snapshot must not silently become an empty inventory. Keep the
-    // last valid snapshot and surface the failure on the next status poll.
-    record.state.warnings.push({
-      family: 'api-versions',
-      code: 'DISCOVERY_INTERRUPTED',
-      message: `Background discovery stopped: ${error instanceof Error ? error.message : 'unknown error'}`,
-      severity: 'error',
-    });
-    record.latest = progressiveSnapshot(record.state);
-    record.updatedAt = Date.now();
+    // Terminalize active cursors so a repeated runner exception cannot keep the
+    // session alive and make the browser poll forever.
+    const reason = error instanceof Error ? error.message : 'unknown error';
+    interruptProgressiveDiscovery(record.state, reason);
+    publish(state, record);
   } finally {
     record.running = false;
   }
@@ -148,7 +154,9 @@ export async function startDiscoverySession(
   const sessionId = options.sessionId ?? newId();
   const generation = `${Date.now().toString(36)}-${newId().slice(0, 8)}`;
   const controller = new AbortController();
-  const progressive = await createProgressiveDiscovery({
+  // Return as soon as the API version is known. The runner publishes every
+  // family page to the shared cache, so status polls see rows as they land.
+  const progressive = await initializeProgressiveDiscovery({
     cli: state.cli,
     alias: org.alias,
     org,
@@ -169,7 +177,7 @@ export async function startDiscoverySession(
   };
   state.discoverySessions.set(sessionId, record);
   state.discoveryByAlias.set(org.alias, sessionId);
-  state.inventoryCache = { at: Date.now(), alias: org.alias, inventory: record.latest };
+  publish(state, record);
   ensureRunner(state, record);
   return resultOf(record);
 }
@@ -190,8 +198,7 @@ export async function getDiscoverySession(
 
   if (options.resume) {
     resumeProgressiveDiscovery(record.state, options.family);
-    record.latest = progressiveSnapshot(record.state);
-    record.updatedAt = Date.now();
+    publish(state, record);
   }
   ensureRunner(state, record);
   return resultOf(record);

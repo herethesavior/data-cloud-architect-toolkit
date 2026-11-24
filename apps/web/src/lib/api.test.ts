@@ -349,6 +349,36 @@ describe('web API session handling', () => {
     expect(fetchMock.mock.calls.filter(([path]) => path === '/api/relay/requests')).toHaveLength(1);
   });
 
+  it('stops polling when a terminal partial snapshot has no active cursors', async () => {
+    const partial = {
+      ...demoInventory,
+      progress: {
+        sessionId: 'session-1',
+        generation: 'gen-1',
+        state: 'partial' as const,
+        loaded: 1,
+        total: null,
+        families: [],
+        message: 'Inventory loaded with gaps. Earlier results were kept.',
+      },
+    };
+    let statusCalls = 0;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/orgs/prod-org/inventory/session/session-1') {
+        statusCalls += 1;
+        return jsonResponse({ sessionId: 'session-1', snapshot: partial });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.inventory('prod-org', { sessionId: 'session-1' })).resolves.toMatchObject({
+      progress: { state: 'partial' },
+    });
+    expect(statusCalls).toBe(1);
+  });
+
   it('applies resume only to the first status poll', async () => {
     vi.useFakeTimers();
     const running = {
