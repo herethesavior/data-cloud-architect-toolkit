@@ -1676,6 +1676,9 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
     visualNodeWidth: number | null;
     iconWidths: number[];
     iconAlignments: string[];
+    cardAlignments: string[];
+    cardTextAlignments: string[];
+    coverSummary: string | null;
     stageStrong: number | null;
     stageSpan: number | null;
   };
@@ -1705,6 +1708,11 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
         iconWidths: icons.map(width),
         iconAlignments: [...slide.querySelectorAll('.slide-stage-icon, .slide-capability > svg')]
           .map((icon) => getComputedStyle(icon).alignSelf),
+        cardAlignments: [...slide.querySelectorAll('.slide-capability, .slide-stage')]
+          .map((card) => getComputedStyle(card).alignItems),
+        cardTextAlignments: [...slide.querySelectorAll('.slide-capability, .slide-stage')]
+          .map((card) => getComputedStyle(card).textAlign),
+        coverSummary: slide.querySelector('.slide-cover-summary')?.textContent?.trim() ?? null,
         stageStrong: stageStrong ? Number.parseFloat(getComputedStyle(stageStrong).fontSize) : null,
         stageSpan: stageSpan ? Number.parseFloat(getComputedStyle(stageSpan).fontSize) : null,
       };
@@ -1715,7 +1723,7 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
   const byLayout = new Map(slideMetrics.map((metrics) => [metrics.layout, metrics]));
   for (const [layout, expectedWidth] of [
     ['capabilities', 40],
-    ['flow', 28],
+    ['flow', 32],
     ['alignment', 16],
     ['guardrails', 28],
     ['takeaway', 28],
@@ -1725,13 +1733,16 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
     expect(new Set(metrics.iconWidths), `${layout} icon widths`).toEqual(new Set([expectedWidth]));
   }
   for (const layout of ['capabilities', 'flow']) {
-    const alignments = byLayout.get(layout)!.iconAlignments;
-    expect(alignments.length, `${layout} icon alignment count`).toBeGreaterThan(0);
-    expect(new Set(alignments), `${layout} icon alignment`).toEqual(new Set(['center']));
+    const metrics = byLayout.get(layout)!;
+    expect(metrics.iconAlignments.length, `${layout} icon alignment count`).toBeGreaterThan(0);
+    expect(new Set(metrics.iconAlignments), `${layout} icon alignment`).toEqual(new Set(['center']));
+    expect(new Set(metrics.cardAlignments), `${layout} card content alignment`).toEqual(new Set(['center']));
+    expect(new Set(metrics.cardTextAlignments), `${layout} card text alignment`).toEqual(new Set(['center']));
   }
-  expect(byLayout.get('cover')!.visualNodeWidth, 'cover diagram node width').toBeGreaterThan(74);
-  expect(byLayout.get('flow')!.stageStrong, 'flow stage title size').toBeGreaterThanOrEqual(18);
-  expect(byLayout.get('flow')!.stageSpan, 'flow stage detail size').toBeGreaterThanOrEqual(16);
+  expect(byLayout.get('cover')!.coverSummary, 'cover DCAT summary').toMatch(/Data Cloud architecture/i);
+  expect(byLayout.get('cover')!.visualNodeWidth, 'cover diagram node width').toBeGreaterThan(86);
+  expect(byLayout.get('flow')!.stageStrong, 'flow stage title size').toBeGreaterThanOrEqual(20);
+  expect(byLayout.get('flow')!.stageSpan, 'flow stage detail size').toBeGreaterThanOrEqual(18);
 });
 
 test('about deck slides stay legible and scrollable on a phone viewport', async ({ page }) => {

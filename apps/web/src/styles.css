@@ -2859,7 +2859,16 @@ html[data-theme='dark'] .dcat-mark {
 
   .deck-slide .present-layout-cover .slide-cover-copy {
     justify-content: center;
-    gap: clamp(1rem, 2.8cqh, 2rem);
+    gap: clamp(0.85rem, 2.3cqh, 1.5rem);
+  }
+
+  .deck-slide .slide-cover-summary {
+    max-width: 32ch;
+    margin: 0;
+    color: var(--color-ink-soft);
+    font-size: clamp(1.1rem, 2.45cqh, 1.35rem);
+    line-height: 1.45;
+    text-wrap: pretty;
   }
 
   .deck-slide .slide-visual {
@@ -2944,9 +2953,11 @@ html[data-theme='dark'] .dcat-mark {
   /* Capabilities: treat the three pillars as equal panels and center their
      icon/title/copy group within the available vertical space. */
   .deck-slide .present-layout-capabilities .slide-capability {
+    align-items: center;
     justify-content: center;
     gap: clamp(0.65rem, 1.6cqh, 1rem);
     padding: clamp(1.1rem, 3cqh, 2rem);
+    text-align: center;
   }
 
   .deck-slide .present-layout-capabilities .slide-capability > svg {
@@ -2982,24 +2993,26 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-flow .slide-stage {
+    align-items: center;
     justify-content: center;
-    gap: clamp(0.25rem, 0.75cqh, 0.5rem);
-    padding: clamp(0.65rem, 1.6cqh, 1rem);
+    gap: clamp(0.15rem, 0.5cqh, 0.35rem);
+    padding: clamp(0.5rem, 1.25cqh, 0.8rem);
+    text-align: center;
   }
 
   .deck-slide .present-layout-flow .slide-stage-icon {
-    width: var(--deck-icon-md);
-    height: var(--deck-icon-md);
+    width: 2rem;
+    height: 2rem;
     flex: 0 0 auto;
     align-self: center;
   }
 
   .deck-slide .present-layout-flow .slide-stage strong {
-    font-size: clamp(1.15rem, 2.35cqh, 1.35rem);
+    font-size: clamp(1.25rem, 2.55cqh, 1.45rem);
   }
 
   .deck-slide .present-layout-flow .slide-stage span {
-    font-size: clamp(1.05rem, 2.15cqh, 1.2rem);
+    font-size: clamp(1.15rem, 2.3cqh, 1.3rem);
   }
 
   .deck-slide .present-layout-flow .story-outcome,
