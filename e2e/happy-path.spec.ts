@@ -1670,6 +1670,69 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
   expect(await page.evaluate(() => Math.round(window.scrollY))).toBe(deckScroll);
 });
 
+test('about deck icon and text scale stays consistent across repeated motifs', async ({ page }) => {
+  type IconMetrics = {
+    layout: string;
+    visualNodeWidth: number | null;
+    iconWidths: number[];
+    iconAlignments: string[];
+    stageStrong: number | null;
+    stageSpan: number | null;
+  };
+
+  await page.goto('/about');
+  await expect(page.getByRole('button', { name: 'Present' })).toBeVisible();
+  await page.getByRole('button', { name: 'Present' }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+
+  const slideMetrics: IconMetrics[] = [];
+  for (let index = 0; index < 14; index += 1) {
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+    slideMetrics.push(await page.evaluate(() => {
+      const slide = document.querySelector('.deck-slide') as HTMLElement;
+      const chapter = slide.querySelector('.story-chapter') as HTMLElement;
+      const fit = Number(slide.style.getPropertyValue('--slide-fit') || '1');
+      const width = (element: Element) => Math.round(element.getBoundingClientRect().width / fit);
+      const icons = [...slide.querySelectorAll('svg')].filter((svg) => !svg.classList.contains('story-art'));
+      const stageStrong = slide.querySelector('.slide-stage strong');
+      const stageSpan = slide.querySelector('.slide-stage span');
+      return {
+        layout: [...chapter.classList].find((name) => name.startsWith('present-layout-'))?.replace('present-layout-', '') ?? '',
+        visualNodeWidth: slide.querySelector('.story-art rect') ? width(slide.querySelector('.story-art rect')!) : null,
+        iconWidths: icons.map(width),
+        iconAlignments: [...slide.querySelectorAll('.slide-stage-icon, .slide-capability > svg')]
+          .map((icon) => getComputedStyle(icon).alignSelf),
+        stageStrong: stageStrong ? Number.parseFloat(getComputedStyle(stageStrong).fontSize) : null,
+        stageSpan: stageSpan ? Number.parseFloat(getComputedStyle(stageSpan).fontSize) : null,
+      };
+    }));
+    if (index < 13) await page.keyboard.press('ArrowRight');
+  }
+
+  const byLayout = new Map(slideMetrics.map((metrics) => [metrics.layout, metrics]));
+  for (const [layout, expectedWidth] of [
+    ['capabilities', 40],
+    ['flow', 28],
+    ['alignment', 16],
+    ['guardrails', 28],
+    ['takeaway', 28],
+  ] as const) {
+    const metrics = byLayout.get(layout)!;
+    expect(metrics.iconWidths.length, `${layout} icon count`).toBeGreaterThan(0);
+    expect(new Set(metrics.iconWidths), `${layout} icon widths`).toEqual(new Set([expectedWidth]));
+  }
+  for (const layout of ['capabilities', 'flow']) {
+    const alignments = byLayout.get(layout)!.iconAlignments;
+    expect(alignments.length, `${layout} icon alignment count`).toBeGreaterThan(0);
+    expect(new Set(alignments), `${layout} icon alignment`).toEqual(new Set(['center']));
+  }
+  expect(byLayout.get('cover')!.visualNodeWidth, 'cover diagram node width').toBeGreaterThan(74);
+  expect(byLayout.get('flow')!.stageStrong, 'flow stage title size').toBeGreaterThanOrEqual(18);
+  expect(byLayout.get('flow')!.stageSpan, 'flow stage detail size').toBeGreaterThanOrEqual(16);
+});
+
 test('about deck slides stay legible and scrollable on a phone viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openDemo(page);
