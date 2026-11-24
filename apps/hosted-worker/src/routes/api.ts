@@ -26,7 +26,7 @@ export function apiRoutes() {
         status: 'ok',
         mode: session.mode,
         version: RELAY_VERSION,
-        time: status.lastSeenAt ?? new Date().toISOString(),
+        time: new Date().toISOString(),
         cli: status.cli,
       });
     } catch (error) {

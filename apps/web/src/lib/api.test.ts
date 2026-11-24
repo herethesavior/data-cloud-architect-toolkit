@@ -94,6 +94,38 @@ describe('web API session handling', () => {
     expect((options?.headers as Record<string, string>)['x-dcat-token']).toBeUndefined();
   });
 
+  it('uses the current time for hosted health checks', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const lastSeenAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/relay/status') {
+        return jsonResponse({
+          paired: true,
+          mode: 'live',
+          version: '0.1.0',
+          cli: { installed: true, version: '2.116.6', error: null },
+          lastSeenAt,
+          relay: 'stale',
+          pairing: null,
+          agentVersion: '0.1.6',
+          latestVersion: '0.1.6',
+          updateAvailable: false,
+          selfUpdateSupported: true,
+        });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const before = Date.now();
+    const health = await api.health();
+    const after = Date.now();
+
+    expect(Date.parse(health.time)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(health.time)).toBeLessThanOrEqual(after);
+    expect(health.time).not.toBe(lastSeenAt);
+  });
+
   it('serializes hosted relay calls instead of creating overlapping bridge requests', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     const fetchMock = vi.fn(async (path: string) => {

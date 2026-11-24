@@ -11,6 +11,14 @@ export interface RelayHttp {
   post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T>;
 }
 
+/** A missing pairing cannot recover without a new setup code, so the agent must stop. */
+export class RelayAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RelayAuthError';
+  }
+}
+
 export class FetchRelayHttp implements RelayHttp {
   constructor(
     private readonly baseUrl: string,
@@ -30,8 +38,11 @@ export class FetchRelayHttp implements RelayHttp {
       | null;
     if (!response.ok) {
       const error = payload as { error?: { code?: string; message?: string } } | null;
-      throw new CliError(error?.error?.code === 'INVALID_AGENT_TOKEN' ? 'INVALID_ARGUMENT' : 'COMMAND_FAILED',
-        error?.error?.message ?? `Relay request failed with status ${response.status}.`);
+      const message = error?.error?.message ?? `Relay request failed with status ${response.status}.`;
+      if (response.status === 401 || error?.error?.code === 'INVALID_AGENT_TOKEN') {
+        throw new RelayAuthError(message);
+      }
+      throw new CliError('COMMAND_FAILED', message);
     }
     return payload as T;
   }
@@ -199,7 +210,7 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
         cli: state.cliStatus,
       }, options.signal);
       if (poll.status === 'unpaired') {
-        throw new CliError('INVALID_ARGUMENT', 'The site reset this bridge pairing. Run setup again.');
+        throw new RelayAuthError('The site reset this bridge pairing. Run setup again.');
       }
 
       for (const task of poll.tasks) {
@@ -218,6 +229,10 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
       }
     } catch (error) {
       if (options.signal?.aborted) break;
+      if (error instanceof RelayAuthError) {
+        logger(`Bridge stopped: ${safeErrorMessage(error)}`);
+        return;
+      }
       logger(`Bridge request failed: ${safeErrorMessage(error)}. Retrying.`);
     }
 

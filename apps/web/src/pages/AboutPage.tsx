@@ -249,6 +249,18 @@ function ArchitectureArt({ present = false }: { present?: boolean }) {
       { x: 397, y: 288, label: 'LINEAGE', sub: 'Dependencies' },
       { x: 252, y: 372, label: 'INSIGHT', sub: 'Architecture view' },
     ];
+  // Slide edges are horizontal or vertical; a user-space gradient still paints
+  // paths whose bounding box has zero width or height.
+  const presentEdges = [
+    { d: 'M170 88H205' },
+    { d: 'M345 88H380' },
+    { d: 'M520 88H555' },
+    { d: 'M695 88H730' },
+    { d: 'M450 140V268' },
+    { d: 'M800 140V268' },
+    { d: 'M520 320H730' },
+    { d: 'M625 140V204H500V268', dashed: true },
+  ];
 
   return (
     <svg
@@ -258,23 +270,52 @@ function ArchitectureArt({ present = false }: { present?: boolean }) {
       aria-hidden="true"
     >
       <defs>
-        <linearGradient id="dcat-architecture-edge" x1="0" x2="1" y1="0" y2="1">
+        <linearGradient
+          id="dcat-architecture-edge"
+          gradientUnits="userSpaceOnUse"
+          x1="20"
+          x2="880"
+          y1="24"
+          y2="384"
+        >
           <stop offset="0%" stopColor="var(--color-brand)" />
           <stop offset="100%" stopColor="var(--color-violet)" />
         </linearGradient>
+        <marker
+          id="dcat-architecture-arrow"
+          markerWidth="10"
+          markerHeight="8"
+          refX="9"
+          refY="4"
+          orient="auto"
+          markerUnits="userSpaceOnUse"
+          overflow="visible"
+        >
+          <path d="M0 0 10 4 0 8Z" fill="var(--color-brand)" />
+        </marker>
         <linearGradient id="dcat-architecture-node" x1="0" x2="1" y1="0" y2="1">
           <stop offset="0%" stopColor="var(--color-brand)" />
           <stop offset="100%" stopColor="var(--color-info)" />
         </linearGradient>
       </defs>
       <g>
-        <g stroke="url(#dcat-architecture-edge)" strokeWidth="1.5" opacity="0.65">
+        <g
+          stroke="url(#dcat-architecture-edge)"
+          strokeWidth={present ? 2.25 : 1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={present ? 0.85 : 0.65}
+        >
           {present ? (
-            <>
-              <path d="M170 88H205M345 88H380M520 88H555M695 88H730" />
-              <path d="M450 140V268M800 140V268M520 320H730" opacity="0.6" />
-              <path d="M625 140V204H450" opacity="0.4" strokeDasharray="5 7" />
-            </>
+            presentEdges.map((edge) => (
+              <path
+                key={edge.d}
+                d={edge.d}
+                opacity={edge.dashed ? 0.55 : 1}
+                strokeDasharray={edge.dashed ? '5 7' : undefined}
+                markerEnd={edge.dashed ? undefined : 'url(#dcat-architecture-arrow)'}
+              />
+            ))
           ) : (
             <>
               <path d="M310 74 165 157 165 310 310 393 455 310 455 157 310 74Z" />

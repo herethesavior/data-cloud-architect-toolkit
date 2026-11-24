@@ -231,6 +231,11 @@ export function AppShell({
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        // Another modal owns the keyboard and its portal may paint above the
+        // in-root palette. Do not stack two Escape handlers on one key press.
+        const blockingDialog = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]'))
+          .some((dialog) => dialog.getAttribute('aria-label') !== 'Search metadata');
+        if (blockingDialog) return;
         setMetadataResult(null);
         setPaletteOpen((open) => !open);
       }

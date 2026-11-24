@@ -1550,6 +1550,12 @@ test('detail drawer contains keyboard focus and closes on Escape', async ({ page
 
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
+
+  // Ctrl+K must not open the in-root palette over a portaled drawer.
+  await page.keyboard.press('Control+k');
+  await expect(page.getByRole('dialog', { name: 'Search metadata' })).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+
   for (let press = 0; press < 12; press += 1) await page.keyboard.press('Tab');
   expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
 
@@ -1690,6 +1696,10 @@ test('about page shows the story and a stable, navigable full-screen deck', asyn
     (nodes) => new Set(nodes.map((node) => Math.round(node.getBoundingClientRect().top))).size,
   );
   expect(flowRows, 'flow stage rows').toBe(2);
+  const flowBorders = await deck.locator('.slide-stage').evaluateAll(
+    (nodes) => nodes.map((node) => getComputedStyle(node).borderTopWidth),
+  );
+  expect(flowBorders, 'flow stage borders').toEqual(Array(6).fill('0px'));
 
   await page.keyboard.press('End');
   await expect(deck.locator('.deck-counter')).toContainText('14');
@@ -1816,7 +1826,9 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
       let artHeightRatio = 0;
       if (art) {
         const artBox = art.getBoundingClientRect();
-        const shapes = [...art.querySelectorAll('rect, text, path, circle')].map((shape) => shape.getBoundingClientRect());
+        const shapes = [...art.querySelectorAll('rect, text, path, circle')]
+          .filter((shape) => !shape.closest('defs'))
+          .map((shape) => shape.getBoundingClientRect());
         if (shapes.length > 0) {
           const left = Math.min(...shapes.map((shape) => shape.left));
           const right = Math.max(...shapes.map((shape) => shape.right));
@@ -1879,6 +1891,51 @@ test('about deck icon and text scale stays consistent across repeated motifs', a
   expect(byLayout.get('flow')!.stageSpan, 'flow stage detail size').toBeGreaterThanOrEqual(18);
 });
 
+test('cover architecture diagram visibly connects the presentation nodes', async ({ page }) => {
+  await openDemo(page);
+  await page.goto('/about');
+  await page.getByRole('button', { name: 'Present' }).click();
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+
+  const diagram = await page.locator('.slide-visual .story-art').evaluate((art) => {
+    const rects = [...art.querySelectorAll('rect')].map((rect) => ({
+      x: Number(rect.getAttribute('x')),
+      y: Number(rect.getAttribute('y')),
+      width: Number(rect.getAttribute('width')),
+      height: Number(rect.getAttribute('height')),
+    }));
+    const edges = [...art.querySelectorAll('g[stroke] path')];
+    const endpoints = edges.map((edge) => {
+      const point = edge.getPointAtLength(edge.getTotalLength());
+      return { x: Math.round(point.x), y: Math.round(point.y) };
+    });
+    const touchesNode = (point: { x: number; y: number }) => rects.some((rect) => {
+      const withinX = point.x >= rect.x - 2 && point.x <= rect.x + rect.width + 2;
+      const withinY = point.y >= rect.y - 2 && point.y <= rect.y + rect.height + 2;
+      const onVerticalEdge = Math.abs(point.x - rect.x) <= 2
+        || Math.abs(point.x - (rect.x + rect.width)) <= 2;
+      const onHorizontalEdge = Math.abs(point.y - rect.y) <= 2
+        || Math.abs(point.y - (rect.y + rect.height)) <= 2;
+      return withinX && withinY && (onVerticalEdge || onHorizontalEdge);
+    });
+    return {
+      nodeCount: rects.length,
+      edgeCount: edges.length,
+      arrowCount: edges.filter((edge) => edge.getAttribute('marker-end')).length,
+      gradientUnits: art.querySelector('#dcat-architecture-edge')?.getAttribute('gradientUnits') ?? null,
+      strokeWidth: edges[0] ? Number.parseFloat(getComputedStyle(edges[0]).strokeWidth) : 0,
+      allEndpointsTouchNodes: endpoints.every(touchesNode),
+    };
+  });
+
+  expect(diagram.nodeCount, 'architecture nodes').toBe(7);
+  expect(diagram.edgeCount, 'architecture connectors').toBe(8);
+  expect(diagram.arrowCount, 'directional architecture connectors').toBe(7);
+  expect(diagram.gradientUnits, 'architecture connector gradient').toBe('userSpaceOnUse');
+  expect(diagram.strokeWidth, 'architecture connector stroke width').toBeGreaterThanOrEqual(2);
+  expect(diagram.allEndpointsTouchNodes, 'architecture connector endpoints').toBe(true);
+});
+
 test('about deck slides stay legible and scrollable on a phone viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openDemo(page);
@@ -1916,7 +1973,9 @@ test('about deck slides stay legible and scrollable on a phone viewport', async 
       let artClipped = false;
       if (art) {
         const artBox = art.getBoundingClientRect();
-        const shapes = [...art.querySelectorAll('rect, text, path, circle')].map((shape) => shape.getBoundingClientRect());
+        const shapes = [...art.querySelectorAll('rect, text, path, circle')]
+          .filter((shape) => !shape.closest('defs'))
+          .map((shape) => shape.getBoundingClientRect());
         artClipped = shapes.some((shape) =>
           shape.left < artBox.left - 1 || shape.right > artBox.right + 1
           || shape.top < artBox.top - 1 || shape.bottom > artBox.bottom + 1);

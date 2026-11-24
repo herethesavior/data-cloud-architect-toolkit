@@ -3081,6 +3081,7 @@ html[data-theme='dark'] .dcat-mark {
     align-items: center;
     justify-content: center;
     gap: clamp(0.15rem, 0.5cqh, 0.35rem);
+    border: 0;
     padding: clamp(0.5rem, 1.25cqh, 0.8rem);
     text-align: center;
   }

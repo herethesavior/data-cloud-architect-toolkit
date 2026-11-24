@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { RESOURCE_FAMILIES, cliStatusSchema, inventorySnapshotSchema, orgSummarySchema, transformBundleSchema } from './domain.ts';
+import { isValidTransformId } from './transform-id.ts';
 
 export const RELAY_OPERATIONS = [
   'cli.status',
@@ -64,7 +65,7 @@ export const relayOperationSchema = z.discriminatedUnion('operation', [
   z.object({
     operation: z.literal('transform.get'),
     alias: aliasSchema,
-    id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
+    id: z.string().refine(isValidTransformId, 'Invalid transform id.'),
   }),
   z.object({
     operation: z.literal('mode.set'),
