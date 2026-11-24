@@ -28,11 +28,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Do not set registry-url: setup-node would write an .npmrc authToken and
+      # export a placeholder NODE_AUTH_TOKEN, which makes npm choose token auth
+      # instead of the OIDC identity used by trusted publishing.
       - name: Set up Node and npm
         uses: actions/setup-node@v6
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
       # Staged publishing requires npm 11.15.0 or newer. CI never uses a token.
@@ -62,4 +64,6 @@ jobs:
 
       - name: Stage package for maintainer approval
         working-directory: packages/bridge
-        run: npm stage publish --tag latest
+        run: |
+          unset NODE_AUTH_TOKEN || true
+          npm stage publish --tag latest
