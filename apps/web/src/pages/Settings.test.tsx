@@ -33,13 +33,20 @@ const bridge: BridgeStatus = {
 const theme: ThemeController = {
   preference: 'system',
   resolved: 'light',
+  palette: 'forest',
+  fontSize: 'medium',
+  density: 'comfortable',
   choose: () => {},
+  choosePalette: () => {},
+  chooseFontSize: () => {},
+  chooseDensity: () => {},
   toggle: () => {},
   reset: () => {},
 };
 
 interface RenderOptions {
   mode?: 'demo' | 'live';
+  theme?: ThemeController;
   onClearCachedMetadata?: () => Promise<void>;
   onResetSavedLayouts?: () => void;
   onEraseLocalData?: () => Promise<void>;
@@ -48,9 +55,10 @@ interface RenderOptions {
 function renderSettings(options: RenderOptions = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const mode = options.mode ?? 'live';
+  const appearance = options.theme ?? theme;
   const settings = (
     <Settings
-      theme={theme}
+      theme={appearance}
       mode={mode}
       onClearCachedMetadata={options.onClearCachedMetadata ?? vi.fn().mockResolvedValue(undefined)}
       onResetSavedLayouts={options.onResetSavedLayouts ?? vi.fn()}
@@ -63,7 +71,7 @@ function renderSettings(options: RenderOptions = {}) {
     rerenderWithMode: (nextMode: 'demo' | 'live') => view.rerender(
       <QueryClientProvider client={queryClient}>
         <Settings
-          theme={theme}
+          theme={appearance}
           mode={nextMode}
           onClearCachedMetadata={vi.fn().mockResolvedValue(undefined)}
           onResetSavedLayouts={vi.fn()}
@@ -231,5 +239,45 @@ describe('Settings stored data controls', () => {
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByRole('alert')).toHaveTextContent('Connector offline.');
     expect(screen.queryByText(/All local data erased/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Settings appearance controls', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'health').mockResolvedValue(health);
+    vi.spyOn(api, 'bridgeStatus').mockResolvedValue(bridge);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('updates palette, font size, and density from the Appearance panel', async () => {
+    const choosePalette = vi.fn();
+    const chooseFontSize = vi.fn();
+    const chooseDensity = vi.fn();
+    renderSettings({
+      theme: {
+        ...theme,
+        preference: 'dark',
+        resolved: 'dark',
+        choosePalette,
+        chooseFontSize,
+        chooseDensity,
+      },
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Appearance' })).toBeInTheDocument();
+    expect(screen.getByText(/with the Forest palette/)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Dark palette' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Midnight' }));
+    await userEvent.selectOptions(screen.getByLabelText('Font size'), 'large');
+    await userEvent.selectOptions(screen.getByLabelText('Interface density'), 'compact');
+
+    expect(choosePalette).toHaveBeenCalledWith('midnight');
+    expect(chooseFontSize).toHaveBeenCalledWith('large');
+    expect(chooseDensity).toHaveBeenCalledWith('compact');
   });
 });

@@ -1287,6 +1287,68 @@ test('theme toggle switches to dark and persists across reloads', async ({ page 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
 
+test('appearance settings apply app-wide and persist across reloads', async ({ page }) => {
+  await openDemo(page);
+  await page.getByRole('link', { name: 'Settings & Diagnostics' }).click();
+  await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+
+  const bodyFontSize = () => page.evaluate(() => Number.parseFloat(getComputedStyle(document.body).fontSize));
+  const panelPadding = () => page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('.panel-pad');
+    return panel ? Number.parseFloat(getComputedStyle(panel).paddingTop) : 0;
+  });
+  const brandColor = () => page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--color-brand').trim());
+
+  const defaultFontSize = await bodyFontSize();
+  const defaultPadding = await panelPadding();
+
+  const appearancePanel = page.locator('.panel').filter({ has: page.getByRole('heading', { name: 'Appearance' }) });
+  const panelBox = await appearancePanel.boundingBox();
+  expect(panelBox).not.toBeNull();
+  for (const control of [
+    page.getByRole('group', { name: 'Dark palette' }),
+    page.getByLabel('Font size'),
+    page.getByLabel('Interface density'),
+  ]) {
+    const box = await control.boundingBox();
+    expect(box, 'appearance control bounds').not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(panelBox!.x - 1);
+    expect(box!.y).toBeGreaterThanOrEqual(panelBox!.y - 1);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 1);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(panelBox!.y + panelBox!.height + 1);
+  }
+
+  await page.getByRole('group', { name: 'Theme preference' }).getByRole('button', { name: 'Dark' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).toHaveAttribute('data-palette', 'forest');
+  const forestBrand = await brandColor();
+
+  await page.getByRole('group', { name: 'Dark palette' }).getByRole('button', { name: 'Midnight' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-palette', 'midnight');
+  expect(await brandColor(), 'midnight palette brand role').not.toBe(forestBrand);
+
+  await page.getByLabel('Font size').selectOption('large');
+  await expect(page.locator('html')).toHaveAttribute('data-font-size', 'large');
+  const largeFontSize = await bodyFontSize();
+  expect(largeFontSize).toBeGreaterThan(defaultFontSize);
+
+  await page.getByLabel('Interface density').selectOption('compact');
+  await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
+  expect(await panelPadding()).toBeLessThan(defaultPadding);
+
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).toHaveAttribute('data-palette', 'midnight');
+  await expect(page.locator('html')).toHaveAttribute('data-font-size', 'large');
+  await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
+  expect(await bodyFontSize()).toBeCloseTo(largeFontSize, 1);
+
+  await page.getByRole('link', { name: 'Dashboard' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-palette', 'midnight');
+  expect(await bodyFontSize()).toBeCloseTo(largeFontSize, 1);
+});
+
 test('header stays compact and groups workspace controls', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openDemo(page);
