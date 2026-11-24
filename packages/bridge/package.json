@@ -1,6 +1,6 @@
 {
   "name": "@dcat-toolkit/bridge",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": false,
   "type": "module",
   "description": "One-command local outbound bridge installer for the hosted DCAT workbench",

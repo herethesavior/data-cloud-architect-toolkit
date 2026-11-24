@@ -59,7 +59,7 @@ The deploy command bundles `apps/hosted-worker/src/pages.ts` from the root confi
 For a future release, bump the version on `main`, push the commit, then push a matching tag:
 
 ```bash
-npm version patch --workspace @dcat-toolkit/bridge
+npm version patch --workspace @dcat-toolkit/bridge --no-git-tag-version
 git add packages/bridge/package.json package-lock.json
 git commit -m "chore: release bridge 0.1.7"
 git push origin main
