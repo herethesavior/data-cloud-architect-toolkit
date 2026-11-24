@@ -1,8 +1,43 @@
+import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { resolveSfShim } from './run.ts';
+import { PassThrough } from 'node:stream';
+import { describe, expect, it, vi } from 'vitest';
+import { NodeProcessRunner, resolveSfShim } from './run.ts';
+
+type SpawnFn = ConstructorParameters<typeof NodeProcessRunner>[1];
+
+interface FakeChild extends EventEmitter {
+  stdout: PassThrough;
+  stderr: PassThrough;
+  kill: ReturnType<typeof vi.fn>;
+}
+
+function fakeChild(): FakeChild {
+  const child = new EventEmitter() as FakeChild;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = vi.fn(() => {
+    child.emit('close', null);
+    return true;
+  });
+  return child;
+}
+
+function childSpawner(children: FakeChild[]): SpawnFn {
+  return (() => {
+    const child = fakeChild();
+    children.push(child);
+    return child;
+  }) as unknown as SpawnFn;
+}
+
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+const localResolver = async () => ({ command: 'sf', prefixArgs: [] });
 
 describe('resolveSfShim', () => {
   it('extracts the Node entry point from a Salesforce CLI .cmd shim without a shell', () => {
@@ -68,5 +103,65 @@ describe('resolveSfShim', () => {
     } finally {
       delete process.env[envName];
     }
+  });
+});
+
+describe('NodeProcessRunner queue', () => {
+  it('runs one CLI process at a time and survives a failed command', async () => {
+    const children: FakeChild[] = [];
+    const runner = new NodeProcessRunner('sf', childSpawner(children), localResolver);
+    const first = runner.run(['first']);
+    const second = runner.run(['second']);
+    await tick();
+
+    expect(children).toHaveLength(1);
+    children[0]!.emit('error', new Error('boom'));
+    await expect(first).rejects.toMatchObject({ code: 'COMMAND_FAILED' });
+
+    await tick();
+    expect(children).toHaveLength(2);
+    children[1]!.emit('close', 0);
+    await expect(second).resolves.toMatchObject({ stdout: '', stderr: '', exitCode: 0 });
+  });
+
+  it('does not spawn a queued command after its caller aborts', async () => {
+    const children: FakeChild[] = [];
+    const runner = new NodeProcessRunner('sf', childSpawner(children), localResolver);
+    const controller = new AbortController();
+    const first = runner.run(['first']);
+    const queued = runner.run(['queued'], { signal: controller.signal });
+    await tick();
+
+    expect(children).toHaveLength(1);
+    controller.abort();
+    await expect(queued).rejects.toMatchObject({ code: 'TIMEOUT' });
+
+    children[0]!.emit('close', 0);
+    await first;
+    const third = runner.run(['third']);
+    await tick();
+    expect(children).toHaveLength(2);
+    expect(children[1]!.kill).not.toHaveBeenCalled();
+    children[1]!.emit('close', 0);
+    await third;
+  });
+
+  it('starts a queued command timeout only after dequeue', async () => {
+    const children: FakeChild[] = [];
+    const runner = new NodeProcessRunner('sf', childSpawner(children), localResolver);
+    const first = runner.run(['first'], { timeoutMs: 1_000 });
+    const second = runner.run(['second'], { timeoutMs: 5 });
+    await tick();
+
+    expect(children).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(children).toHaveLength(1);
+
+    children[0]!.emit('close', 0);
+    await first;
+    await tick();
+    expect(children).toHaveLength(2);
+    children[1]!.emit('close', 0);
+    await expect(second).resolves.toMatchObject({ exitCode: 0 });
   });
 });

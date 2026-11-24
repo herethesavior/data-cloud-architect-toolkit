@@ -529,6 +529,10 @@ export function impactEvidenceText(item: ImpactItem): string {
 
 /** Whether the snapshot has enough family data to trust an impact result. */
 export function impactSnapshotComplete(inventory: InventorySnapshot): boolean {
+  const progress = inventory.progress;
+  // A live cursor or an in-flight refresh means the current rows are a subset,
+  // even when every capability has so far reported success.
+  if (progress?.state === 'running' || progress?.families.some((family) => family.hasMore)) return false;
   const required = ['dlos', 'dmos', 'mappings', 'data-streams', 'data-transforms'] as const;
   return required.every((family) => {
     const capability = inventory.capabilities.find((entry) => entry.family === family);

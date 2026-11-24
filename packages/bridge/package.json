@@ -4,6 +4,14 @@
   "private": false,
   "type": "module",
   "description": "One-command local outbound bridge installer for the hosted DCAT workbench",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/herethesavior/data-cloud-architect-toolkit.git",
+    "directory": "packages/bridge"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22.12.0"
   },

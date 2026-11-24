@@ -127,8 +127,10 @@ export function findCapability(
 }
 
 function aggregateState(capabilities: ApiCapability[], loading: boolean): ResourceStageState {
-  if (loading && capabilities.length === 0) return 'loading';
   if (capabilities.some((capability) => capability.status === 'error' || capability.status === 'forbidden')) return 'blocked';
+  // Existing rows stay visible, but a stage with usable data must not be
+  // labelled complete while another batch is still in flight.
+  if (loading) return capabilities.length === 0 ? 'loading' : 'partial';
   if (capabilities.some((capability) => capability.status === 'partial')) return 'partial';
   if (capabilities.length > 0 && capabilities.every((capability) =>
     capability.status === 'available' || capability.status === 'not-started')) return 'complete';
@@ -180,6 +182,7 @@ export function discoveryStages(
 
     let detail = 'Waiting for the inventory snapshot.';
     if (state === 'loading') detail = `Checking ${stage.families.map(humanizeResource).join(', ')}...`;
+    else if (loading && !partial) detail = `Refreshing ${stage.families.map(humanizeResource).join(', ')}; ${loaded} loaded so far.`;
     else if (blocking) detail = resourceStatusMessage(blocking);
     else if (unsupported.length === capabilities.length && capabilities.length > 0) {
       detail = resourceStatusMessage(unsupported[0]!);

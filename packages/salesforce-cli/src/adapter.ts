@@ -111,9 +111,10 @@ export class SalesforceCliAdapter {
   }
 
   /** Fast local-only listing; no network status check, so it can poll during login. */
-  async listOrgsLocal(): Promise<OrgSummary[]> {
+  async listOrgsLocal(options: { queue?: boolean } = {}): Promise<OrgSummary[]> {
     const result = await this.run(['org', 'list', '--skip-connection-status', '--json'], {
       timeoutMs: LOCAL_ORG_TIMEOUT_MS,
+      queue: options.queue,
     });
     return parseOrgList(result.stdout);
   }
@@ -138,7 +139,8 @@ export class SalesforceCliAdapter {
       if (signal?.aborted) throw new CliError('COMMAND_FAILED', 'Login detection stopped.');
       let found: OrgSummary | undefined;
       try {
-        found = (await this.listOrgsLocal()).find((org) => org.alias === safeAlias);
+        // The login command itself is unqueued; this probe must not wait behind it.
+        found = (await this.listOrgsLocal({ queue: false })).find((org) => org.alias === safeAlias);
       } catch {
         // A concurrent login can briefly make `org list` fail. Keep polling.
       }
@@ -191,6 +193,7 @@ export class SalesforceCliAdapter {
       timeoutMs: LOGIN_TIMEOUT_MS,
       windowsHide: false,
       signal: controller.signal,
+      queue: false,
     });
     const detected = this.waitForOrgConnected(safeAlias, baseline, {
       timeoutMs: LOGIN_TIMEOUT_MS,
@@ -217,7 +220,7 @@ export class SalesforceCliAdapter {
     const safePath = validateRestPath(path);
     const result = await this.run(
       ['api', 'request', 'rest', safePath, '--method', 'GET', '--target-org', safeAlias],
-      { timeoutMs: REST_TIMEOUT_MS, ...options },
+      { timeoutMs: REST_TIMEOUT_MS, ...options, queue: true },
     );
     return result.stdout;
   }

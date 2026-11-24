@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { RetrievalStatus } from '@dcat/core';
+import type { ResourceFamily, RetrievalStatus } from '@dcat/core';
 import { downloadTextFile, exportCsvTable, exportInventoryJson, exportInventoryMarkdown } from '@dcat/exporters';
 import type { Page } from '../navigation.ts';
 import { ExportMenu } from '../components/ExportMenu.tsx';
@@ -12,6 +12,7 @@ import type { IconName } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, Panel, SectionHeading } from '../components/ui/index.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
+import { snapshotCountLabel } from '../lib/inventoryDisplay.ts';
 import { discoverySummary, safeDateText } from '../lib/inventory.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
 import {
@@ -110,24 +111,28 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
 
         const exportItems: ExportMenuItem[] = [
           { id: 'csv', label: 'CSV', description: 'Discovery summary', icon: 'download', onSelect: () => download('csv') },
-          { id: 'json', label: 'JSON', description: 'Full inventory', icon: 'download', onSelect: () => download('json') },
+          { id: 'json', label: 'JSON', description: 'Current snapshot', icon: 'download', onSelect: () => download('json') },
           { id: 'markdown', label: 'Markdown', description: 'Architecture summary', icon: 'book', onSelect: () => download('markdown') },
         ];
 
-        const metrics: { label: string; value: number; page: Page; icon: IconName }[] = [
-          { label: 'Data Spaces', value: inventory.dataSpaces.length, page: 'data-spaces', icon: 'layers' },
-          { label: 'DLOs', value: inventory.dlos.length, page: 'dlos', icon: 'database' },
-          { label: 'DMOs', value: inventory.dmos.length, page: 'dmos', icon: 'cube' },
-          { label: 'Mappings', value: inventory.mappings.length, page: 'mappings', icon: 'route' },
-          { label: 'Streams', value: inventory.dataStreams.length, page: 'data-streams', icon: 'stream' },
-          { label: 'Transforms', value: inventory.dataTransforms.length, page: 'data-transforms', icon: 'sparkles' },
+        const familyCount = (
+          family: ResourceFamily,
+          loaded: number,
+        ): string => snapshotCountLabel(inventory, family, loaded);
+        const metrics: { label: string; value: string; page: Page; icon: IconName }[] = [
+          { label: 'Data Spaces', value: familyCount('data-spaces', inventory.dataSpaces.length), page: 'data-spaces', icon: 'layers' },
+          { label: 'DLOs', value: familyCount('dlos', inventory.dlos.length), page: 'dlos', icon: 'database' },
+          { label: 'DMOs', value: familyCount('dmos', inventory.dmos.length), page: 'dmos', icon: 'cube' },
+          { label: 'Mappings', value: familyCount('mappings', inventory.mappings.length), page: 'mappings', icon: 'route' },
+          { label: 'Streams', value: familyCount('data-streams', inventory.dataStreams.length), page: 'data-streams', icon: 'stream' },
+          { label: 'Transforms', value: familyCount('data-transforms', inventory.dataTransforms.length), page: 'data-transforms', icon: 'sparkles' },
         ];
-        const flowSteps: { label: string; value: number; icon: IconName }[] = [
-          { label: 'Data Spaces', value: inventory.dataSpaces.length, icon: 'layers' },
-          { label: 'Data Lake Objects', value: inventory.dlos.length, icon: 'database' },
-          { label: 'Data Model Objects', value: inventory.dmos.length, icon: 'cube' },
-          { label: 'Mappings', value: inventory.mappings.length, icon: 'route' },
-          { label: 'Data Transforms', value: inventory.dataTransforms.length, icon: 'sparkles' },
+        const flowSteps: { label: string; value: string; icon: IconName }[] = [
+          { label: 'Data Spaces', value: familyCount('data-spaces', inventory.dataSpaces.length), icon: 'layers' },
+          { label: 'Data Lake Objects', value: familyCount('dlos', inventory.dlos.length), icon: 'database' },
+          { label: 'Data Model Objects', value: familyCount('dmos', inventory.dmos.length), icon: 'cube' },
+          { label: 'Mappings', value: familyCount('mappings', inventory.mappings.length), icon: 'route' },
+          { label: 'Data Transforms', value: familyCount('data-transforms', inventory.dataTransforms.length), icon: 'sparkles' },
         ];
         const quickLinks: { label: string; description: string; page: Page; icon: IconName }[] = [
           { label: 'Data Spaces', description: 'Boundaries and ownership', page: 'data-spaces', icon: 'layers' },

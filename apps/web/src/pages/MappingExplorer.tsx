@@ -6,6 +6,7 @@ import {
   exportInventoryJson,
   exportInventoryMarkdown,
 } from '@dcat/exporters';
+import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.ts';
 import { filterByQuery } from '../lib/inventory.ts';
 import { ExportMenu } from '../components/ExportMenu.tsx';
 import type { ExportMenuItem } from '../components/ExportMenu.tsx';
@@ -113,12 +114,16 @@ export function MappingExplorer({ context }: { context: WorkspaceContext | null 
                   <ExportMenu items={exportItems} />
                 </>
               }
-              meta={<Badge tone="brand">{mappings.length} of {inventory.mappings.length} mappings</Badge>}
+              meta={<Badge tone="brand">{shownFamilyCountLabel(inventory, 'mappings', mappings.length, inventory.mappings.length, 'mappings')}</Badge>}
             />
             {message ? <p className="mb-4 text-xs text-ink-soft" role="status">{message}</p> : null}
 
             {mappings.length === 0 ? (
-              <Panel role="status" className="text-center text-sm text-ink-soft">No mappings match that search.</Panel>
+              <Panel role="status" className="text-center text-sm text-ink-soft">
+                {isFamilyLoading(inventory, 'mappings')
+                  ? 'Mappings are still loading; matching results will appear here as batches arrive.'
+                  : 'No mappings match that search.'}
+              </Panel>
             ) : (
               <div className="grid gap-4 xl:grid-cols-2">
                 {mappings.map((mapping, index) => (

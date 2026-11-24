@@ -46,7 +46,7 @@ describe('SalesforceCliAdapter', () => {
         '--target-org',
         'demo-uat',
       ],
-      { timeoutMs: 90_000 },
+      { timeoutMs: 90_000, queue: true },
     );
     const args = vi.mocked(runner.run).mock.calls[0]?.[0].join(' ') ?? '';
     expect(args).not.toContain('--url');
@@ -68,7 +68,7 @@ describe('SalesforceCliAdapter', () => {
     await expect(adapter.restGet('demo-uat', path)).resolves.toBeTruthy();
     expect(runner.run).toHaveBeenCalledWith(
       ['api', 'request', 'rest', `/${path}`, '--method', 'GET', '--target-org', 'demo-uat'],
-      { timeoutMs: 90_000 },
+      { timeoutMs: 90_000, queue: true },
     );
   });
 

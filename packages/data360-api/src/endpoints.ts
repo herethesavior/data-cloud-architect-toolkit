@@ -58,6 +58,16 @@ export function buildFamilyPath(family: ResourceFamily, apiVersion: string): str
   return family === 'dmos' ? `${base}?limit=${DMO_PAGE_SIZE}&offset=0` : base;
 }
 
+/**
+ * Minimal count probe for families whose verified REST responses expose a
+ * global `totalSize`. DMOs have no envelope total, and mapping/relationship
+ * lookups are per-DMO calls with no global count endpoint.
+ */
+export function buildExpectedCountPath(family: ResourceFamily, apiVersion: string): string | null {
+  if (family === 'dmos' || family === 'mappings') return null;
+  return `${buildFamilyPath(family, apiVersion)}?limit=1`;
+}
+
 export function buildDmoPath(apiVersion: string, offset: number): string {
   if (!Number.isSafeInteger(offset) || offset < 0) {
     throw new CliError('INVALID_ARGUMENT', 'An invalid DMO offset was supplied.');

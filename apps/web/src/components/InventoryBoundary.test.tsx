@@ -8,6 +8,7 @@ import type { DiscoveryProgress, InventorySnapshot } from '@dcat/core';
 import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
 import { api } from '../lib/api.ts';
 import { InventoryActionsProvider } from '../lib/inventoryActions.tsx';
+import type { InventoryActions } from '../lib/inventoryActions.tsx';
 import { createWorkspaceContext } from '../lib/workspace.ts';
 import { DloExplorer } from './ObjectExplorer.tsx';
 
@@ -69,7 +70,26 @@ function snapshotWithExhaustedTotal(): InventorySnapshot {
   };
 }
 
-function renderExplorer(snapshot: InventorySnapshot, resumeDiscovery = vi.fn(), seedCache = false) {
+function snapshotWithExpectedTotal(): InventorySnapshot {
+  const snapshot = snapshotFor('running');
+  return {
+    ...snapshot,
+    progress: {
+      ...snapshot.progress!,
+      total: null,
+      families: snapshot.progress!.families.map((family) => family.family === 'dlos'
+        ? { ...family, total: null, expectedTotal: 100, expectedTotalSource: 'preflight' }
+        : family),
+    },
+  };
+}
+
+function renderExplorer(
+  snapshot: InventorySnapshot,
+  resumeDiscovery = vi.fn(),
+  seedCache = false,
+  actionOverrides: Partial<InventoryActions> = {},
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   if (seedCache) queryClient.setQueryData(['inventory', context.contextId], snapshot);
   vi.spyOn(api, 'inventory').mockResolvedValue(snapshot);
@@ -88,6 +108,7 @@ function renderExplorer(snapshot: InventorySnapshot, resumeDiscovery = vi.fn(), 
         refreshError: '',
         resumeDiscovery,
         isResumingDiscovery: false,
+        ...actionOverrides,
       }}>
         <DloExplorer context={context} />
       </InventoryActionsProvider>
@@ -109,6 +130,24 @@ describe('InventoryBoundary progressive state', () => {
     expect(banner).toHaveTextContent('2 of 100 records loaded');
     expect(screen.getByTestId('inventory-progress-dlos')).toHaveTextContent('2/100');
     expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('img', { name: /inventory.*loading/i }).length).toBeGreaterThan(0);
+  });
+
+  it('uses the authoritative expected count instead of an unknown envelope total', async () => {
+    renderExplorer(snapshotWithExpectedTotal());
+
+    const banner = await screen.findByTestId('inventory-progress');
+    expect(banner).toHaveTextContent('2 of 100 records loaded');
+    expect(screen.getByTestId('inventory-progress-dlos')).toHaveTextContent('2/100');
+  });
+
+  it('keeps rows visible and spins the shared indicator during a manual refresh', async () => {
+    renderExplorer(snapshotFor('running'), vi.fn(), true, { isRefreshingInventory: true });
+
+    expect(await screen.findByTestId('inventory-freshness')).toBeInTheDocument();
+    expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
+    expect(screen.getByRole('img', { name: 'Inventory loading' })).toBeInTheDocument();
     expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
   });
 

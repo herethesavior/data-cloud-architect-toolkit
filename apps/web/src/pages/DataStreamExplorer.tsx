@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from '../components/ui/index.ts';
 import type { DataTableColumn, TabItem } from '../components/ui/index.ts';
+import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.ts';
 import { filterByQuery, sameName } from '../lib/inventory.ts';
 import type { FocusObject } from '../lib/objectDetail.ts';
 import { findCapability, resourceStatusMessage } from '../lib/resourceStatus.ts';
@@ -379,7 +380,7 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
                   <ExportMenu items={exportItems} />
                 </>
               }
-              meta={<Badge tone="brand">{streams.length} of {inventory.dataStreams.length} streams</Badge>}
+              meta={<Badge tone="brand">{shownFamilyCountLabel(inventory, 'data-streams', streams.length, inventory.dataStreams.length, 'streams')}</Badge>}
             />
             {exportMessage ? <p className="mb-4 text-xs text-ink-soft" role="status">{exportMessage}</p> : null}
 
@@ -399,11 +400,14 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
                     : capability?.status === 'unsupported' ? 'Data Streams are unavailable'
                       : capability?.status === 'error' ? 'Could not load Data Streams'
                         : capability?.status === 'partial' ? 'Some Data Streams may be missing'
-                          : 'No data streams found'
+                          : isFamilyLoading(inventory, 'data-streams') ? 'Data Streams are still loading'
+                            : 'No data streams found'
                 }
-                description={capability && capability.status !== 'available' && capability.status !== 'not-started'
-                  ? resourceStatusMessage(capability)
-                  : 'No streams match this search and status filter for the current org.'}
+                description={isFamilyLoading(inventory, 'data-streams')
+                  ? 'Batches are still arriving; this result is not final yet.'
+                  : capability && capability.status !== 'available' && capability.status !== 'not-started'
+                    ? resourceStatusMessage(capability)
+                    : 'No streams match this search and status filter for the current org.'}
                 icon="stream"
               />
             ) : (

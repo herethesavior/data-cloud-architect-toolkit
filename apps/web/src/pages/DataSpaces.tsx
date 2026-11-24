@@ -5,6 +5,7 @@ import {
   exportInventoryJson,
   exportInventoryMarkdown,
 } from '@dcat/exporters';
+import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.ts';
 import { countInDataSpace, countStreamsInDataSpace, filterByQuery, sameName } from '../lib/inventory.ts';
 import { ExportMenu } from '../components/ExportMenu.tsx';
 import type { ExportMenuItem } from '../components/ExportMenu.tsx';
@@ -96,12 +97,16 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
                   <ExportMenu items={exportItems} />
                 </>
               }
-              meta={<Badge tone="brand">{spaces.length} of {inventory.dataSpaces.length} spaces</Badge>}
+              meta={<Badge tone="brand">{shownFamilyCountLabel(inventory, 'data-spaces', spaces.length, inventory.dataSpaces.length, 'spaces')}</Badge>}
             />
             {message ? <p className="mb-4 text-xs text-ink-soft" role="status">{message}</p> : null}
 
             {spaces.length === 0 ? (
-              <Panel role="status" className="text-center text-sm text-ink-soft">No data spaces match that search.</Panel>
+              <Panel role="status" className="text-center text-sm text-ink-soft">
+                {isFamilyLoading(inventory, 'data-spaces')
+                  ? 'Data spaces are still loading; matching results will appear here as batches arrive.'
+                  : 'No data spaces match that search.'}
+              </Panel>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {spaces.map((space) => {

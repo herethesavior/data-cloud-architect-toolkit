@@ -27,6 +27,7 @@ import {
 import {
   buildData360Path,
   buildDmoRelationshipsPath,
+  buildExpectedCountPath,
   buildFamilyPath,
   buildMappingPath,
   buildVersionsPath,
@@ -66,6 +67,10 @@ type WarningFamily = ResourceFamily | 'api-versions' | typeof STREAM_ENRICHMENT_
 const MAX_REST_PATH_LENGTH = 480;
 const MAPPING_CONCURRENCY = 4;
 const RELATIONSHIP_CONCURRENCY = 4;
+/** Bounded count-repair passes prevent an inconsistent endpoint from looping forever. */
+const MAX_EXPECTED_COUNT_RETRIES = 2;
+
+type ExpectedTotalSource = 'preflight' | 'response';
 
 export interface PageRetryOptions {
   maxAttempts: number;
@@ -83,6 +88,11 @@ interface CursorState {
   param: string | null;
   pageIndex: number;
   total: number | null;
+  expectedTotal: number | null;
+  expectedTotalSource: ExpectedTotalSource | null;
+  countProbeAttempts: number;
+  countRetries: number;
+  countMismatch: boolean;
   done: boolean;
   failed: boolean;
   degraded: boolean;
@@ -221,6 +231,11 @@ function makeCursor(basePath: string): CursorState {
     param: null,
     pageIndex: 0,
     total: null,
+    expectedTotal: null,
+    expectedTotalSource: null,
+    countProbeAttempts: 0,
+    countRetries: 0,
+    countMismatch: false,
     done: false,
     failed: false,
     degraded: false,
@@ -275,6 +290,87 @@ function unavailableFamily(family: NonMappingFamily): FamilyState {
     relationships: [],
     relationshipIds: new Set<string>(),
   };
+}
+
+/** Only a final count greater than an exhausted page can be used as a denominator. */
+function isTrustworthyExpectedTotal(total: number | null, loaded: number, hasMore: boolean): total is number {
+  if (total === null) return false;
+  return hasMore ? total > loaded : total >= loaded;
+}
+
+function setExpectedTotal(
+  state: ProgressiveDiscoveryState,
+  family: NonMappingFamily,
+  cursor: CursorState,
+  total: number,
+  source: ExpectedTotalSource,
+  loaded: number,
+  hasMore: boolean,
+): void {
+  if (!isTrustworthyExpectedTotal(total, loaded, hasMore)) return;
+  if (cursor.expectedTotal !== null && cursor.expectedTotal !== total) {
+    pushWarning(state, family, 'EXPECTED_COUNT_CHANGED',
+      `Salesforce reported a new final count (${total}); progress now uses the latest value.`, 'info');
+  }
+  cursor.expectedTotal = total;
+  cursor.expectedTotalSource = source;
+}
+
+function loadedForFamily(state: ProgressiveDiscoveryState, family: ResourceFamily): number {
+  return family === 'mappings'
+    ? state.mappings.items.length
+    : state.families[family].items.length;
+}
+
+function expectedCountGap(state: ProgressiveDiscoveryState, family: NonMappingFamily): number {
+  const cursor = state.families[family];
+  if (cursor.failed || cursor.expectedTotal === null) return 0;
+  return Math.max(0, cursor.expectedTotal - cursor.items.length);
+}
+
+function canRetryExpectedCount(state: ProgressiveDiscoveryState, family: NonMappingFamily): boolean {
+  const cursor = state.families[family];
+  return !cursor.countMismatch && cursor.countRetries < MAX_EXPECTED_COUNT_RETRIES
+    && expectedCountGap(state, family) > 0;
+}
+
+/**
+ * Rewind only the cursor path. Seen keys stay in place, so a replay that returns
+ * the same records cannot inflate the loaded count or duplicate rows.
+ */
+function restartForExpectedCount(
+  state: ProgressiveDiscoveryState,
+  family: NonMappingFamily,
+): void {
+  const cursor = state.families[family];
+  cursor.countRetries += 1;
+  cursor.path = cursor.basePath;
+  cursor.paths = [cursor.basePath];
+  cursor.cursor = null;
+  cursor.param = null;
+  cursor.done = false;
+  cursor.degraded = false;
+  pushWarning(state, family, 'EXPECTED_COUNT_RETRY',
+    `Loaded ${cursor.items.length} of ${cursor.expectedTotal} ${family} records; checking the first page again.`,
+    'info');
+}
+
+function finalizeExpectedCounts(state: ProgressiveDiscoveryState): void {
+  for (const family of NON_MAPPING_FAMILIES) {
+    const cursor = state.families[family];
+    if (cursor.failed || cursor.expectedTotal === null) continue;
+    if (cursor.items.length >= cursor.expectedTotal) {
+      cursor.countMismatch = false;
+      continue;
+    }
+    if (canRetryExpectedCount(state, family)) continue;
+    if (cursor.countMismatch) continue;
+    cursor.countMismatch = true;
+    cursor.degraded = true;
+    pushWarning(state, family, 'EXPECTED_COUNT_MISMATCH',
+      `Discovery loaded ${cursor.items.length} of ${cursor.expectedTotal} reported ${family} records. Earlier results were kept.`,
+      'warning');
+  }
 }
 
 function contextFor(
@@ -368,10 +464,14 @@ function applyContinuation(
   family: ResourceFamily,
   cursor: CursorState,
   continuation: ReturnType<typeof extractContinuation>,
+  loaded = 0,
 ): void {
   cursor.pageIndex += 1;
   if (continuation.total !== null) {
     cursor.total = Math.max(cursor.total ?? 0, continuation.total);
+    if (family !== 'mappings') {
+      setExpectedTotal(state, family, cursor, continuation.total, 'response', loaded, continuation.hasMore);
+    }
   }
   if (!continuation.hasMore) {
     cursor.done = true;
@@ -449,7 +549,7 @@ async function requestPage<T>(
     const continuation = family === 'dmos'
       ? offsetContinuation(decoded, cursor.path, DMO_PAGE_SIZE, entries.length)
       : extractContinuation(decoded);
-    applyContinuation(state, family, cursor, continuation);
+    applyContinuation(state, family, cursor, continuation, loadedForFamily(state, family));
     return cursor.pageIndex > before || cursor.done !== false;
   } catch (error) {
     if (family === 'mappings' && isMappingAbsence(error)) {
@@ -609,7 +709,7 @@ async function fetchRelationshipTaskPage(
 function anyActive(state: ProgressiveDiscoveryState): boolean {
   return NON_MAPPING_FAMILIES.some((family) => {
     const cursor = state.families[family];
-    return !cursor.done && !cursor.failed;
+    return (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family);
   }) || state.mappings.tasks.some((task) => !task.done && !task.failed)
   || state.relationshipQueries.tasks.some((task) => !task.done && !task.failed);
 }
@@ -633,6 +733,7 @@ function statusForFamily(state: ProgressiveDiscoveryState, family: ResourceFamil
   if (cursor.failed) {
     return cursor.items.length > 0 ? 'partial' : cursor.errorStatus;
   }
+  if (cursor.countMismatch || canRetryExpectedCount(state, family)) return 'partial';
   if (cursor.degraded) return 'partial';
   return cursor.done ? 'available' : 'partial';
 }
@@ -747,7 +848,7 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
     : state.families[family].pageIndex;
   const hasMore = family === 'mappings'
     ? state.mappings.tasks.some((task) => !task.done && !task.failed)
-    : !cursor.done && !cursor.failed;
+    : (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family);
   const failedTask = family === 'mappings'
     ? state.mappings.tasks.find((task) => task.failed)
     : null;
@@ -770,6 +871,8 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
     status,
     loaded,
     total,
+    expectedTotal: cursor.expectedTotal,
+    expectedTotalSource: cursor.expectedTotalSource,
     pagesFetched: pages,
     hasMore,
     error,
@@ -789,13 +892,19 @@ export function discoveryProgress(state: ProgressiveDiscoveryState): DiscoveryPr
     : failed ? 'failed'
       : terminal ? 'complete'
         : 'partial';
-  const allTotalsKnown = families.every((entry) => entry.total !== null);
+  // Prefer the authoritative envelope count, then the conservative page total.
+  // A page-local total is still unusable as a global denominator.
+  const totals = families.map((entry) => {
+    if (entry.expectedTotal !== null) return entry.expectedTotal;
+    return entry.total !== null && (!entry.hasMore || entry.total > entry.loaded) ? entry.total : null;
+  });
+  const allTotalsKnown = totals.every((total) => total !== null);
   return {
     sessionId: state.sessionId,
     generation: state.generation,
     state: sessionState,
     loaded: families.reduce((sum, entry) => sum + entry.loaded, 0),
-    total: allTotalsKnown ? families.reduce((sum, entry) => sum + (entry.total ?? 0), 0) : null,
+    total: allTotalsKnown ? totals.reduce<number>((sum, total) => sum + (total ?? 0), 0) : null,
     families,
     message: sessionState === 'failed'
       ? 'Some families stopped after a page failure. Earlier results are still available.'
@@ -924,6 +1033,53 @@ function unavailableState(
   return state;
 }
 
+/**
+ * Repair a missing expected count after the first page is already visible. A
+ * minimal `limit=1` request reveals a global envelope total when the real page
+ * only reported its own size. One bounded probe per family keeps this honest
+ * without delaying the first rows.
+ */
+async function probeMissingExpectedTotals(state: ProgressiveDiscoveryState): Promise<void> {
+  if (!state.apiVersion || state.signal?.aborted) return;
+  for (const family of NON_MAPPING_FAMILIES) {
+    const cursor = state.families[family];
+    if (cursor.pageIndex === 0 || cursor.done || cursor.failed || cursor.expectedTotal !== null) continue;
+    if (cursor.countProbeAttempts > 0) continue;
+    const path = buildExpectedCountPath(family, state.apiVersion);
+    if (!path) continue;
+    cursor.countProbeAttempts += 1;
+    try {
+      const attempt = await withPageRetry(async () => {
+        const raw = await state.cli.restGet(state.alias, path, { signal: state.signal });
+        return parseJsonResponse(raw, `${family} count probe`);
+      }, state.options.retry);
+      const decoded = attempt.value;
+      const entries = extractCollection(decoded, family);
+      const continuation = extractContinuation(decoded);
+      if (continuation.total !== null) {
+        setExpectedTotal(
+          state,
+          family,
+          cursor,
+          continuation.total,
+          'preflight',
+          entries.length,
+          continuation.hasMore,
+        );
+      }
+      if (attempt.retried) {
+        pushWarning(state, family, 'COUNT_PROBE_RETRY_SUCCEEDED',
+          'The expected count was read after a bounded transient retry.', 'info');
+      }
+    } catch (error) {
+      if (state.signal?.aborted) return;
+      pushWarning(state, family, 'COUNT_PROBE_FAILED',
+        `Expected count unavailable for ${family}; progress will use batch completion. ${safeErrorMessage(error)}`,
+        'info');
+    }
+  }
+}
+
 /** Start a session and await its first page so the caller can render rows immediately. */
 export async function createProgressiveDiscovery(
   options: ProgressiveDiscoveryOptions,
@@ -998,17 +1154,32 @@ export async function createProgressiveDiscovery(
   return state;
 }
 
+async function fetchFamilyPageWithCountRepair(
+  state: ProgressiveDiscoveryState,
+  family: NonMappingFamily,
+): Promise<boolean> {
+  const cursor = state.families[family];
+  if (cursor.done && !cursor.failed && canRetryExpectedCount(state, family)) {
+    restartForExpectedCount(state, family);
+  }
+  return fetchFamilyPage(state, family);
+}
+
 /** Fetch one page for each active family, then one page for a few mapping DMOs. */
 export async function advanceProgressiveDiscovery(
   state: ProgressiveDiscoveryState,
 ): Promise<{ active: boolean; changed: boolean }> {
   if (!state.apiVersion || state.signal?.aborted) return { active: false, changed: false };
 
+  // The first page has already been returned to the caller at this point, so
+  // count repair never blocks the initial render.
+  await probeMissingExpectedTotals(state);
+
   const active = NON_MAPPING_FAMILIES.filter((family) => {
     const cursor = state.families[family];
-    return !cursor.done && !cursor.failed;
+    return (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family);
   });
-  const results = await Promise.all(active.map((family) => fetchFamilyPage(state, family)));
+  const results = await Promise.all(active.map((family) => fetchFamilyPageWithCountRepair(state, family)));
 
   syncMappingTasks(state);
   const tasks = state.mappings.tasks
@@ -1051,6 +1222,7 @@ export async function advanceProgressiveDiscovery(
     || relationshipResults.some(Boolean) || enrichmentChanged;
   // Freshness follows the most recently loaded page, not the session start.
   if (changed) state.generatedAt = new Date().toISOString();
+  finalizeExpectedCounts(state);
   recompute(state);
   return {
     active: anyActive(state),

@@ -306,14 +306,18 @@ export const FAMILY_PROGRESS_STATES = [
 export type FamilyProgressState = (typeof FAMILY_PROGRESS_STATES)[number];
 
 /**
- * Per-family retrieval counters. `total` is null until Salesforce reports one;
- * the UI must never turn an unknown total into a misleading denominator.
+ * Per-family retrieval counters. `total` is the conservative page-derived value;
+ * `expectedTotal` is only set when Salesforce reports an authoritative final
+ * count before or during loading. The UI must never turn an unknown total into
+ * a misleading denominator.
  */
 export const familyProgressSchema = z.object({
   family: z.enum(RESOURCE_FAMILIES),
   status: z.enum(FAMILY_PROGRESS_STATES),
   loaded: z.number().int().nonnegative(),
   total: z.number().int().nonnegative().nullable(),
+  expectedTotal: z.number().int().nonnegative().nullable().optional(),
+  expectedTotalSource: z.enum(['preflight', 'response']).nullable().optional(),
   pagesFetched: z.number().int().nonnegative(),
   hasMore: z.boolean(),
   error: z.string().nullish(),

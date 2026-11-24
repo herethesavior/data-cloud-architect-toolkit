@@ -56,16 +56,19 @@ The deploy command bundles `apps/hosted-worker/src/pages.ts` from the root confi
 
 `@dcat-toolkit/bridge` is published publicly, and the hosted wizard uses `npx -y @dcat-toolkit/bridge@latest ...`. No npm credentials or publish step are needed to deploy the Pages site.
 
-For a future release, from a machine that owns the `@dcat-toolkit` npm scope:
+For a future release, bump the version on `main`, push the commit, then push a matching tag:
 
 ```bash
-npm login
 npm version patch --workspace @dcat-toolkit/bridge
-npm publish --workspace @dcat-toolkit/bridge --access public
+git add packages/bridge/package.json package-lock.json
+git commit -m "chore: release bridge 0.1.7"
+git push origin main
+git tag bridge-v0.1.7
+git push origin bridge-v0.1.7
 npm view @dcat-toolkit/bridge version
 ```
 
-`npm publish` runs the bridge `prepack` script, which bundles `packages/bridge/dist/bridge.mjs`. If npm places the release in staged publishing, approve it under **Account > Staged Packages**. If you do not own the `@dcat-toolkit` scope, rename the package and every `npx -y @dcat-toolkit/bridge@latest` string in the UI/docs before publishing under a scope you control.
+The tag runs `.github/workflows/publish-bridge.yml`. It checks that the tag matches `packages/bridge/package.json`, runs the full checks, builds the bridge, and runs `npm stage publish --tag latest` with npm trusted publishing (OIDC). Configure the trusted publisher for `herethesavior/data-cloud-architect-toolkit`, workflow `publish-bridge.yml`, environment `npm-bridge`, allowing **npm stage publish** only — not `npm publish` or `npm dist-tag`. No npm token is needed or stored in GitHub. Review and approve the staged version under **Account > Staged Packages** with 2FA; only then does `@latest` move. `prepack` bundles `packages/bridge/dist/bridge.mjs` from source, so the staged tarball is reproducible from the tag.
 
 ## 2. Create the KV namespace
 
