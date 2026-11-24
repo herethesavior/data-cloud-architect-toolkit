@@ -1802,45 +1802,6 @@ html[data-theme='dark'] .dcat-mark {
     transition: width var(--duration-normal) var(--ease-standard);
   }
 
-  .deck-dots {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-  }
-
-  .deck-dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    flex: 0 0 0.5rem;
-    border: 0;
-    border-radius: 999px;
-    background: var(--color-line-strong);
-    cursor: pointer;
-    opacity: 0.6;
-    transition: width var(--duration-normal) var(--ease-standard),
-      background var(--duration-normal) var(--ease-standard),
-      opacity var(--duration-normal) var(--ease-standard);
-  }
-
-  .deck-dot:hover,
-  .deck-dot.is-active {
-    background: var(--color-brand);
-    opacity: 1;
-  }
-
-  .deck-dot.is-active {
-    width: 1.5rem;
-    flex-basis: 1.5rem;
-    box-shadow: 0 0 0.75rem color-mix(in srgb, var(--color-brand) 45%, transparent);
-  }
-
-  .deck-dot:focus-visible {
-    outline: 2px solid var(--color-brand);
-    outline-offset: 2px;
-  }
-
   .deck-hint {
     color: var(--color-ink-faint);
     font-size: 0.8125rem;
@@ -1911,10 +1872,11 @@ html[data-theme='dark'] .dcat-mark {
     border: 0;
     border-radius: 0;
     box-shadow: none;
+    padding-bottom: 4.5rem;
   }
 
   .deck-shell:fullscreen .deck-slide {
-    --story-pad: 2.5rem clamp(3.25rem, 5vw, 6.875rem) 5rem;
+    --story-pad: clamp(3rem, min(6cqh, 5vw), 4.5rem);
   }
 
   .deck-shell:fullscreen .deck-controls {
@@ -1957,14 +1919,14 @@ html[data-theme='dark'] .dcat-mark {
      and --slide-fit is a measured last resort for slides that would otherwise
      scroll. Phones keep full-size text and scroll the body instead. */
   .deck-slide {
-    --story-title: clamp(2.25rem, min(5.8cqw, 9cqh), 5.25rem);
-    --story-lead: clamp(1.0625rem, min(1.75cqw, 2.8cqh), 1.5rem);
-    --story-body: clamp(0.95rem, min(1.25cqw, 2.1cqh), 1.125rem);
-    --story-small: clamp(0.875rem, min(1.1cqw, 1.85cqh), 1rem);
-    --story-note-size: clamp(0.75rem, min(0.95cqw, 1.55cqh), 0.875rem);
-    --story-eyebrow-size: clamp(0.75rem, min(1cqh, 1.6cqw), 0.875rem);
+    --story-title: clamp(2.375rem, min(6.2cqw, 9.5cqh), 5.75rem);
+    --story-lead: clamp(1.125rem, min(1.9cqw, 3.1cqh), 1.65rem);
+    --story-body: clamp(1rem, min(1.5cqw, 2.5cqh), 1.35rem);
+    --story-small: clamp(0.9375rem, min(1.25cqw, 2.2cqh), 1.125rem);
+    --story-note-size: clamp(0.8125rem, min(1cqw, 1.8cqh), 1rem);
+    --story-eyebrow-size: clamp(0.8125rem, min(1.1cqw, 1.6cqh), 1rem);
     --story-gap: clamp(0.5rem, min(1.5cqh, 1.1cqw), 1.125rem);
-    --story-pad: clamp(1.5rem, min(4.25cqh, 3.4cqw), 3.5rem);
+    --story-pad: clamp(1.5rem, min(4cqh, 3.5cqw), 3rem);
     --slide-fit: 1;
     position: relative;
     z-index: 1;
@@ -2111,12 +2073,6 @@ html[data-theme='dark'] .dcat-mark {
 
   .deck-slide .story-legend-row {
     flex: 1;
-  }
-
-  .deck-slide [data-chapter='trust'] .story-body > div:first-child {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
   }
 
   .deck-slide [data-chapter='boundaries'] .story-body > .story-grid:first-child { flex: 3; }
@@ -2759,7 +2715,6 @@ html[data-theme='dark'] .dcat-mark {
     .slide-timeline-track,
     .slide-roadmap-phases { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .deck-status,
-    .deck-dots,
     .deck-current-title,
     .deck-hint { display: none; }
     .deck-progress { width: 20vw; }
@@ -2843,7 +2798,7 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .story-title {
-    font-size: clamp(2.125rem, min(4cqw, 7cqh), 4.25rem);
+    font-size: clamp(2.25rem, min(4.4cqw, 7.5cqh), 4.75rem);
     letter-spacing: -0.05em;
     line-height: 1.06;
   }
@@ -2861,25 +2816,25 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-cover .story-title {
-    font-size: clamp(3rem, min(5.2cqw, 7.6cqh), 5.5rem);
+    font-size: clamp(3.25rem, min(5.6cqw, 8.2cqh), 5.875rem);
     letter-spacing: -0.065em;
     line-height: 1.02;
   }
 
   .deck-slide .present-layout-cover .story-lead {
-    max-width: 45rem;
+    max-width: 48rem;
     color: color-mix(in srgb, var(--color-ink) 82%, var(--color-info));
-    font-size: clamp(1rem, min(1.6cqw, 2.4cqh), 1.375rem);
+    font-size: clamp(1.125rem, min(1.8cqw, 2.8cqh), 1.5rem);
   }
 
   .deck-slide .present-layout-takeaway .story-title {
-    font-size: clamp(2.875rem, min(5vw, 8.5cqh), 4.875rem);
+    font-size: clamp(3rem, min(5.4cqw, 9cqh), 5.25rem);
     letter-spacing: -0.055em;
     line-height: 1.04;
   }
 
   .deck-slide .story-pill {
-    padding: 0.5rem 0.85rem;
+    padding: 0.55rem 0.95rem;
     font-size: var(--story-small);
     letter-spacing: 0.03em;
   }
@@ -2909,7 +2864,7 @@ html[data-theme='dark'] .dcat-mark {
     display: grid;
     width: 100%;
     height: 100%;
-    max-height: 18rem;
+    max-height: clamp(17rem, 50cqh, 24rem);
     min-height: 0;
     place-items: center;
   }
@@ -2923,7 +2878,8 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .slide-visual::before {
-    width: min(100%, 18rem);
+    height: min(100%, 20rem);
+    width: auto;
     aspect-ratio: 1;
     border: 1px solid color-mix(in srgb, var(--color-brand) 19%, transparent);
     box-shadow: 0 0 4.6875rem color-mix(in srgb, var(--color-brand) 10%, transparent),
@@ -2931,7 +2887,7 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .slide-visual::after {
-    height: min(100%, 25rem);
+    height: min(100%, 32rem);
     width: auto;
     aspect-ratio: 1;
     border: 1px solid color-mix(in srgb, var(--color-info) 16%, transparent);
@@ -2963,11 +2919,11 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-diagnosis .slide-diagnosis > .slide-panel .slide-panel-title {
-    font-size: clamp(1.15rem, 2.7cqw, 1.75rem);
+    font-size: clamp(1.25rem, 2.9cqw, 1.9rem);
   }
 
   .deck-slide .present-layout-diagnosis .slide-diagnosis > .slide-panel .slide-panel-body p {
-    font-size: clamp(1rem, 2.1cqh, 1.18rem);
+    font-size: clamp(1.1rem, 2.4cqh, 1.3rem);
   }
 
   .deck-slide .present-layout-diagnosis .slide-diagnosis-list {
@@ -2991,19 +2947,19 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-capabilities .slide-capability > svg {
-    width: clamp(1.75rem, 3cqh, 2.35rem);
+    width: clamp(2.25rem, 4cqh, 2.75rem);
     height: auto;
     margin-bottom: 0.25rem;
   }
 
   .deck-slide .present-layout-capabilities .slide-capability h4 {
     max-width: 18ch;
-    font-size: clamp(1.3rem, 2.7cqw, 1.8rem);
+    font-size: clamp(1.4rem, 3cqw, 2rem);
   }
 
   .deck-slide .present-layout-capabilities .slide-capability p {
     max-width: 34ch;
-    font-size: clamp(1.05rem, 2.1cqh, 1.22rem);
+    font-size: clamp(1.15rem, 2.7cqh, 1.35rem);
   }
 
   /* Data path: keep the six stages evenly distributed and reserve a clear
@@ -3026,12 +2982,17 @@ html[data-theme='dark'] .dcat-mark {
     padding: clamp(0.8rem, 2cqh, 1.25rem);
   }
 
+  .deck-slide .present-layout-flow .slide-stage-icon {
+    width: clamp(1.5rem, 3cqh, 1.875rem);
+    height: auto;
+  }
+
   .deck-slide .present-layout-flow .slide-stage strong {
-    font-size: clamp(0.95rem, 2cqh, 1.12rem);
+    font-size: clamp(1.05rem, 2.2cqh, 1.25rem);
   }
 
   .deck-slide .present-layout-flow .slide-stage span {
-    font-size: clamp(0.85rem, 1.8cqh, 1rem);
+    font-size: clamp(0.95rem, 2cqh, 1.1rem);
   }
 
   .deck-slide .present-layout-flow .story-outcome {
@@ -3040,11 +3001,11 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-flow .story-outcome strong {
-    font-size: clamp(1rem, 2.2cqh, 1.15rem);
+    font-size: clamp(1.1rem, 2.4cqh, 1.3rem);
   }
 
   .deck-slide .present-layout-flow .story-outcome span {
-    font-size: clamp(0.9rem, 1.9cqh, 1rem);
+    font-size: clamp(1rem, 2.1cqh, 1.15rem);
   }
 
   /* Workflow: five steps fill the left rail; the outcome panel balances the
@@ -3062,9 +3023,21 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-process .slide-process-list .slide-line {
+    grid-template-columns: 2.25rem minmax(6rem, 0.55fr) minmax(0, 1.45fr);
+    grid-template-rows: auto;
     align-content: center;
     min-height: 0;
     padding-block: clamp(0.5rem, 1.25cqh, 0.85rem);
+  }
+
+  .deck-slide .present-layout-process .slide-line-title {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .deck-slide .present-layout-process .slide-line-detail {
+    grid-column: 3;
+    grid-row: 1;
   }
 
   .deck-slide .present-layout-process .slide-process > .slide-panel {
@@ -3074,11 +3047,11 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-process .slide-process > .slide-panel .slide-panel-title {
-    font-size: clamp(1.1rem, 2.6cqw, 1.6rem);
+    font-size: clamp(1.2rem, 2.8cqw, 1.75rem);
   }
 
   .deck-slide .present-layout-process .slide-process > .slide-panel .slide-panel-body p {
-    font-size: clamp(1rem, 2.1cqh, 1.18rem);
+    font-size: clamp(1.1rem, 2.4cqh, 1.3rem);
   }
 
   /* Business alignment: the two perspectives share the same height, with the
@@ -3097,19 +3070,30 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-alignment .slide-quote {
-    font-size: clamp(1.2rem, 2.7cqw, 1.65rem);
+    font-size: clamp(1.35rem, 3cqw, 1.9rem);
   }
 
   .deck-slide .present-layout-alignment .slide-panel-body p {
-    font-size: clamp(1rem, 2.1cqh, 1.18rem);
+    font-size: clamp(1.1rem, 2.4cqh, 1.3rem);
   }
 
   .deck-slide .present-layout-alignment .slide-checklist {
     gap: clamp(0.55rem, 1.5cqh, 0.95rem);
   }
 
+  .deck-slide .present-layout-alignment .story-check-mark {
+    width: 1.4rem;
+    height: 1.4rem;
+    flex-basis: 1.4rem;
+  }
+
+  .deck-slide .present-layout-alignment .story-check-mark svg {
+    width: 0.9rem;
+    height: 0.9rem;
+  }
+
   .deck-slide .present-layout-alignment .slide-checklist .story-check {
-    font-size: clamp(1rem, 2.1cqh, 1.15rem);
+    font-size: clamp(1.1rem, 2.4cqh, 1.25rem);
   }
 
   .deck-slide .present-layout-alignment > .slide-fineprint {
@@ -3142,13 +3126,13 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-timeline .slide-timeline-step .slide-label {
-    font-size: clamp(0.85rem, 1.8cqh, 1rem);
+    font-size: clamp(0.9375rem, 2cqh, 1.0625rem);
   }
 
   .deck-slide .present-layout-timeline .slide-timeline-step p {
     margin-top: 0.75rem;
-    font-size: clamp(1.1rem, 2.5cqw, 1.28rem);
-    line-height: 1.55;
+    font-size: clamp(1.15rem, 2.8cqh, 1.35rem);
+    line-height: 1.5;
   }
 
   .deck-slide .present-layout-timeline .story-outcome {
@@ -3194,13 +3178,13 @@ html[data-theme='dark'] .dcat-mark {
 
   .deck-slide .present-layout-evidence .slide-evidence-copy .slide-principle {
     max-width: 18ch;
-    font-size: clamp(1.45rem, 3.1cqw, 2.35rem);
-    line-height: 1.18;
+    font-size: clamp(1.65rem, 3.4cqw, 2.6rem);
+    line-height: 1.16;
   }
 
   .deck-slide .present-layout-evidence .slide-evidence-copy p {
     max-width: 58ch;
-    font-size: clamp(0.98rem, 1.9cqh, 1.12rem);
+    font-size: clamp(1.1rem, 2.5cqh, 1.3rem);
   }
 
   .deck-slide .present-layout-evidence .slide-evidence-legend {
@@ -3213,7 +3197,13 @@ html[data-theme='dark'] .dcat-mark {
 
   .deck-slide .present-layout-evidence .slide-evidence-legend .story-legend-row {
     align-items: center;
+    gap: clamp(0.65rem, 1.5cqw, 1rem);
     padding: clamp(0.6rem, 1.6cqh, 1.1rem) clamp(0.4rem, 1cqw, 0.75rem);
+  }
+
+  .deck-slide .present-layout-evidence .story-legend-line {
+    width: clamp(3rem, 5cqw, 4rem);
+    flex-basis: clamp(3rem, 5cqw, 4rem);
   }
 
   /* Boundaries: pair three guardrails with the two execution modes. Both sides
@@ -3238,6 +3228,11 @@ html[data-theme='dark'] .dcat-mark {
     border-bottom: 1px solid var(--color-line);
   }
 
+  .deck-slide .present-layout-guardrails .slide-guardrail > svg {
+    width: clamp(1.5rem, 3.4cqh, 1.875rem);
+    height: auto;
+  }
+
   .deck-slide .present-layout-guardrails .slide-guardrail:last-child {
     border-bottom: 0;
   }
@@ -3249,11 +3244,11 @@ html[data-theme='dark'] .dcat-mark {
   }
 
   .deck-slide .present-layout-guardrails .slide-mode strong {
-    font-size: clamp(1.05rem, 2.2cqh, 1.2rem);
+    font-size: clamp(1.15rem, 2.4cqh, 1.35rem);
   }
 
   .deck-slide .present-layout-guardrails .slide-mode p {
-    font-size: clamp(1rem, 2.1cqh, 1.15rem);
+    font-size: clamp(1.1rem, 2.4cqh, 1.3rem);
   }
 
   /* Success measures: give each signal equal weight and use the final note as
@@ -3287,18 +3282,32 @@ html[data-theme='dark'] .dcat-mark {
 
   .deck-slide .present-layout-roadmap .slide-phase {
     height: 100%;
-    gap: clamp(0.45rem, 1.1cqh, 0.75rem);
-    padding: clamp(0.85rem, 2.1cqh, 1.4rem);
+    gap: clamp(0.3rem, 0.8cqh, 0.5rem);
+    padding: clamp(0.7rem, 1.6cqh, 1rem);
+  }
+
+  .deck-slide .present-layout-roadmap .slide-phase-description {
+    font-size: clamp(1.05rem, 2.4cqh, 1.25rem);
   }
 
   .deck-slide .present-layout-roadmap .slide-phase-items {
     flex: 1 1 auto;
     align-content: space-evenly;
-    gap: clamp(0.3rem, 0.8cqh, 0.55rem);
+    gap: clamp(0.2rem, 0.5cqh, 0.35rem);
   }
 
   .deck-slide .present-layout-roadmap .slide-phase-items li {
-    padding-top: clamp(0.35rem, 0.9cqh, 0.6rem);
+    padding-top: clamp(0.25rem, 0.6cqh, 0.4rem);
+  }
+
+  .deck-slide .present-layout-roadmap .slide-phase-items strong {
+    font-size: clamp(0.9375rem, 2cqh, 1.0625rem);
+    line-height: 1.25;
+  }
+
+  .deck-slide .present-layout-roadmap .slide-phase-items span {
+    font-size: clamp(0.8125rem, 1.8cqh, 0.9375rem);
+    line-height: 1.3;
   }
 
   /* Demo: spread the five prompts down the left column and let the illustrative
@@ -3321,7 +3330,7 @@ html[data-theme='dark'] .dcat-mark {
     align-items: center;
     min-height: 0;
     padding: clamp(0.65rem, 1.6cqh, 1rem) clamp(0.75rem, 1.6cqw, 1.1rem);
-    font-size: clamp(0.98rem, 1.9cqh, 1.12rem);
+    font-size: clamp(1.1rem, 2.4cqh, 1.3rem);
   }
 
   .deck-slide .present-layout-demo .slide-demo-screen {
@@ -3336,6 +3345,17 @@ html[data-theme='dark'] .dcat-mark {
     flex-direction: column;
     justify-content: center;
     padding: clamp(0.85rem, 2cqh, 1.4rem);
+  }
+
+  .deck-slide .present-layout-demo .story-mock-top,
+  .deck-slide .present-layout-demo .story-mock-kpis span,
+  .deck-slide .present-layout-demo .story-mock-flow strong,
+  .deck-slide .present-layout-demo .story-mock-flow span {
+    font-size: var(--story-small);
+  }
+
+  .deck-slide .present-layout-demo .story-mock-kpis strong {
+    font-size: clamp(1.35rem, 3cqh, 1.75rem);
   }
 
   .deck-slide .present-layout-demo .slide-demo-screen .slide-fineprint {
@@ -3359,7 +3379,7 @@ html[data-theme='dark'] .dcat-mark {
 
   .deck-slide .present-layout-takeaway .slide-takeaway-statement {
     max-width: 16ch;
-    font-size: clamp(1.8rem, 4.1cqw, 3.35rem);
+    font-size: clamp(2rem, 4.5cqw, 3.75rem);
     line-height: 1.12;
   }
 
@@ -3372,6 +3392,11 @@ html[data-theme='dark'] .dcat-mark {
   .deck-slide .present-layout-takeaway .story-links a {
     min-height: clamp(4.5rem, 10cqh, 6rem);
     padding: clamp(0.85rem, 2cqh, 1.25rem) clamp(1rem, 2cqw, 1.5rem);
+  }
+
+  .deck-slide .present-layout-takeaway .story-links svg {
+    width: clamp(1.35rem, 3cqh, 1.75rem);
+    height: auto;
   }
 
   /* On compact presentation viewports, preserve readable type and let the
