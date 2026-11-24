@@ -1261,18 +1261,6 @@ export function AboutPage({ onNavigate }: AboutPageProps) {
               <span style={{ width: `${((slideIndex + 1) / chapters.length) * 100}%` }} />
             </div>
           </div>
-          <div className="deck-dots" aria-label="Go to slide">
-            {chapters.map((chapter, index) => (
-              <button
-                key={chapter.id}
-                type="button"
-                className={`deck-dot ${index === slideIndex ? 'is-active' : ''}`}
-                onClick={() => goToSlide(index)}
-                aria-label={`Go to slide ${index + 1}: ${chapter.shortTitle}`}
-                aria-current={index === slideIndex ? 'step' : undefined}
-              />
-            ))}
-          </div>
           <div className="deck-control-right">
             <span className="deck-hint"><span className="key">←</span><span className="key">→</span> to navigate · Esc to exit</span>
             <span className="deck-current-title">{activeChapter.shortTitle}</span>
