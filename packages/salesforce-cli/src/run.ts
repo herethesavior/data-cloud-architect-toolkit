@@ -108,6 +108,8 @@ export interface RunOptions {
   windowsHide?: boolean;
   /** Cancels an in-flight CLI process when a discovery session is stopped. */
   signal?: AbortSignal;
+  /** How long to wait for `close` after a kill before unwedging the queue. */
+  closeGraceMs?: number;
   /**
    * Serialize with other CLI calls by default. Only the web-login race opts
    * out: its org-list probe must run while the browser login command is open.
@@ -120,6 +122,7 @@ export interface ProcessRunner {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_CLOSE_GRACE_MS = 1_500;
 const DEFAULT_MAX_OUTPUT_BYTES = 2_000_000;
 
 function cancelledRunError(): CliError {
@@ -195,33 +198,59 @@ export class NodeProcessRunner implements ProcessRunner {
       let aborted = false;
       let limitExceeded = false;
       let settled = false;
+      let forceTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const errorFor = (kind: 'timeout' | 'abort' | 'limit'): CliError => {
+        if (kind === 'abort') return new CliError('TIMEOUT', 'Salesforce CLI command was cancelled.');
+        if (kind === 'limit') {
+          return new CliError('OUTPUT_LIMIT', 'Salesforce CLI output exceeded the safe size limit.');
+        }
+        return new CliError('TIMEOUT', `Salesforce CLI command timed out after ${timeoutMs} ms.`);
+      };
 
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill();
+        killAndForceSettle('timeout');
       }, timeoutMs);
 
       const onAbort = () => {
         aborted = true;
-        child.kill();
+        killAndForceSettle('abort');
       };
-      if (options.signal?.aborted) onAbort();
-      else options.signal?.addEventListener('abort', onAbort, { once: true });
 
       const finish = (complete: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (forceTimer) clearTimeout(forceTimer);
         options.signal?.removeEventListener('abort', onAbort);
         complete();
       };
+
+      // A killed CLI can leave a grandchild holding stdio open, so `close` may
+      // never arrive. Settle after a short grace period or the global command
+      // queue would wedge and block every later discovery call.
+      function killAndForceSettle(kind: 'timeout' | 'abort' | 'limit'): void {
+        child.kill();
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        if (!forceTimer) {
+          forceTimer = setTimeout(
+            () => finish(() => reject(errorFor(kind))),
+            options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS,
+          );
+        }
+      }
+
+      if (options.signal?.aborted) onAbort();
+      else options.signal?.addEventListener('abort', onAbort, { once: true });
 
       const collect = (stream: Readable | null, kind: 'stdout' | 'stderr'): void => {
         stream?.on('data', (chunk: Buffer) => {
           totalBytes += chunk.length;
           if (totalBytes > maxOutputBytes) {
             limitExceeded = true;
-            child.kill();
+            killAndForceSettle('limit');
             return;
           }
           if (kind === 'stdout') stdout += chunk.toString('utf8');

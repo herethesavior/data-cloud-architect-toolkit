@@ -371,13 +371,13 @@ async function progressiveInventory(
   // A resume clears failed families once. Repeating it on every poll would hide
   // a second failure and turn a bounded retry into an endless retry loop.
   const pollOptions: InventoryRequestOptions = { ...options, resume: false };
-  while (snapshot.progress && snapshot.progress.state !== 'complete') {
-    if (snapshot.progress.state === 'failed' && !options.resume) break;
+  // A terminal `partial` snapshot has no active cursors; polling it again can
+  // never add rows and would keep the shared spinner alive indefinitely.
+  while (snapshot.progress?.state === 'running') {
     await wait(PROGRESS_POLL_MS, options.signal);
     result = await readInventorySession(alias, result.sessionId, pollOptions, hostedLive);
     snapshot = snapshotWithOrg(result.snapshot);
     options.onSnapshot?.(snapshot);
-    if (snapshot.progress?.state === 'failed') break;
   }
   return snapshot;
 }
