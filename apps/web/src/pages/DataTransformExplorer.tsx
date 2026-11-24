@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
 import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from '../components/ui/index.ts';
 import type { DataTableColumn, TabItem } from '../components/ui/index.ts';
+import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.ts';
 import { filterByQuery, safeDateText } from '../lib/inventory.ts';
 import type { FocusObject } from '../lib/objectDetail.ts';
 import { findCapability, resourceStatusMessage } from '../lib/resourceStatus.ts';
@@ -387,7 +388,7 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
 
         const exportItems: ExportMenuItem[] = [
           { id: 'csv', label: 'CSV', description: 'Visible transforms', icon: 'download', onSelect: () => download('csv') },
-          { id: 'json', label: 'JSON', description: 'Full inventory', icon: 'download', onSelect: () => download('json') },
+          { id: 'json', label: 'JSON', description: 'Current snapshot', icon: 'download', onSelect: () => download('json') },
           { id: 'markdown', label: 'Markdown', description: 'Architecture summary', icon: 'book', onSelect: () => download('markdown') },
         ];
 
@@ -464,7 +465,7 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
                   <ExportMenu items={exportItems} />
                 </>
               }
-              meta={<Badge tone="brand">{transforms.length} of {inventory.dataTransforms.length} transforms</Badge>}
+              meta={<Badge tone="brand">{shownFamilyCountLabel(inventory, 'data-transforms', transforms.length, inventory.dataTransforms.length, 'transforms')}</Badge>}
             />
             {exportMessage ? <p className="mb-4 text-xs text-ink-soft" role="status">{exportMessage}</p> : null}
 
@@ -478,11 +479,15 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
             {transforms.length === 0 ? (
               <EmptyState
                 title={capability?.status === 'forbidden' ? 'Access denied to Data Transforms' : (
-                  capability?.status === 'unsupported' ? 'Data Transforms are unavailable' : 'No data transforms found'
+                  capability?.status === 'unsupported' ? 'Data Transforms are unavailable'
+                    : isFamilyLoading(inventory, 'data-transforms') ? 'Data Transforms are still loading'
+                      : 'No data transforms found'
                 )}
-                description={capability && capability.status !== 'available'
-                  ? resourceStatusMessage(capability)
-                  : 'No transforms were returned for this org or API version. Detail and run-history endpoints remain unavailable until metadata is present.'}
+                description={isFamilyLoading(inventory, 'data-transforms')
+                  ? 'Batches are still arriving; this result is not final yet.'
+                  : capability && capability.status !== 'available'
+                    ? resourceStatusMessage(capability)
+                    : 'No transforms were returned for this org or API version. Detail and run-history endpoints remain unavailable until metadata is present.'}
                 icon="sparkles"
               />
             ) : (

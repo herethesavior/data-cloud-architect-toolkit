@@ -14,6 +14,7 @@ export const dataSpacesJson = JSON.stringify({
     { id: '0Sp000000000001', apiName: 'default', label: 'Default Space', description: 'Primary data space', isDefault: true },
     { id: '0Sp000000000002', name: 'sales_space', label: 'Sales Space' },
   ],
+  totalSize: 2,
 });
 
 export const dlosJson = JSON.stringify({
@@ -120,6 +121,7 @@ export const dataStreamsJson = JSON.stringify({
       refreshRate: '15m',
     },
   ],
+  totalSize: 1,
 });
 
 export const connectorCatalogJson = JSON.stringify({
@@ -146,6 +148,7 @@ export const dataTransformsJson = JSON.stringify({
   records: [
     { apiName: 'Account_Transform', label: 'Account Transform', status: 'Active', description: 'Normalizes account names' },
   ],
+  totalSize: 1,
 });
 
 export const transformDetailJson = JSON.stringify({

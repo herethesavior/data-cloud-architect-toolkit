@@ -850,13 +850,15 @@ test('a slow refresh can be cancelled instead of leaving a permanent spinner', a
   });
 
   await page.getByRole('button', { name: 'Refresh inventory' }).click();
-  const skeleton = page.getByTestId('inventory-refresh-skeleton');
-  await expect(skeleton).toBeVisible();
-  await expect(page.getByText('Sample inventory')).toHaveCount(0);
-  await expect(skeleton.getByRole('button', { name: 'Cancel refresh' })).toBeVisible();
-  await skeleton.getByRole('button', { name: 'Cancel refresh' }).click();
+  const spinner = page.getByRole('img', { name: 'Inventory loading' });
+  await expect(spinner).toBeVisible();
+  // The last usable snapshot stays on screen while the refresh streams in.
+  await expect(page.getByText('Sample inventory')).toBeVisible();
+  const cancel = page.getByRole('button', { name: 'Cancel refresh' });
+  await expect(cancel).toBeVisible();
+  await cancel.click();
 
-  await expect(skeleton).toBeHidden();
+  await expect(spinner).toHaveCount(0);
   await expect(page.getByText('Sample inventory')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -2153,12 +2155,13 @@ test('a refresh started before a mode switch cannot repopulate the old context',
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   await page.getByRole('button', { name: 'Refresh inventory' }).click();
-  await expect(page.getByTestId('inventory-refresh-skeleton')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Inventory loading' })).toBeVisible();
+  await expect(page.getByText('Sample inventory')).toBeVisible();
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
 
   await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
   await expect(page.getByText('Live org metadata')).toBeVisible();
-  await expect(page.getByTestId('inventory-refresh-skeleton')).toHaveCount(0);
+  await expect(page.getByRole('img', { name: 'Inventory loading' })).toHaveCount(0);
   await expect(page.getByText('Sample inventory')).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect.poll(() => refreshCompleted).toBe(true);

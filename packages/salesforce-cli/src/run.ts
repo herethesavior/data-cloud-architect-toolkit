@@ -48,28 +48,51 @@ export function resolveSfShim(shimPath: string, depth = 0): ResolvedCliCommand |
 }
 
 let windowsResolution: ResolvedCliCommand | null | undefined;
+let windowsResolutionPromise: Promise<ResolvedCliCommand | null> | undefined;
 
-async function resolveCliCommand(command: string): Promise<ResolvedCliCommand> {
+function resolveCliCommand(command: string): Promise<ResolvedCliCommand> {
   if (process.platform !== 'win32' || command !== 'sf') {
-    return { command, prefixArgs: [] };
+    return Promise.resolve({ command, prefixArgs: [] });
   }
 
-  // Retry a failed lookup: the CLI may be installed after the first attempt.
-  if (windowsResolution === undefined || windowsResolution === null) {
-    const where = spawnSync('where.exe', ['sf'], {
-      encoding: 'utf8',
-      shell: false,
-      windowsHide: true,
-    });
-    const found = (where.stdout ?? '')
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const shim = found.find((path) => path.toLowerCase().endsWith('.cmd')) ?? found[0];
-    windowsResolution = shim ? resolveSfShim(shim) : null;
-  }
+  // Share one shim lookup across concurrent discovery calls.
+  windowsResolutionPromise ??= (async () => {
+    // Retry a failed lookup: the CLI may be installed after the first attempt.
+    if (windowsResolution === undefined || windowsResolution === null) {
+      const where = spawnSync('where.exe', ['sf'], {
+        encoding: 'utf8',
+        shell: false,
+        windowsHide: true,
+      });
+      const found = (where.stdout ?? '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const shim = found.find((path) => path.toLowerCase().endsWith('.cmd')) ?? found[0];
+      windowsResolution = shim ? resolveSfShim(shim) : null;
+    }
+    return windowsResolution;
+  })();
 
-  return windowsResolution ?? { command, prefixArgs: [] };
+  return windowsResolutionPromise.then((resolved) => {
+    // Allow a later call to retry if the CLI was not installed yet.
+    if (!resolved) windowsResolutionPromise = undefined;
+    return resolved ?? { command, prefixArgs: [] };
+  });
+}
+
+/**
+ * Salesforce CLI commands share auth/config state and a single org token cache.
+ * Run discovery reads one at a time so internal `Promise.all` fan-out cannot
+ * spawn overlapping `sf` processes.
+ */
+let commandTail: Promise<unknown> = Promise.resolve();
+
+function enqueueCommand<T>(operation: () => Promise<T>): Promise<T> {
+  const result = commandTail.then(operation, operation);
+  // A rejected command must not wedge the queue for every later call.
+  commandTail = result.then(() => undefined, () => undefined);
+  return result;
 }
 
 export interface ProcessRunResult {
@@ -85,6 +108,11 @@ export interface RunOptions {
   windowsHide?: boolean;
   /** Cancels an in-flight CLI process when a discovery session is stopped. */
   signal?: AbortSignal;
+  /**
+   * Serialize with other CLI calls by default. Only the web-login race opts
+   * out: its org-list probe must run while the browser login command is open.
+   */
+  queue?: boolean;
 }
 
 export interface ProcessRunner {
@@ -93,6 +121,10 @@ export interface ProcessRunner {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 2_000_000;
+
+function cancelledRunError(): CliError {
+  return new CliError('TIMEOUT', 'Salesforce CLI command was cancelled.');
+}
 
 /**
  * Runs a fixed Salesforce CLI argument list without a shell. Raw output is
@@ -106,6 +138,32 @@ export class NodeProcessRunner implements ProcessRunner {
   ) {}
 
   async run(args: readonly string[], options: RunOptions = {}): Promise<ProcessRunResult> {
+    if (options.queue === false) return this.runCommand(args, options);
+
+    const signal = options.signal;
+    if (signal?.aborted) throw cancelledRunError();
+
+    let rejectAbort: (error: unknown) => void = () => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAbort = reject;
+    });
+    const onAbort = () => rejectAbort(cancelledRunError());
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    try {
+      // Abort rejects immediately, but the queued operation still checks the
+      // signal before spawning so a cancelled caller never starts a CLI process.
+      const queued = enqueueCommand(async () => {
+        if (signal?.aborted) throw cancelledRunError();
+        return this.runCommand(args, options);
+      });
+      return await Promise.race([queued, aborted]);
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  private async runCommand(args: readonly string[], options: RunOptions): Promise<ProcessRunResult> {
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
     const windowsHide = options.windowsHide ?? true;

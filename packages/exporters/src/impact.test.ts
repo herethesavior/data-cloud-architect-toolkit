@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { RESOURCE_FAMILIES } from '@dcat/core';
 import { demoInventory } from '@dcat/test-fixtures';
 import {
   analyzeImpact,
@@ -122,5 +123,26 @@ describe('change impact analysis', () => {
     expect(capability).toBeDefined();
     capability!.status = 'unsupported';
     expect(impactSnapshotComplete(incomplete)).toBe(false);
+
+    const inFlight = structuredClone(demoInventory);
+    inFlight.progress = {
+      sessionId: 'session-1',
+      generation: 'generation-1',
+      state: 'running',
+      loaded: 10,
+      total: null,
+      families: RESOURCE_FAMILIES.map((family) => ({
+        family,
+        status: family === 'dlos' ? 'partial' : 'complete',
+        loaded: family === 'dlos' ? 10 : 0,
+        total: null,
+        pagesFetched: 1,
+        hasMore: family === 'dlos',
+        error: null,
+        errorStatus: null,
+      })),
+      message: 'Loading metadata in small batches.',
+    };
+    expect(impactSnapshotComplete(inFlight)).toBe(false);
   });
 });

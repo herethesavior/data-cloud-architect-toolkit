@@ -77,7 +77,7 @@ The mode choice is saved as `dcat.mode` in local browser storage. The local conn
 4. In **Step 2: Connect org**, choose an alias and, optionally, an HTTPS sandbox URL. Salesforce CLI opens your browser for login. DCAT does not collect credentials.
 5. **Step 3: View inventory** starts immediately after the org is connected. A disabled Data 360 feature is shown as **Not enabled**, not as a failed retrieval or an empty dataset.
 
-The pairing code is one-time and short-lived. The Worker checks npm for the latest bridge release, caches that answer for one hour, and shares one registry request across concurrent status checks. When a paired bridge is behind, **Step 1** shows a copyable `npm install -g @dcat-toolkit/bridge@latest` command to run on the bridge machine. This branch prepares bridge `0.1.5`; the hosted wizard always installs whatever version npm currently marks `@latest`.
+The pairing code is one-time and short-lived. The Worker checks npm for the latest bridge release, caches that answer for one hour, and shares one registry request across concurrent status checks. When a paired bridge is behind, **Step 1** shows a copyable `npm install -g @dcat-toolkit/bridge@latest` command to run on the bridge machine. The hosted wizard always installs whatever version npm currently marks `@latest`; a release is published only after a maintainer approves the staged package with 2FA.
 
 ## What DCAT does and does not do
 
@@ -232,16 +232,17 @@ Copy `.env.example` to `.env` only if you need to change a local setting. It hol
 | `npm run test:e2e:local` | Run only the local mocked-connector suite. |
 | `npm run test:e2e:hosted` | Run only the hosted pairing, connect, and inventory suite. |
 
-The bridge source is in `packages/bridge` and is published to npm as `@dcat-toolkit/bridge`. The hosted wizard always installs `@latest`.
+The bridge source is in `packages/bridge` and is published to npm as `@dcat-toolkit/bridge`. The hosted wizard always installs `@latest`. Tag `bridge-vX.Y.Z` after bumping `packages/bridge/package.json` on `main`; `.github/workflows/publish-bridge.yml` verifies the tag, runs the checks, and stages the package with npm trusted publishing. Configure npm's trusted publisher for `herethesavior/data-cloud-architect-toolkit`, workflow `publish-bridge.yml`, environment `npm-bridge`, with **npm stage publish** as the only allowed action. A maintainer then approves the staged version in npm with 2FA. No npm token is stored in GitHub.
 
 ## Salesforce CLI notes
 
-These behaviours were verified against `@salesforce/cli/2.158.7`:
+These behaviours were verified against `@salesforce/cli/2.159.7`:
 
 - `sf org list --json` returns orgs under `other`, `nonScratchOrgs`, `sandboxes`, `devHubs`, and `scratchOrgs`. It can include an access token; the adapter strips it immediately.
 - `sf api request rest` uses a positional endpoint URL with `--method GET --target-org <alias>`.
 - On Windows, DCAT resolves the `sf.cmd` shim to its Node entry point so child processes still use `shell: false` and argument arrays. The resolver uses the platform path separator, so the same tests pass on Linux and macOS.
 - `sf org list` can be slow while the CLI refreshes status. It is bounded at 90 seconds and cached for 60 seconds.
+- Salesforce CLI commands share auth/config state, so discovery reads are serialized in-process (one `sf` child process at a time). Queued calls start their timeout only after dequeue, and aborted queued calls never spawn. Only the browser-login race opts out so its local alias probe can run alongside the interactive login command.
 - Update and beta notices are suppressed. Real Salesforce REST errors on stdout are preserved and shown first. `FUNCTIONALITY_NOT_ENABLED` is reported as **Not enabled**, not as a CLI or update failure.
 
 The Data 360 endpoint allowlist lives in `packages/data360-api`.
@@ -270,7 +271,7 @@ npm run build:bridge
 npm run worker:dry-run         # confirms the DCAT_SESSIONS binding
 ```
 
-Live-site checks covered `/api/health`, `/api/relay/status`, built assets, and the intentional `404` responses from `/api/auth/*`. A live CLI probe returned the exact `FUNCTIONALITY_NOT_ENABLED: This feature is not currently enabled for this user type or org: [CdpDataSpace]` message, confirming honest capability reporting. The published `0.1.4` tarball was inspected previously; this branch prepares `0.1.5`, and its local bundle was verified.
+Live-site checks covered `/api/health`, `/api/relay/status`, built assets, and the intentional `404` responses from `/api/auth/*`. A live CLI probe returned the exact `FUNCTIONALITY_NOT_ENABLED: This feature is not currently enabled for this user type or org: [CdpDataSpace]` message, confirming honest capability reporting. Bridge bundles are verified locally with `npm run build:bridge`; publishing is staged by the tag workflow and completed only after maintainer approval in npm.
 
 ## What changed
 

@@ -6,6 +6,7 @@ import {
   exportInventoryJson,
   exportInventoryMarkdown,
 } from '@dcat/exporters';
+import { isFamilyLoading, shownCountLabel } from '../lib/inventoryDisplay.ts';
 import { buildDictionaryRows, filterByQuery } from '../lib/inventory.ts';
 import { ExportMenu } from '../components/ExportMenu.tsx';
 import type { ExportMenuItem } from '../components/ExportMenu.tsx';
@@ -150,7 +151,15 @@ export function DataDictionary({ context, onNavigate }: { context: WorkspaceCont
                   <ExportMenu items={exportItems} />
                 </>
               }
-              meta={<Badge tone="brand">{rows.length} of {allRows.length} fields</Badge>}
+              meta={<Badge tone="brand">{inventory.progress
+                ? shownCountLabel(
+                  rows.length,
+                  allRows.length,
+                  null,
+                  isFamilyLoading(inventory, 'dlos') || isFamilyLoading(inventory, 'dmos'),
+                  'fields',
+                )
+                : `${rows.length} of ${allRows.length} fields`}</Badge>}
             />
 
             <Panel className="mb-5 flex flex-wrap items-center gap-3 border-warning/20 bg-warning-soft">
@@ -167,7 +176,9 @@ export function DataDictionary({ context, onNavigate }: { context: WorkspaceCont
                 rows={rows}
                 getRowKey={(row) => row.key}
                 ariaLabel="Data dictionary fields"
-                emptyMessage="No fields match the current filters."
+                emptyMessage={isFamilyLoading(inventory, 'dlos') || isFamilyLoading(inventory, 'dmos')
+                  ? 'Fields are still loading; this result is not final yet.'
+                  : 'No fields match the current filters.'}
               />
             </Panel>
           </>

@@ -314,7 +314,17 @@ export function App() {
       refreshContextRef.current = target?.contextId ?? null;
       try {
         if (!target?.alias) throw new Error('Select an org first.');
-        return await api.inventory(target.alias, { force: true, signal: controller.signal });
+        return await api.inventory(target.alias, {
+          force: true,
+          signal: controller.signal,
+          onSnapshot: (snapshot) => {
+            // Stream refresh batches into the same cache so existing rows stay
+            // usable and the shared progress banner can show live counts.
+            if (target.contextId === activeContextIdRef.current) {
+              queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
+            }
+          },
+        });
       } finally {
         if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
       }

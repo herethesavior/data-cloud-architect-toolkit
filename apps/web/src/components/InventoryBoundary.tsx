@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { DiscoveryProgress as DiscoveryProgressData, InventorySnapshot } from '@dcat/core';
+import {
+  isInventoryLoading,
+  loadedCountLabel,
+  loadedDetailLabel,
+  progressTotal,
+  trustedTotal,
+} from '../lib/inventoryDisplay.ts';
 import { formatUpdatedAt, isInventoryStale } from '../lib/inventory.ts';
 import { discoveryStages, humanizeResource, resumableProgressFamilies } from '../lib/resourceStatus.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
@@ -12,15 +19,6 @@ import { Icon } from './Icon.tsx';
 import { NoticeDismissButton } from './NoticeDismissButton.tsx';
 import { DiscoveryProgress, ResourceStatusNotice } from './ResourceStatusPanel.tsx';
 import { NoOrgState } from './NoOrgState.tsx';
-
-function hasUsableTotal(loaded: number, total: number | null, hasMore: boolean): boolean {
-  if (total === null) return false;
-  return hasMore ? total > loaded : total >= loaded;
-}
-
-function countLabel(loaded: number, total: number | null, hasMore = false): string {
-  return hasUsableTotal(loaded, total, hasMore) ? `${loaded}/${total}` : `${loaded} loaded`;
-}
 
 function stalledFamilies(inventory: InventorySnapshot): boolean {
   return resumableProgressFamilies(inventory) > 0;
@@ -37,20 +35,20 @@ function InventoryProgressBanner({
   isResuming: boolean;
 }) {
   const stalled = progress.state === 'failed';
+  const degraded = progress.families.some((family) =>
+    family.status === 'partial' || family.status === 'failed');
+  const spinning = progress.state === 'running' || progress.families.some((family) => family.hasMore);
   const title = stalled
     ? 'Some collections stopped loading'
     : progress.state === 'complete'
-      ? 'Inventory complete'
+      ? degraded ? 'Discovery finished with gaps' : 'Inventory complete'
       : 'Loading inventory in batches';
-  const moreToLoad = progress.families.some((family) => family.hasMore);
-  const detail = hasUsableTotal(progress.loaded, progress.total, moreToLoad)
-    ? `${progress.loaded} of ${progress.total} records loaded`
-    : `${progress.loaded} records loaded so far`;
+  const detail = loadedDetailLabel(progress.loaded, progressTotal(progress), spinning);
 
   if (progress.state === 'complete') {
     return (
       <p data-testid="inventory-progress" role="status" className="mb-4 text-xs text-ink-soft">
-        <span aria-hidden="true">✓ </span>{title} · {detail}
+        <span aria-hidden="true">{degraded ? '! ' : '✓ '}</span>{title} · {detail}
       </p>
     );
   }
@@ -63,9 +61,16 @@ function InventoryProgressBanner({
       className={`mb-4 rounded-lg border px-4 py-3 ${stalled ? 'border-danger/25 bg-danger-soft' : 'border-brand/20 bg-brand-soft'}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium text-ink">{title}</p>
-          <p className="mt-0.5 text-xs text-ink-soft">{detail}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          {spinning ? (
+            <span role="img" aria-label="Inventory still loading" className="shrink-0">
+              <Icon name="refresh" size={16} className="animate-spin text-brand" />
+            </span>
+          ) : null}
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-ink">{title}</p>
+            <p className="mt-0.5 text-xs text-ink-soft">{detail}</p>
+          </div>
         </div>
         {stalled && onResume ? (
           <button
@@ -83,7 +88,7 @@ function InventoryProgressBanner({
           <li key={family.family} data-testid={`inventory-progress-${family.family}`} className="flex items-center justify-between gap-2 rounded-md bg-surface/70 px-2.5 py-1.5">
             <span className="truncate font-medium text-ink">{humanizeResource(family.family)}</span>
             <span className="whitespace-nowrap tabular-nums">
-              {countLabel(family.loaded, family.total, family.hasMore)}
+              {loadedCountLabel(family.loaded, trustedTotal(family))}
               {family.hasMore ? ' · more' : ''}
               {family.status === 'failed' ? ' · stopped' : ''}
             </span>
@@ -155,11 +160,11 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   // explorer would spin forever when live mode has no authenticated org.
   if (!context) return <NoOrgState />;
   if (query.isPending && !query.data) return <DiscoveryProgress stages={discoveryStages(null, true)} />;
-  // A manual refresh deliberately replaces the view with its cancellable
-  // skeleton. Automatic continuation keeps partial rows visible; it only needs
-  // a skeleton when there is no snapshot to render yet.
+  // Once any snapshot exists, keep it visible. Automatic loads, resume, and
+  // manual refresh all stream partial snapshots into the same query cache;
+  // only a first-ever load needs a full-page skeleton.
   const manualRefresh = Boolean(actions?.isRefreshingInventory);
-  if (manualRefresh || (query.isFetching && !query.data)) {
+  if (query.isFetching && !query.data) {
     // Only a manual refresh can be cancelled. An invalidation-triggered query
     // refetch is owned by React Query, so offering Cancel there would spin
     // forever after the click without actually stopping the request.
@@ -191,9 +196,16 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   const absolute = Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : 'time unavailable';
   const live = context.mode === 'live';
   const stale = live && isInventoryStale(inventory.generatedAt);
+  const working = isInventoryLoading(inventory)
+    || Boolean(actions?.isRefreshingInventory || actions?.isResumingDiscovery);
 
   const freshness = (
     <span data-testid="inventory-freshness" className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-surface-alt px-2 text-xs text-ink-soft">
+      {working ? (
+        <span role="img" aria-label="Inventory loading" className="shrink-0">
+          <Icon name="refresh" size={13} className="animate-spin text-brand" />
+        </span>
+      ) : null}
       <Icon name="clock" size={13} className="text-ink-faint" />
       <span title={`Updated ${absolute}`} className="whitespace-nowrap">
         Updated {formatUpdatedAt(inventory.generatedAt)}

@@ -6,6 +6,7 @@ import {
   exportInventoryJson,
   exportInventoryMarkdown,
 } from '@dcat/exporters';
+import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.ts';
 import { filterByQuery, safeDateText } from '../lib/inventory.ts';
 import { objectLinks, objectMarkdown } from '../lib/objectDetail.ts';
 import type { ExplorerObject, FocusObject } from '../lib/objectDetail.ts';
@@ -415,7 +416,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                   <ExportMenu items={exportItems} />
                 </>
               }
-              meta={<Badge tone="brand">{filtered.length} of {objects.length} objects</Badge>}
+              meta={<Badge tone="brand">{shownFamilyCountLabel(inventory, isDlo ? 'dlos' : 'dmos', filtered.length, objects.length, 'objects')}</Badge>}
             />
             {message ? <p className="mb-4 text-xs text-ink-soft" role="status">{message}</p> : null}
 
@@ -435,11 +436,15 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                     : capability?.status === 'unsupported' ? `${isDlo ? 'DLOs' : 'DMOs'} are unavailable`
                       : capability?.status === 'error' ? `Could not load ${isDlo ? 'DLOs' : 'DMOs'}`
                         : capability?.status === 'partial' ? `Some ${isDlo ? 'DLOs' : 'DMOs'} may be missing`
-                          : 'No objects found'
+                          : isFamilyLoading(inventory, isDlo ? 'dlos' : 'dmos')
+                            ? `${isDlo ? 'DLOs' : 'DMOs'} are still loading`
+                            : 'No objects found'
                 }
-                description={capability && capability.status !== 'available' && capability.status !== 'not-started'
-                  ? resourceStatusMessage(capability)
-                  : 'Try a different search term or clear the data space filter.'}
+                description={isFamilyLoading(inventory, isDlo ? 'dlos' : 'dmos')
+                  ? 'Batches are still arriving; this result is not final yet.'
+                  : capability && capability.status !== 'available' && capability.status !== 'not-started'
+                    ? resourceStatusMessage(capability)
+                    : 'Try a different search term or clear the data space filter.'}
               />
             ) : (
               <>

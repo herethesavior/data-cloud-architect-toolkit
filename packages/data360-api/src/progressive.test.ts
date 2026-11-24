@@ -19,6 +19,7 @@ import {
   buildConnectorCatalogPath,
   buildConnectorConnectionsPath,
   buildDmoRelationshipsPath,
+  buildExpectedCountPath,
   buildMappingPath,
 } from './endpoints.ts';
 import {
@@ -80,6 +81,16 @@ function fakeCli(
 ): FakeCli {
   const calls: string[] = [];
   const attempts = new Map<string, number>();
+  const countFixtures = {
+    'data-spaces': dataSpacesJson,
+    dlos: pagedDlos()[dloPath]!,
+    'data-streams': dataStreamsJson,
+    'data-transforms': dataTransformsJson,
+  } as const;
+  const countPaths = Object.fromEntries(Object.entries(countFixtures).map(([family, response]) => [
+    buildExpectedCountPath(family as keyof typeof countFixtures, '65.0')!,
+    response,
+  ]));
   const paths: Record<string, string> = {
     'services/data/': versionsJson,
     [`${base}/data-spaces`]: dataSpacesJson,
@@ -90,6 +101,7 @@ function fakeCli(
     [buildConnectorCatalogPath('65.0')]: connectorCatalogJson,
     [buildConnectorConnectionsPath('65.0', 'SalesforceDotCom')]: connectorConnectionsJson,
     [`${base}/data-transforms`]: dataTransformsJson,
+    ...countPaths,
     ...Object.fromEntries(dmoNames.map((name) => [
       buildMappingPath(name, '65.0', dmoSpaces[name]), mappingsJson,
     ])),
@@ -137,7 +149,7 @@ describe('progressive discovery', () => {
       hasMore: true,
       status: 'partial',
     });
-    expect(cli.calls.filter((path) => path.startsWith(dloPath))).toHaveLength(1);
+    expect(cli.calls.filter((path) => path === dloPath || path.startsWith(`${dloPath}?pageToken`))).toHaveLength(1);
 
     await drain(state);
     const complete = progressiveSnapshot(state);
@@ -150,7 +162,67 @@ describe('progressive discovery', () => {
       status: 'available',
       itemCount: 200,
     });
-    expect(cli.calls.filter((path) => path.startsWith(dloPath))).toHaveLength(20);
+    expect(cli.calls.filter((path) => path === dloPath || path.startsWith(`${dloPath}?pageToken`))).toHaveLength(20);
+  });
+
+  it('reads final expected counts from first-page response envelopes without delaying rows', async () => {
+    const cli = fakeCli();
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const progress = progressiveSnapshot(state).progress!;
+    const familyProgress = (family: string) => progress.families.find((entry) => entry.family === family)!;
+
+    expect(familyProgress('dlos')).toMatchObject({ expectedTotal: 200, expectedTotalSource: 'response' });
+    expect(familyProgress('data-spaces')).toMatchObject({ expectedTotal: 2, expectedTotalSource: 'response' });
+    expect(familyProgress('data-streams')).toMatchObject({ expectedTotal: 1, expectedTotalSource: 'response' });
+    expect(familyProgress('data-transforms')).toMatchObject({ expectedTotal: 1, expectedTotalSource: 'response' });
+    expect(familyProgress('dmos').expectedTotal).toBeNull();
+    expect(familyProgress('mappings').expectedTotal).toBeNull();
+    expect(cli.calls).not.toContain(`${dloPath}?limit=1`);
+  });
+
+  it('retries a reported count gap, then ends with a visible gap instead of looping forever', async () => {
+    const records = Array.from({ length: 8 }, (_, index) => ({
+      apiName: `Short_DLO_${String(index + 1).padStart(3, '0')}__dll`,
+      fields: [],
+    }));
+    const cli = fakeCli({
+      [dloPath]: JSON.stringify({ records, totalSize: 200 }),
+    });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+    const dlos = snapshot.progress!.families.find((family) => family.family === 'dlos')!;
+
+    expect(snapshot.dlos).toHaveLength(8);
+    expect(dlos).toMatchObject({ expectedTotal: 200, status: 'partial', hasMore: false });
+    expect(snapshot.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: 'dlos', code: 'EXPECTED_COUNT_MISMATCH' }),
+    ]));
+    expect(snapshot.progress!.state).toBe('complete');
+    expect(cli.calls.filter((path) => path === dloPath).length).toBeLessThanOrEqual(3);
+  });
+
+  it('uses cursor completion when no trustworthy count is available', async () => {
+    const countPath = buildExpectedCountPath('dlos', '65.0')!;
+    const records = Array.from({ length: 8 }, (_, index) => ({
+      apiName: `Unknown_Total_DLO_${String(index + 1).padStart(3, '0')}__dll`,
+      fields: [],
+    }));
+    const cli = fakeCli({
+      [dloPath]: JSON.stringify({ records, pagination: { pageToken: '2' } }),
+      [`${dloPath}?pageToken=2`]: JSON.stringify({ records: [] }),
+    }, {}, { [countPath]: 'ERROR running api request rest: 403 Forbidden' });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+    const dlos = snapshot.progress!.families.find((family) => family.family === 'dlos')!;
+
+    expect(dlos.expectedTotal).toBeNull();
+    expect(dlos.status).toBe('complete');
+    expect(snapshot.progress!.state).toBe('complete');
+    expect(snapshot.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ family: 'dlos', code: 'COUNT_PROBE_FAILED' }),
+    ]));
   });
 
   it('does not expose a page-local total as complete while another page remains', async () => {
@@ -165,6 +237,10 @@ describe('progressive discovery', () => {
 
     expect(progressiveSnapshot(state).progress?.families.find((family) => family.family === 'dlos'))
       .toMatchObject({ status: 'partial', loaded: 8, total: null, hasMore: true });
+
+    await advanceProgressiveDiscovery(state);
+    expect(progressiveSnapshot(state).progress?.families.find((family) => family.family === 'dlos'))
+      .toMatchObject({ status: 'partial', expectedTotal: 200, hasMore: true });
   });
 
   it('keeps earlier pages when a late page fails and resumes from the checkpoint', async () => {
