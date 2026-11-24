@@ -64,6 +64,12 @@ jobs:
 
       - name: Stage package for maintainer approval
         working-directory: packages/bridge
+        env:
+          NPM_CONFIG_LOGLEVEL: silly
         run: |
           unset NODE_AUTH_TOKEN || true
+          echo "GITHUB_ACTIONS=${GITHUB_ACTIONS:-unset}"
+          echo "OIDC_URL=${ACTIONS_ID_TOKEN_REQUEST_URL:+set}"
+          echo "OIDC_TOKEN=${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+set}"
+          echo "NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-unset}"
           npm stage publish --tag latest
