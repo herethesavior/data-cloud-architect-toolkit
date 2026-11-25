@@ -474,25 +474,31 @@ export const api = {
   },
   inventory: async (alias: string, options: InventoryRequestOptions = {}): Promise<InventorySnapshot> => {
     const hostedLive = isHosted() && !await hostedUsesFixtures();
-    try {
-      return await progressiveInventory(alias, options, hostedLive);
-    } catch (error) {
-      // An expired session is normal after a long-lived tab. Start a fresh one
-      // instead of silently dropping to an all-at-once legacy discovery.
-      if (error instanceof ApiError && error.code === 'SESSION_EXPIRED' && options.sessionId) {
-        return progressiveInventory(alias, { ...options, sessionId: undefined }, hostedLive);
+    // Two bounded recoveries: drop a stale session id, then force a brand new
+    // session. A connector that keeps reporting expiry must surface the error
+    // rather than sending the caller into an endless retry loop.
+    const run = async (attempt: number, requestOptions: InventoryRequestOptions): Promise<InventorySnapshot> => {
+      try {
+        return await progressiveInventory(alias, requestOptions, hostedLive);
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'SESSION_EXPIRED' && attempt < 2) {
+          const recovered: InventoryRequestOptions = {
+            ...requestOptions,
+            sessionId: undefined,
+            force: attempt > 0 ? true : requestOptions.force,
+          };
+          return run(attempt + 1, recovered);
+        }
+        // An older local bridge or connector may not expose the progressive
+        // operations yet. Preserve the previous all-at-once behavior only for
+        // that explicit capability gap, never for a transport failure.
+        if (!isUnsupportedProgressiveError(error, hostedLive)) throw error;
+        const snapshot = snapshotWithOrg(await legacyInventory(alias, requestOptions, hostedLive));
+        requestOptions.onSnapshot?.(snapshot);
+        return snapshot;
       }
-      if (error instanceof ApiError && error.code === 'SESSION_EXPIRED' && !options.sessionId) {
-        return progressiveInventory(alias, { ...options, sessionId: undefined, force: true }, hostedLive);
-      }
-      // An older local bridge or connector may not expose the progressive
-      // operations yet. Preserve the previous all-at-once behavior only for that
-      // explicit capability gap, never for a failed request or relay mismatch.
-      if (!isUnsupportedProgressiveError(error, hostedLive)) throw error;
-      const snapshot = snapshotWithOrg(await legacyInventory(alias, options, hostedLive));
-      options.onSnapshot?.(snapshot);
-      return snapshot;
-    }
+    };
+    return run(0, options);
   },
   transformBundle: async (alias: string, id: string, options: { signal?: AbortSignal } = {}): Promise<TransformBundle> => {
     if (isHosted() && !await hostedUsesFixtures()) {

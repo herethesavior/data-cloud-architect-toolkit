@@ -412,6 +412,22 @@ describe('web API session handling', () => {
     expect(starts).toBe(2);
   });
 
+  it('stops retrying when a connector keeps reporting an expired session', async () => {
+    let starts = 0;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/orgs/prod-org/inventory/session') {
+        starts += 1;
+        return jsonResponse({ error: { code: 'SESSION_EXPIRED', message: 'Session expired.' } }, 502);
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.inventory('prod-org')).rejects.toMatchObject({ code: 'SESSION_EXPIRED' });
+    expect(starts).toBe(3);
+  });
+
   it('falls back for an explicitly unsupported local inventory operation', async () => {
     const fetchMock = vi.fn(async (path: string) => {
       if (path === '/api/session') return jsonResponse(session);
