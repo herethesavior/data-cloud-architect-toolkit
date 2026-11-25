@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppState } from '../state.ts';
+import { refreshCliStatus } from '../state.ts';
 import { clearDiscoverySessions } from '../discovery-sessions.ts';
 import { requireSessionToken } from '../security.ts';
 
@@ -18,6 +19,7 @@ export function registerSessionRoutes(app: FastifyInstance, state: AppState): vo
     state.mode = parsed.data.mode;
     state.orgsCache = null;
     state.inventoryCache = null;
+    if (state.mode === 'live') void refreshCliStatus(state);
     return { mode: state.mode };
   });
 }

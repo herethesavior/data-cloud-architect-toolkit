@@ -23,7 +23,8 @@ const localHeaders = { host: 'localhost:3847' };
 
 async function demoApp() {
   const config = { ...loadConfig({}, []), mode: 'demo' as const, sessionToken: 'phase1-test-token' };
-  return buildApp({ config });
+  // Starting in demo must not call it, but switching to live refreshes status.
+  return buildApp({ config, runner: liveCliRunner() });
 }
 
 /** Fake CLI that answers version, org-list, and every Data 360 REST path. */
@@ -78,6 +79,18 @@ describe('local connector API', () => {
     const response = await app.inject({ method: 'GET', url: '/api/health', headers: localHeaders });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ status: 'ok', mode: 'demo' });
+    await app.close();
+  });
+
+  it('does not probe the CLI when starting in demo mode', async () => {
+    const config = { ...loadConfig({}, []), mode: 'demo' as const, sessionToken: 'phase1-test-token' };
+    const run = vi.fn(async () => ({ stdout: cliVersionOutput, stderr: '', exitCode: 0 }));
+    const app = await buildApp({ config, runner: { run } });
+
+    const response = await app.inject({ method: 'GET', url: '/api/health', headers: localHeaders });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ mode: 'demo' });
+    expect(run).not.toHaveBeenCalled();
     await app.close();
   });
 

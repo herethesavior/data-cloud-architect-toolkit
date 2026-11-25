@@ -22,7 +22,9 @@ export async function buildApp({ config, runner }: BuildAppOptions): Promise<Fas
   registerSecurity(app, config);
 
   const state = createAppState(config, runner);
-  await refreshCliStatus(state);
+  // Demo mode never invokes the CLI. Probing it here can block startup for the
+  // full 15s version-check timeout, so only live mode pays that cost.
+  if (config.mode === 'live') await refreshCliStatus(state);
 
   registerHealthRoutes(app, state);
   registerSessionRoutes(app, state);
