@@ -76,7 +76,9 @@ function setupLabel(status: BridgeStatus | undefined, hosted: boolean, installed
   if (installed === false || status.cli.installed === false) return 'SF CLI missing';
   if (!hosted) return 'SF CLI ready';
   if (!status.paired) return 'Bridge not paired';
+  if (status.relay === 'unavailable') return 'Status unavailable';
   if (status.relay === 'stale') return 'Bridge offline';
+  if (status.relay === 'working') return 'Bridge working';
   if (status.relay === 'waiting') return 'Waiting for bridge';
   return 'Bridge connected';
 }
@@ -112,8 +114,9 @@ export function OrgConnections({
     queryFn: api.bridgeStatus,
     refetchInterval: (query) => {
       const status = query.state.data;
-      if (!status || (status.paired && status.relay === 'connected' && status.cli.installed)) return 60_000;
-      return 5_000;
+      if (status?.paired && status.relay === 'connected' && status.cli.installed) return 60_000;
+      if (status?.paired && status.relay === 'working') return 5_000;
+      return 10_000;
     },
   });
   // The App root also observes the mode-scoped org list. In hosted live mode,
@@ -203,7 +206,7 @@ export function OrgConnections({
   const status = bridgeStatusQuery.data;
   const cliInstalled = status?.cli.installed ?? null;
   const bridgeReady = hosted
-    ? Boolean(status?.paired && status.relay === 'connected' && status.cli.installed)
+    ? Boolean(status?.paired && (status.relay === 'connected' || status.relay === 'working') && status.cli.installed)
     : Boolean(status?.cli.installed);
   const setupState = setupLabel(status, hosted, cliInstalled);
   // The session mode is authoritative; a cached bridge payload can briefly
@@ -446,19 +449,41 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {!demo && status && hosted && status.paired && status.relay !== 'connected' ? (
+          {!demo && status && hosted && status.paired && status.relay === 'working' ? (
+            <div className="rounded-lg border border-brand/20 bg-brand-soft px-4 py-3 text-sm text-brand" role="status">
+              <p className="font-medium">The bridge is running a long operation.</p>
+              <p>It will check in again as soon as the operation finishes. Keep the bridge running.</p>
+            </div>
+          ) : null}
+
+          {!demo && status && hosted && status.paired && status.relay === 'unavailable' ? (
+            <div className="rounded-lg border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning" role="alert">
+              <p className="font-medium">Bridge status is temporarily unavailable.</p>
+              <p>Refresh status to try again. The pairing is still valid unless the site reports it as reset.</p>
+            </div>
+          ) : null}
+
+          {!demo && status && hosted && status.paired && (status.relay === 'waiting' || status.relay === 'stale') ? (
             <div className="space-y-2 rounded-lg border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning">
               <p className="font-medium">
                 {status.relay === 'stale' ? 'The bridge stopped responding.' : 'Bridge paired. Waiting for its first check-in.'}
               </p>
-              <p>Keep the installer running with <code className="mono">npx -y @dcat-toolkit/bridge@latest start</code>, or create a fresh pairing code.</p>
-              <Button
-                variant="secondary"
-                onClick={() => createPairing.mutate()}
-                disabled={createPairing.isPending}
-              >
-                {createPairing.isPending ? 'Creating code...' : 'Create new pairing code'}
-              </Button>
+              <p>
+                {status.relay === 'stale'
+                  ? 'Check its network connection or sleep state, then restart it with '
+                  : 'Keep the installer running with '}
+                <code className="mono">npx -y @dcat-toolkit/bridge@latest start</code>.
+                {status.canRepairPairing ? ' If it does not reconnect, create a fresh pairing code.' : ''}
+              </p>
+              {status.canRepairPairing ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => createPairing.mutate()}
+                  disabled={createPairing.isPending}
+                >
+                  {createPairing.isPending ? 'Creating code...' : 'Create new pairing code'}
+                </Button>
+              ) : null}
             </div>
           ) : null}
 

@@ -209,13 +209,28 @@ async function hostedUsesFixtures(): Promise<boolean> {
 /** Send one typed operation to the paired local bridge and wait for its result. */
 async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Promise<T> {
   if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
+  const session = await getSession();
 
-  // A cancelled browser fetch does not cancel the bridge task. The caller is
-  // released immediately, but the queued execution keeps draining the request
-  // so the next operation cannot hit BRIDGE_BUSY while the old one is active.
+  // Abort releases the UI, then best-effort cancels the queued relay request so
+  // a reload cannot hit BRIDGE_BUSY behind an abandoned operation.
+  let activeRequestId: string | null = null;
+  let cancelSent = false;
+  const cancelRelayRequest = (id: string) => {
+    if (cancelSent) return;
+    cancelSent = true;
+    void request('/api/relay/cancel', {
+      method: 'POST',
+      token: session.token,
+      body: { requestId: id },
+      timeoutMs: SESSION_TIMEOUT_MS,
+    }).catch(() => undefined);
+  };
   let onAbort: (() => void) | undefined;
   const cancellation = new Promise<never>((_resolve, reject) => {
-    onAbort = () => reject(new ApiError('ABORTED', 'Request cancelled.'));
+    onAbort = () => {
+      if (activeRequestId) cancelRelayRequest(activeRequestId);
+      reject(new ApiError('ABORTED', 'Request cancelled.'));
+    };
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 
@@ -224,12 +239,12 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
     if (isHosted() && await hostedUsesFixtures() && operation.operation !== 'cli.status') {
       throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode to use the local bridge.');
     }
-    const session = await getSession();
     const deadline = Date.now() + OPERATION_TIMEOUT_MS[operation.operation];
     const createRequest = () => request<{ id: string }>('/api/relay/requests', {
       method: 'POST',
       token: session.token,
       body: operation,
+      signal,
       timeoutMs: RELAY_POLL_TIMEOUT_MS,
     });
 
@@ -242,28 +257,39 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       if (!(error instanceof ApiError && error.code === 'TIMEOUT') || Date.now() >= deadline) throw error;
       created = await createRequest();
     }
+    activeRequestId = created.id;
+    if (signal?.aborted) {
+      cancelRelayRequest(created.id);
+      throw new ApiError('ABORTED', 'Request cancelled.');
+    }
 
     while (Date.now() < deadline) {
+      if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
       let state: RelayRequestState;
       try {
-        state = await request<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}`, {
+        // The Durable Object holds this read until the request settles, so
+        // progressive discovery costs one session read per status poll.
+        state = await request<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}?wait=1`, {
           token: session.token,
+          signal,
           timeoutMs: RELAY_POLL_TIMEOUT_MS,
         });
       } catch (error) {
+        if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
         // A slow status poll is recoverable until the operation deadline. Keep
         // polling so a bridge that answers late still completes the user action.
         if (error instanceof ApiError && error.code === 'TIMEOUT' && Date.now() < deadline) {
-          await wait(Math.min(1_200, Math.max(0, deadline - Date.now())));
+          await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
           continue;
         }
         throw error;
       }
+      if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
       if (state.status === 'completed') return state.result as T;
       if (state.status === 'failed' || state.status === 'expired') {
         throw new ApiError(state.error?.code ?? 'RELAY_FAILED', state.error?.message ?? 'The local bridge request failed.');
       }
-      await wait(Math.min(1_200, Math.max(0, deadline - Date.now())));
+      await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
     }
 
     throw new ApiError('RELAY_TIMEOUT', 'The local bridge did not answer in time. Check that it is still running.');
@@ -275,6 +301,7 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
     return await Promise.race([result, cancellation]);
   } finally {
     if (onAbort) signal?.removeEventListener('abort', onAbort);
+    activeRequestId = null;
   }
 }
 
@@ -392,6 +419,8 @@ async function bridgeStatus(): Promise<BridgeStatus> {
     cli: health.cli,
     lastSeenAt: health.time,
     relay: 'connected',
+    working: false,
+    canRepairPairing: false,
     pairing: null,
     agentVersion: null,
     latestVersion: null,

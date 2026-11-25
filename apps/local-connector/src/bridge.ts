@@ -19,6 +19,17 @@ export class RelayAuthError extends Error {
   }
 }
 
+/** A rejected result cannot succeed on retry; the bridge must not spin on it. */
+export class RelayTerminalError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'RelayTerminalError';
+    this.code = code;
+  }
+}
+
 export class FetchRelayHttp implements RelayHttp {
   constructor(
     private readonly baseUrl: string,
@@ -41,6 +52,10 @@ export class FetchRelayHttp implements RelayHttp {
       const message = error?.error?.message ?? `Relay request failed with status ${response.status}.`;
       if (response.status === 401 || error?.error?.code === 'INVALID_AGENT_TOKEN') {
         throw new RelayAuthError(message);
+      }
+      const code = error?.error?.code;
+      if (response.status === 413 || code === 'RESPONSE_TOO_LARGE') {
+        throw new RelayTerminalError(code ?? 'RESPONSE_TOO_LARGE', message);
       }
       throw new CliError('COMMAND_FAILED', message);
     }
@@ -179,6 +194,19 @@ function isRestarting(result: unknown): boolean {
   return typeof result === 'object' && result !== null && 'restarting' in result && result.restarting === true;
 }
 
+async function taskCancelled(http: RelayHttp, token: string, taskId: string): Promise<boolean> {
+  try {
+    const state = await http.post<{ cancelled?: boolean }>('/api/relay/cancelled', {
+      agentToken: token,
+      requestId: taskId,
+    });
+    return state.cancelled === true;
+  } catch {
+    // A status check must never block an otherwise valid task.
+    return false;
+  }
+}
+
 /** Long-lived outbound agent. It never opens a listener or accepts inbound connections. */
 export async function runBridge(options: BridgeOptions): Promise<void> {
   const logger = options.logger ?? (() => {});
@@ -199,6 +227,7 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
     logger('DCAT bridge paired with the site.');
   }
 
+  // Idle polls are held open by the relay. This delay only backs off failures.
   const interval = options.pollIntervalMs ?? 2000;
   logger('DCAT bridge is running. Press Ctrl+C to stop.');
 
@@ -208,12 +237,19 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
         agentToken: token,
         version: state.config.version,
         cli: state.cliStatus,
+        // The relay holds this request until work arrives, so a queued browser
+        // action reaches the bridge without a two-second polling delay.
+        wait: true,
       }, options.signal);
       if (poll.status === 'unpaired') {
         throw new RelayAuthError('The site reset this bridge pairing. Run setup again.');
       }
 
       for (const task of poll.tasks) {
+        if (await taskCancelled(http, token, task.id)) {
+          logger(`Bridge skipped cancelled request ${task.id}.`);
+          continue;
+        }
         let response: RelayResponse;
         try {
           const result = await executeRelayOperation(state, task.operation, options.onUpdate);
@@ -221,7 +257,17 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
         } catch (error) {
           response = errorResponse(task.id, error);
         }
-        await http.post('/api/relay/respond', { agentToken: token, response }, options.signal);
+        try {
+          await http.post('/api/relay/respond', { agentToken: token, response }, options.signal);
+        } catch (error) {
+          if (error instanceof RelayTerminalError) {
+            // The Worker has stored a terminal failure for the browser; the
+            // bridge itself is still healthy and must keep serving new tasks.
+            logger(`Bridge result rejected: ${safeErrorMessage(error)} This request cannot be retried.`);
+            continue;
+          }
+          throw error;
+        }
         if (response.ok && isRestarting(response.result)) {
           logger('Bridge updated. Restarting with the latest version…');
           return;

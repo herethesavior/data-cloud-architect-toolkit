@@ -100,7 +100,7 @@ The same three use cases are told as a story on **About DCAT**, including a pres
 ## Safety boundaries
 
 - Salesforce CLI owns authentication. DCAT never asks for or stores usernames, passwords, tokens, SFDX auth URLs, or client secrets. The browser's inventory cache holds metadata snapshots only.
-- The browser never runs `sf`. Hosted mode uses an outbound bridge that polls the Worker; it needs no open inbound port or tunnel.
+- The browser never runs `sf`. Hosted mode uses an outbound bridge that long-polls the Worker; it needs no open inbound port or tunnel.
 - The relay accepts only nine typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `inventory.start`, `inventory.status`, `transform.get`, `mode.set`, and `bridge.update`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
 - Process output is redacted before it is returned to the browser. Bridge storage contains only the relay URL, agent token, and version, written with mode `600`; it never reads the CLI credential store.
 - The local connector binds only to `127.0.0.1` and validates Host and Origin headers.
@@ -123,11 +123,11 @@ flowchart LR
     W -->|result| B
 ```
 
-The public site is a static React SPA. A Cloudflare Worker at the same origin owns the browser session, CSRF token, mode, health, demo fixtures, and relay. The browser talks only to that Worker.
+The public site is a static React SPA. A Cloudflare Worker at the same origin owns the browser session, CSRF token, mode, health, demo fixtures, and relay entry points. Hot relay state lives in one SQLite-backed Durable Object per paired bridge. The browser talks only to that Worker.
 
 ## Hosted deployment
 
-`npm run build:pages` builds the hosted SPA and writes `apps/web/dist/_worker.js`. Cloudflare Pages advanced mode serves that Worker automatically. Workers Builds uses the root `wrangler.jsonc` and `npx wrangler deploy`.
+Workers Builds deploys the root `wrangler.jsonc` with `npx wrangler deploy`. The `build:pages` command still emits `apps/web/dist/_worker.js` for static previews, but the hosted live bridge requires the Worker entry in `apps/hosted-worker/src/worker-entry.ts` because it exports the Durable Object class.
 
 | Setting | Value |
 | --- | --- |
@@ -136,19 +136,20 @@ The public site is a static React SPA. A Cloudflare Worker at the same origin ow
 | Worker deploy command | `npx wrangler deploy` (Workers Builds only) |
 | Node version | 22.12.0 or newer |
 | KV binding | `DCAT_SESSIONS` exactly |
+| Durable Object binding | `RELAY_DO` → `RelaySessionDO` (SQLite storage) |
 
 | KV namespace | ID |
 | --- | --- |
 | Production | `fd2bbc29b1b2427f87ccf9f8e34e6705` |
 | Preview | `0155c4acd0054d5bb60519428b14c5ee` |
 
-After deployment, check that `/api/health` returns JSON and `/api/auth/*` returns `404`.
+After deployment, check that `/api/health` returns JSON without touching KV and `/api/auth/*` returns `404`.
 
-For a local Pages rehearsal, run `npm run pages:dev` and open **http://127.0.0.1:8788**. For the full dashboard walkthrough, see [docs/CLOUDFLARE_PAGES_SETUP.md](docs/CLOUDFLARE_PAGES_SETUP.md). For the short user guide, see [docs/HOSTED_ONBOARDING.md](docs/HOSTED_ONBOARDING.md).
+For a local hosted rehearsal, run `npm run pages:dev` and open **http://127.0.0.1:8788**. This now starts the asset-aware Worker with a local Durable Object. For the full dashboard walkthrough, see [docs/CLOUDFLARE_PAGES_SETUP.md](docs/CLOUDFLARE_PAGES_SETUP.md). For the short user guide, see [docs/HOSTED_ONBOARDING.md](docs/HOSTED_ONBOARDING.md).
 
 There are no Worker secrets to set. `apps/hosted-worker/.dev.vars.example` only documents the optional `SESSION_TTL_SECONDS`; never commit a local `.dev.vars`. The standalone Worker commands are still available: `npm run worker:dev`, `npm run worker:dry-run`, and `npm run worker:deploy`.
 
-Worker KV writes are kept small and expire because free-tier KV has write limits. Pairing codes are one-time and short-lived; unpairing invalidates the agent token.
+KV is only an identity/config plane: `session:<id>` and one-time `pairing:<code>` keys. Bridge heartbeats, task claims, and the latest result live in the Durable Object. This matters because the Free KV plan allows **100,000 reads, 1,000 writes, 1,000 deletes, and 1,000 list requests per day** with **1 GB** of storage; the old two-second poll would exceed the read cap with a single always-on bridge. Results are capped at 5 MiB before storage, and unpairing invalidates the agent token in both the session and the Durable Object.
 
 ## Using the workbench
 
@@ -218,7 +219,7 @@ Copy `.env.example` to `.env` only if you need to change a local setting. It hol
 | `npm run build` | Type-check, build the local UI, and emit the Pages Worker via `postbuild`. |
 | `npm run build:hosted` | Type-check and build hosted assets only. |
 | `npm run build:pages` | Build hosted assets and the Pages Worker bundle. |
-| `npm run pages:dev` | Build and serve the Pages output locally with a KV binding. |
+| `npm run pages:dev` | Build and serve the hosted Worker locally with KV and Durable Object bindings. |
 | `npm run build:bridge` | Bundle `@dcat-toolkit/bridge`. |
 | `npm run pack:bridge` | Build and pack the bridge npm tarball. |
 | `npm start` | Serve the built UI and API from the connector. |

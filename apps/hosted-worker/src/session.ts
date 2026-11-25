@@ -21,16 +21,47 @@ export async function loadSession(env: Env, id: string): Promise<SessionRecord |
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as SessionRecord;
-    return parsed && typeof parsed.id === 'string' && typeof parsed.csrf === 'string' && parsed.relay ? parsed : null;
+    if (!parsed || typeof parsed.id !== 'string' || typeof parsed.csrf !== 'string' || !parsed.relay) return null;
+    if (typeof parsed.expiresAt === 'number' && Date.now() >= parsed.expiresAt) return null;
+    return parsed;
   } catch {
     return null;
   }
 }
 
-export async function saveSession(env: Env, session: SessionRecord): Promise<void> {
-  await env.DCAT_SESSIONS.put(sessionKey(session.id), JSON.stringify(session), {
-    expirationTtl: sessionTtl(env),
+export function setSessionCookie(context: Context, env: Env, id: string, maxAge = sessionTtl(env)): void {
+  setCookie(context, COOKIE_NAME, id, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    path: '/',
+    maxAge,
   });
+}
+
+/** Remaining life of the session, shared by KV, the cookie, and the Durable Object. */
+function remainingTtl(env: Env, session: SessionRecord): number {
+  const ttl = sessionTtl(env);
+  session.expiresAt ??= Date.now() + ttl * 1000;
+  return Math.max(1, Math.ceil((session.expiresAt - Date.now()) / 1000));
+}
+
+export async function persistSession(env: Env, session: SessionRecord): Promise<number> {
+  const ttl = remainingTtl(env, session);
+  await env.DCAT_SESSIONS.put(sessionKey(session.id), JSON.stringify(session), {
+    expirationTtl: ttl,
+  });
+  return ttl;
+}
+
+/**
+ * Session state uses one absolute deadline. Sliding only KV or only the cookie
+ * leaves a bridge paired to a session the browser can no longer present, and
+ * sliding both would leave the Durable Object's revoked-token deadline behind.
+ */
+export async function saveSession(context: Context, env: Env, session: SessionRecord): Promise<void> {
+  const ttl = await persistSession(env, session);
+  setSessionCookie(context, env, session.id, ttl);
 }
 
 export function createSession(mode: ConnectorMode = 'live'): SessionRecord {
@@ -43,6 +74,7 @@ export function createSession(mode: ConnectorMode = 'live'): SessionRecord {
       agentToken: null,
       pairedAt: null,
       lastSeenAt: null,
+      working: false,
       agentVersion: null,
       cli: { installed: false, version: null, error: null },
       pairingCode: null,
@@ -50,16 +82,6 @@ export function createSession(mode: ConnectorMode = 'live'): SessionRecord {
       request: null,
     },
   };
-}
-
-export function setSessionCookie(context: Context, env: Env, id: string): void {
-  setCookie(context, COOKIE_NAME, id, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'Lax',
-    path: '/',
-    maxAge: sessionTtl(env),
-  });
 }
 
 /** Reuse the browser's session when present; create and set one on the first visit. */
@@ -70,8 +92,7 @@ export async function resolveSession(context: Context, env: Env): Promise<Sessio
     if (existing) return existing;
   }
   const session = createSession();
-  await saveSession(env, session);
-  setSessionCookie(context, env, session.id);
+  await saveSession(context, env, session);
   return session;
 }
 

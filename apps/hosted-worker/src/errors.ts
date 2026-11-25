@@ -27,7 +27,8 @@ function statusForCode(code: string | undefined): RouteStatus {
   if (code === 'INVALID_ARGUMENT' || code === 'INVALID_PAIRING_CODE') return 400;
   if (code === 'AUTH_REQUIRED' || code === 'INVALID_SESSION_TOKEN' || code === 'INVALID_AGENT_TOKEN') return 401;
   if (code === 'ORG_NOT_FOUND' || code === 'TRANSFORM_NOT_FOUND' || code === 'NOT_FOUND') return 404;
-  if (code === 'BRIDGE_NOT_CONNECTED' || code === 'BRIDGE_BUSY' || code === 'BRIDGE_ALREADY_PAIRED') return 409;
+  if (code === 'BRIDGE_NOT_CONNECTED' || code === 'BRIDGE_BUSY' || code === 'BRIDGE_ALREADY_PAIRED'
+    || code === 'BRIDGE_PAIRING_RESET') return 409;
   return 502;
 }
 

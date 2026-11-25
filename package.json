@@ -19,7 +19,7 @@
     "postbuild": "node scripts/build-pages.mjs",
     "build:hosted": "npm run typecheck && vite build --config apps/web/vite.config.ts --mode hosted",
     "build:pages": "npm run build:hosted && node scripts/build-pages.mjs",
-    "pages:dev": "npm run build:pages && wrangler pages dev apps/web/dist --kv=DCAT_SESSIONS --port 8788 --compatibility-date=2026-11-18",
+    "pages:dev": "npm run build:hosted && wrangler dev --config apps/hosted-worker/wrangler.jsonc --port 8788",
     "build:bridge": "npm run build --workspace @dcat-toolkit/bridge",
     "pack:bridge": "npm pack --workspace @dcat-toolkit/bridge",
     "start": "tsx apps/local-connector/src/index.ts --serve-static",

@@ -16,6 +16,8 @@ function status(overrides: Partial<BridgeStatus> = {}): BridgeStatus {
     cli: { installed: true, version: '2.116.6', error: null },
     lastSeenAt: '2026-11-18T00:00:00.000Z',
     relay: 'connected',
+    working: false,
+    canRepairPairing: false,
     pairing: null,
     agentVersion: '0.1.4',
     latestVersion: '0.1.4',
@@ -130,6 +132,34 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.getByText(/npx -y @dcat-toolkit\/bridge@latest setup/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect org' })).toBeDisabled();
     expect(screen.getByText('Complete step 1 first')).toBeInTheDocument();
+  });
+
+  it('does not offer re-pairing while a paired bridge is still waiting for its first check-in', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({
+      relay: 'waiting',
+      lastSeenAt: null,
+      canRepairPairing: false,
+    }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('Bridge paired. Waiting for its first check-in.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create new pairing code' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a long-running bridge working state ready without an offline warning', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({
+      relay: 'working',
+      working: true,
+      lastSeenAt: new Date(Date.now() - 90_000).toISOString(),
+    }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('Bridge working')).toBeInTheDocument();
+    expect(screen.getByText(/running a long operation/)).toBeInTheDocument();
+    expect(screen.queryByText('The bridge stopped responding.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect org' })).toBeEnabled();
   });
 
   it('hides the bridge update control when the paired agent is current', async () => {
@@ -408,7 +438,7 @@ describe('OrgConnections connect wizard', () => {
 
   it('refreshes bridge status when a pairing reset fails after unpairing', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
-    vi.mocked(api.bridgeStatus).mockResolvedValue(status({ relay: 'stale' }));
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({ relay: 'stale', canRepairPairing: true }));
     vi.spyOn(api, 'unpairBridge').mockResolvedValue({ paired: false });
     vi.spyOn(api, 'relayPairing').mockRejectedValue(new Error('Pairing unavailable.'));
     const { queryClient } = renderOrgConnections(vi.fn(), { seedOrgs: [] });

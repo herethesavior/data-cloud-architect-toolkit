@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "data-cloud-architect-toolkit",
-  "main": "apps/hosted-worker/src/pages.ts",
+  "main": "apps/hosted-worker/src/worker-entry.ts",
   "compatibility_date": "2026-11-18",
   "assets": {
     "directory": "apps/web/dist",
@@ -19,5 +19,18 @@
       "id": "fd2bbc29b1b2427f87ccf9f8e34e6705",
       "preview_id": "0155c4acd0054d5bb60519428b14c5ee"
     }
-  ]
+  ],
+  // Relay state is SQLite-backed Durable Object storage, not KV. One object per
+  // agent token keeps the bridge poll out of the free-tier KV operation budget.
+  "durable_objects": {
+    "bindings": [
+      { "name": "RELAY_DO", "class_name": "RelaySessionDO" }
+    ]
+  },
+  "exports": {
+    "RelaySessionDO": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  }
 }
