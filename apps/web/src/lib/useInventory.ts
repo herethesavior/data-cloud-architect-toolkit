@@ -30,6 +30,10 @@ export function useInventory(context: WorkspaceContext | null) {
       });
     },
     enabled: Boolean(context?.alias),
+    // The connector already retries individual pages. A second whole-session
+    // retry here duplicates CLI discovery and can collide with the manual
+    // refresh that owns the same relay slot.
+    retry: false,
     ...persistedQueryOptions,
   });
 }
