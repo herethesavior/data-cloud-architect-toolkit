@@ -178,6 +178,11 @@ export function getBridgeStatus(session: SessionRecord, origin: string, override
   // grace window. Past that, it needs the same repair affordance as a stale one.
   const neverCheckedIn = lastSeenAt === null && pairedAt !== null && now - pairedAt > REPAIR_GRACE_MS;
   const offline = stale || neverCheckedIn;
+  // Once a bridge has checked in, grace runs from that check-in. Pairing days
+  // ago must not turn the first stale status into a destructive re-pair prompt.
+  const graceElapsed = lastSeenAt === null
+    ? pairedAt !== null && now - pairedAt > REPAIR_GRACE_MS
+    : now - lastSeenAt > REPAIR_GRACE_MS;
   const working = override.working === false ? false : Boolean(agentToken && session.relay.working);
   const relay = override.relay ?? (
     working ? 'working'
@@ -192,7 +197,7 @@ export function getBridgeStatus(session: SessionRecord, origin: string, override
     lastSeenAt: lastSeenAt === null ? null : new Date(lastSeenAt).toISOString(),
     relay,
     working,
-    canRepairPairing: Boolean(agentToken && pairedAt !== null && offline && now - pairedAt > REPAIR_GRACE_MS),
+    canRepairPairing: Boolean(agentToken && pairedAt !== null && offline && graceElapsed),
     pairing: pairingFor(session, origin),
     agentVersion: agentVersion ?? null,
     latestVersion: null,

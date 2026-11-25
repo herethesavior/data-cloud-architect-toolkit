@@ -547,6 +547,31 @@ describe('hosted bridge relay', () => {
     }
   });
 
+  it('waits since the last check-in before offering repair for a stale bridge', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(now + 61_000);
+      const stale = await app.request('/api/relay/status', { headers: session.headers }, env);
+      expect(await stale.json()).toMatchObject({ paired: true, relay: 'stale', canRepairPairing: false });
+
+      vi.setSystemTime(now + 121_000);
+      const repairable = await app.request('/api/relay/status', { headers: session.headers }, env);
+      expect(await repairable.json()).toMatchObject({ paired: true, relay: 'stale', canRepairPairing: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows working instead of stale while a claimed task runs', async () => {
     const env = makeEnv();
     const session = await startSession(env);
