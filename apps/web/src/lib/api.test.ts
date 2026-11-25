@@ -330,6 +330,23 @@ describe('web API session handling', () => {
     await assertion;
   });
 
+  it('bounds a hanging local transform detail request with the relay deadline', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_path: string, options?: RequestInit) => new Promise((_resolve, reject) => {
+      if (options?.signal?.aborted) {
+        reject(new Error('aborted'));
+        return;
+      }
+      options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = api.transformBundle('prod-org', 'Transform/One');
+    const assertion = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await assertion;
+  });
+
   it('aborts an inventory refresh when the caller cancels', async () => {
     const controller = new AbortController();
     const fetchMock = vi.fn((path: string, options?: RequestInit) => {

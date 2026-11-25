@@ -494,7 +494,7 @@ export const api = {
     }
     return request<TransformBundle>(
       `/api/orgs/${encodeURIComponent(alias)}/data-transforms/${encodeURIComponent(id)}`,
-      { signal: options.signal },
+      { signal: options.signal, timeoutMs: RELAY_OPERATION_TIMEOUT_MS['transform.get'] },
     );
   },
   refreshOrgs: async (): Promise<OrgSummary[]> => {
