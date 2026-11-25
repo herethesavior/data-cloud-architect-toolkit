@@ -238,6 +238,40 @@ describe('hosted bridge relay', () => {
     expect(kv.deletes.some((key) => key.startsWith('relay:'))).toBe(false);
   });
 
+  it('refreshes bridge liveness when a long task posts its result', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    const now = Date.now();
+    nowSpy.mockReturnValue(now + 61_000);
+    try {
+      await postJson('/api/relay/respond', {
+        agentToken: paired.agentToken,
+        response: { id: created.id, ok: true, result: cli },
+      }, {}, env);
+
+      // The bridge could not poll while it was busy, but its result is proof of
+      // life. The next request must not be rejected as an offline bridge.
+      const next = await postJson<{ id: string }>('/api/relay/requests', {
+        operation: 'org.list',
+      }, session.headers, env);
+      expect(next.id).not.toBe(created.id);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('performs zero KV operations while an agent polls', async () => {
     const kv = new FakeKV();
     const env = makeEnv(kv);
