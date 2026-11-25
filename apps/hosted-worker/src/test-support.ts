@@ -114,6 +114,10 @@ export class FakeRelayDO implements DurableObjectNamespaceLike {
     return new FakeId(id);
   }
 
+  idFromName(name: string): DurableObjectIdLike {
+    return new FakeId(name);
+  }
+
   get(id: DurableObjectIdLike): DurableObjectStubLike {
     const key = id.toString();
     let core = this.instances.get(key);

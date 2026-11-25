@@ -8,7 +8,7 @@ import { isHosted } from '../lib/hosted.ts';
 import type { WorkspaceMode } from '../lib/workspace.ts';
 import { invalidateDiagnosticsState } from '../lib/workspace.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
-import { CompatibilityPanel } from '../components/CompatibilityPanel.tsx';
+import { CompatibilityEditor, compatibilitySettingLabel } from '../components/CompatibilityEditor.tsx';
 import { ErrorState, LoadingState } from '../components/DataStates.tsx';
 import { Icon } from '../components/Icon.tsx';
 import type { IconName } from '../components/Icon.tsx';
@@ -243,8 +243,7 @@ export function Settings({
             ? { tone: 'warning' as const, text: 'Waiting for the bridge to check in. Operations will run as soon as it reconnects.' }
             : null;
   const facts = [
-    { label: 'Status', value: <Badge tone={health.status === 'ok' ? 'success' : 'warning'} dot>{health.status}</Badge> },
-    { label: 'Mode', value: <Badge tone={health.mode === 'demo' ? 'warning' : 'success'}>{health.mode}</Badge> },
+    { label: 'Bridge status', value: <Badge tone={bridgeTone} dot>{bridgeLabel}</Badge> },
     {
       label: 'Bridge version',
       // The hosted relay has its own version; only the paired bridge knows the
@@ -252,18 +251,17 @@ export function Settings({
       // version remains the source of truth.
       value: bridge?.agentVersion ?? (hosted ? '—' : health.version),
     },
-    { label: 'Checked at', value: new Date(health.time).toLocaleString() },
     {
-      label: 'Salesforce CLI',
-      value: health.cli.installed ? health.cli.version ?? 'Detected' : 'Not detected',
+      label: 'Salesforce CLI version',
+      value: health.cli.installed && health.cli.version ? `v${health.cli.version}` : 'Not detected',
     },
     {
-      label: 'Local bridge',
-      value: <Badge tone={bridgeTone} dot>{bridgeLabel}</Badge>,
+      label: 'Salesforce API version',
+      value: compatibility.used ? `v${compatibility.used}` : 'Not verified',
     },
     {
-      label: 'Last check-in',
-      value: bridge?.lastSeenAt ? new Date(bridge.lastSeenAt).toLocaleString() : '—',
+      label: 'API version setting',
+      value: compatibilitySettingLabel(compatibility, mode === 'demo'),
     },
   ];
 
@@ -275,25 +273,10 @@ export function Settings({
       />
 
       <div className="grid gap-5 xl:grid-cols-2">
-        {refreshError ? (
-          <div className="xl:col-span-2 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2.5 text-sm text-danger" role="alert">
-            <span>{refreshError}</span>
-            <button
-              type="button"
-              onClick={() => {
-                setRefreshError('');
-                refreshCli.mutate();
-              }}
-              className="font-semibold underline underline-offset-2"
-            >
-              Try again
-            </button>
-          </div>
-        ) : null}
         <Panel>
           <SectionHeading
-            title="Local bridge"
-            description="Runs on your computer and sends only typed operations to the site."
+            title="Bridge and API compatibility"
+            description="Bridge health and the Salesforce versions DCAT uses in live mode."
             action={
               <Button
                 variant="secondary"
@@ -305,6 +288,21 @@ export function Settings({
               </Button>
             }
           />
+          {refreshError ? (
+            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2.5 text-sm text-danger" role="alert">
+              <span>{refreshError}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setRefreshError('');
+                  refreshCli.mutate();
+                }}
+                className="font-semibold underline underline-offset-2"
+              >
+                Try again
+              </button>
+            </div>
+          ) : null}
           {healthQuery.isError ? (
             <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2 text-sm text-warning" role="alert">
               <Icon name="warning" size={16} />
@@ -318,11 +316,11 @@ export function Settings({
               </button>
             </div>
           ) : null}
-          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <dl className="divide-y divide-line rounded-lg border border-line text-sm">
             {facts.map((fact) => (
-              <div key={fact.label} className="rounded-lg bg-surface-alt px-3 py-2.5">
-                <dt className="label-xs">{fact.label}</dt>
-                <dd className="mt-1 text-ink">{fact.value}</dd>
+              <div key={fact.label} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+                <dt className="text-ink-soft">{fact.label}</dt>
+                <dd className="min-w-0 break-words text-right font-medium text-ink">{fact.value}</dd>
               </div>
             ))}
           </dl>
@@ -345,19 +343,21 @@ export function Settings({
               {statusNotice.text}
             </p>
           ) : null}
+          {mode !== 'demo' && compatibility.probeStatus && compatibility.probeStatus !== 'available' ? (
+            <p className="mt-4 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2 text-sm text-warning" role="status">
+              DCAT checked the org's version list but could not read it. The selected version stays in use.
+            </p>
+          ) : null}
+          <CompatibilityEditor
+            status={compatibility}
+            canChange={canChangeCompatibility}
+            disabledReason={compatibilityDisabledReason}
+            saving={saveCompatibility.isPending}
+            error={compatibilityError}
+            notice={compatibilityNotice}
+            onSave={(selection) => saveCompatibility.mutateAsync(selection).then(() => undefined)}
+          />
         </Panel>
-
-        <CompatibilityPanel
-          status={compatibility}
-          cliVersion={health.cli.version ?? null}
-          demo={mode === 'demo'}
-          canChange={canChangeCompatibility}
-          disabledReason={compatibilityDisabledReason}
-          saving={saveCompatibility.isPending}
-          error={compatibilityError}
-          notice={compatibilityNotice}
-          onSave={(selection) => saveCompatibility.mutateAsync(selection).then(() => undefined)}
-        />
 
         <Panel>
           <SectionHeading title="Appearance" description="Switch themes here or use the toggle in the header." />

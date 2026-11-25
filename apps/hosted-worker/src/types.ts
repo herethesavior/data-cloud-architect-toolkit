@@ -23,6 +23,7 @@ export interface DurableObjectStubLike {
 
 export interface DurableObjectNamespaceLike {
   idFromString(id: string): DurableObjectIdLike;
+  idFromName(name: string): DurableObjectIdLike;
   get(id: DurableObjectIdLike): DurableObjectStubLike;
 }
 

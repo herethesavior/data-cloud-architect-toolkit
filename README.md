@@ -127,16 +127,16 @@ The public site is a static React SPA. A Cloudflare Worker at the same origin ow
 
 ## Hosted deployment
 
-Workers Builds deploys the root `wrangler.jsonc` with `npx wrangler deploy`. The `build:pages` command still emits `apps/web/dist/_worker.js` for static previews, but the hosted live bridge requires the Worker entry in `apps/hosted-worker/src/worker-entry.ts` because it exports the Durable Object class.
+Workers Builds deploys the root `wrangler.jsonc` with `npx wrangler deploy`. Pages advanced mode deploys `apps/web/dist/_worker.js` from `npm run build:pages`. Both serve the hosted live bridge through the SQLite-backed Durable Object bound as `RELAY_DO`; Pages can bind a namespace exported by a separately deployed Worker.
 
 | Setting | Value |
 | --- | --- |
 | Build command | `npm install && npm run build:pages` |
 | Build output | `apps/web/dist` |
-| Worker deploy command | `npx wrangler deploy` (Workers Builds only) |
+| Worker deploy command | `npx wrangler deploy` (Workers Builds only; also publishes the Durable Object for Pages) |
 | Node version | 22.12.0 or newer |
 | KV binding | `DCAT_SESSIONS` exactly |
-| Durable Object binding | `RELAY_DO` → `RelaySessionDO` (SQLite storage) |
+| Durable Object binding | `RELAY_DO` → `RelaySessionDO` (SQLite storage, required on Pages) |
 
 | KV namespace | ID |
 | --- | --- |

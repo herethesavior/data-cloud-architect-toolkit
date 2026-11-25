@@ -143,7 +143,9 @@ async function relayFetch(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const fingerprint = await tokenFingerprint(agentToken);
-  const id = env.RELAY_DO.idFromString(fingerprint);
+  // The fingerprint is not a namespace-minted object id. idFromName gives the
+  // same deterministic object while keeping it valid for this namespace.
+  const id = env.RELAY_DO.idFromName(fingerprint);
   const stub = env.RELAY_DO.get(id);
   return stub.fetch(new Request(`${RELAY_DO_ORIGIN}${path}`, {
     method: 'POST',

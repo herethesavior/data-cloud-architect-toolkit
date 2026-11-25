@@ -96,7 +96,7 @@ function renderSettings(options: RenderOptions = {}) {
 }
 
 function diagnosticValue(label: string): HTMLElement | null {
-  const term = screen.getAllByText(label).find((element) => element.tagName === 'DT');
+  const term = screen.queryAllByText(label).find((element) => element.tagName === 'DT');
   return term?.parentElement?.querySelector('dd') ?? null;
 }
 
@@ -116,7 +116,7 @@ describe('Settings bridge diagnostics', () => {
     vi.mocked(api.bridgeStatus).mockResolvedValue({ ...bridge, agentVersion: null });
     renderSettings();
 
-    expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Bridge and API compatibility' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Re-check CLI/ })).toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
     expect(diagnosticValue('Bridge version')).toHaveTextContent('0.1.0');
@@ -126,20 +126,38 @@ describe('Settings bridge diagnostics', () => {
   it('shows both Salesforce CLI and API versions with the recommended label', async () => {
     renderSettings();
 
-    expect(await screen.findByRole('heading', { name: 'Compatibility' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Bridge and API compatibility' })).toBeInTheDocument();
     expect(diagnosticValue('Salesforce CLI version')).toHaveTextContent('v2.0.0');
     expect(diagnosticValue('Salesforce API version')).toHaveTextContent('v67.0');
-    expect(diagnosticValue('Setting')).toHaveTextContent('DCAT-recommended');
-    expect(diagnosticValue('Latest available')).toHaveTextContent('v68.0');
-    expect(diagnosticValue('DCAT-recommended')).toHaveTextContent('v67.0');
+    expect(diagnosticValue('API version setting')).toHaveTextContent('DCAT-recommended');
+  });
+
+  it('keeps one flat panel free of duplicated and low-value diagnostics', async () => {
+    renderSettings();
+
+    expect(await screen.findByRole('heading', { name: 'Bridge and API compatibility' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Local bridge' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Compatibility' })).not.toBeInTheDocument();
+    for (const label of [
+      'Mode',
+      'Checked at',
+      'Last check-in',
+      'Latest available',
+      'DCAT-recommended',
+      'Last verified',
+    ]) {
+      expect(diagnosticValue(label), `no ${label} diagnostic row`).toBeNull();
+    }
+    expect(screen.getAllByText('Salesforce CLI version')).toHaveLength(1);
+    expect(screen.queryByText('Advanced: update Salesforce CLI')).not.toBeInTheDocument();
   });
 
   it('keeps demo mode on the fixed fixture version', async () => {
     renderSettings({ mode: 'demo' });
 
-    expect(await screen.findByRole('heading', { name: 'Compatibility' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Bridge and API compatibility' })).toBeInTheDocument();
     expect(diagnosticValue('Salesforce API version')).toHaveTextContent('v65.0');
-    expect(diagnosticValue('Setting')).toHaveTextContent('Demo fixture');
+    expect(diagnosticValue('API version setting')).toHaveTextContent('Demo fixture');
     await userEvent.click(screen.getByText('Change API version'));
     expect(screen.getByText(/Demo mode always uses the sample API version/)).toBeInTheDocument();
   });
@@ -176,7 +194,7 @@ describe('Settings bridge diagnostics', () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     renderSettings();
 
-    expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Bridge and API compatibility' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Refresh status/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Re-check CLI/ })).not.toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
@@ -217,7 +235,7 @@ describe('Settings bridge diagnostics', () => {
 
     expect(await screen.findByText('Unavailable')).toBeInTheDocument();
     expect(screen.getByText(/temporarily unavailable/)).toBeInTheDocument();
-    expect(diagnosticValue('Status')).toHaveTextContent('degraded');
+    expect(diagnosticValue('Bridge status')).toHaveTextContent('Unavailable');
   });
 
   it('does not show the relay version before a hosted bridge has paired', async () => {
@@ -230,7 +248,7 @@ describe('Settings bridge diagnostics', () => {
     });
     renderSettings();
 
-    expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Bridge and API compatibility' })).toBeInTheDocument();
     expect(diagnosticValue('Bridge version')).toHaveTextContent('—');
   });
 
@@ -238,7 +256,7 @@ describe('Settings bridge diagnostics', () => {
     vi.spyOn(api, 'refreshCli').mockRejectedValue(new Error('CLI probe failed.'));
     const { rerenderWithMode } = renderSettings({ mode: 'live' });
 
-    expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Bridge and API compatibility' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Re-check CLI' }));
     expect(await screen.findByText("We couldn't read diagnostics.")).toBeInTheDocument();
 
@@ -251,7 +269,7 @@ describe('Settings bridge diagnostics', () => {
     vi.mocked(api.health).mockResolvedValueOnce(health).mockRejectedValue(new Error('Poll failed.'));
     const { queryClient } = renderSettings();
 
-    expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Bridge and API compatibility' })).toBeInTheDocument();
     await act(async () => {
       await queryClient.refetchQueries({ queryKey: ['health'] });
     });
@@ -266,7 +284,7 @@ describe('Settings bridge diagnostics', () => {
     renderSettings();
 
     expect(await screen.findByText("We couldn't read diagnostics.")).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Local bridge' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Bridge and API compatibility' })).not.toBeInTheDocument();
   });
 });
 

@@ -38,6 +38,7 @@ const npmLatestUrl = 'https://registry.npmjs.org/@dcat-toolkit/bridge/latest';
 function stubRelayDo(responder: (request: Request) => Promise<Response>): Env['RELAY_DO'] {
   return {
     idFromString: (id) => ({ toString: () => id }),
+    idFromName: (name) => ({ toString: () => name }),
     get: () => ({ fetch: (request: Request) => Promise.resolve(responder(request)) }),
   };
 }
@@ -124,6 +125,25 @@ describe('hosted session contract', () => {
 });
 
 describe('hosted bridge relay', () => {
+  it('derives the relay object id from a name inside the namespace', async () => {
+    const env = makeEnv();
+    const base = new FakeRelayDO();
+    const idFromName = vi.fn((name: string) => base.idFromName(name));
+    const idFromString = vi.fn((id: string) => base.idFromString(id));
+    env.RELAY_DO = { idFromName, idFromString, get: (id) => base.get(id) };
+
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    expect(paired.agentToken).toMatch(/\S/);
+    expect(idFromString).not.toHaveBeenCalled();
+    expect(idFromName).toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f]{64}$/));
+  });
+
   it('pairs an outbound agent, runs one typed operation, and returns a redacted result', async () => {
     const env = makeEnv();
     const session = await startSession(env);
@@ -711,6 +731,7 @@ describe('hosted bridge relay', () => {
     const base = new FakeRelayDO();
     env.RELAY_DO = {
       idFromString: (id) => base.idFromString(id),
+      idFromName: (name) => base.idFromName(name),
       get: (id) => {
         const stub = base.get(id);
         return {

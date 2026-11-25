@@ -1,6 +1,6 @@
 # Connect DCAT to Cloudflare Pages
 
-The supported production deployment is **Workers Builds** with static assets. The root `wrangler.jsonc` deploys `apps/hosted-worker/src/worker-entry.ts`, which exports both the asset-aware Worker and the SQLite-backed `RelaySessionDO`. `npm run build:pages` still emits `apps/web/dist/_worker.js` for static previews, but Pages advanced mode cannot host the Durable Object class needed by the live bridge.
+Both **Workers Builds** and **Cloudflare Pages advanced mode** can serve DCAT. Workers Builds deploys the root `wrangler.jsonc`, which exports the SQLite-backed `RelaySessionDO` and binds it as `RELAY_DO`. Pages advanced mode deploys `apps/web/dist/_worker.js` from `npm run build:pages` and uses the same Durable Object when its `RELAY_DO` binding points at the namespace exported by that Worker. Relay state does not go in KV.
 
 Do **not** deploy only `npm run build:hosted`; that output has no `_worker.js`, and a direct static deploy has no `/api/*` routes.
 
@@ -12,7 +12,7 @@ The root `wrangler.jsonc` stops Wrangler autoconfiguration at the npm workspace 
 - Production branch: `main`
 - Node.js 22.12+ (set `NODE_VERSION=22.12.0`)
 - A Cloudflare KV namespace bound as `DCAT_SESSIONS` (for Workers Builds, its id goes in the root `wrangler.jsonc`)
-- A `RELAY_DO` binding to the `RelaySessionDO` SQLite class, declared in the root `wrangler.jsonc`
+- A `RELAY_DO` binding to the `RelaySessionDO` SQLite namespace declared in the root `wrangler.jsonc`. Pages can bind a namespace exported by a separately deployed Worker; bind both Production and Preview if both serve the live bridge.
 - For hosted live-org connections: `@dcat-toolkit/bridge` is published publicly at `@latest` (Demo mode works without it)
 
 There are **no OAuth settings, client secrets, callback URLs, or token encryption keys** to configure.
@@ -53,7 +53,7 @@ Use this path if the setup screen says **Configure your Worker project** and sho
 
 The deploy command bundles `apps/hosted-worker/src/worker-entry.ts` from the root config and serves `apps/web/dist` as assets. It does not depend on the generated `_worker.js`, so `npm run build:hosted` is enough to produce the assets. The root config runs the Worker before assets for every route so security headers apply to both API and SPA responses.
 
-> Pages advanced mode remains usable for Demo-only previews with a `DCAT_SESSIONS` binding, but it has no Durable Object binding. Use Workers Builds whenever the hosted live bridge is required.
+> Pages advanced mode serves the live bridge when `RELAY_DO` is bound to the `RelaySessionDO` namespace. Without that binding, pairing fails with a generic request error. Workers Builds declares the binding directly; Pages needs the dashboard/API binding described below.
 
 ## 1. Bridge package
 
@@ -113,14 +113,20 @@ Record the namespace id or note the namespace name; you will select it in the Pa
 
 The build runs the root TypeScript check, builds the hosted Vite bundle, and bundles the API Worker into `apps/web/dist/_worker.js`. It also writes `apps/web/dist/.assetsignore` so server code is not exposed as a public static asset; Pages still uses `_worker.js` as the advanced-mode function.
 
-## 4. Bind KV to the Pages project
+## 4. Bind KV and the Durable Object to the Pages project
+
+Pages cannot create the Durable Object class. If no `RelaySessionDO` namespace exists yet, run `npx wrangler deploy --config wrangler.jsonc` once from the repository root (Workers Builds does this automatically) and note the namespace exported by the `data-cloud-architect-toolkit` Worker.
 
 1. Open the new Pages project.
 2. Go to **Settings** > **Bindings** > **Add** > **KV namespace**.
 3. Set **Variable name** to exactly `DCAT_SESSIONS`.
 4. Select the namespace created in step 2.
 5. Save the binding. Repeat for the Preview environment if you use preview deployments.
-6. Redeploy the project so the binding is picked up.
+6. Go to **Settings** > **Bindings** > **Add** > **Durable Object**.
+7. Set **Variable name** to exactly `RELAY_DO`.
+8. Select the `RelaySessionDO` namespace exported by the Worker deployed above.
+9. Save the binding. Repeat for the Preview environment if preview deployments need the live bridge.
+10. Redeploy the project so both bindings are picked up.
 
 Do not put the namespace id in `apps/hosted-worker/wrangler.jsonc` for the Pages path. That file is for the optional standalone Worker workflow (`npm run worker:dev` / `npm run worker:deploy`); a direct Worker deploy does require its `id` field.
 
@@ -134,6 +140,7 @@ Open the Cloudflare-provided URL (for example, `https://sfdcat.pages.dev`).
 - `GET /api/auth/login` returns `404` (hosted OAuth is removed).
 - API responses include `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
 - **Connect an org** shows the three-step **Set up SF CLI** → **Connect org** → **View inventory** wizard and a pairing command using the deployed origin.
+- Running that pairing command succeeds; `/api/relay/status` then reports `paired: true` for the browser session.
 
 For a local rehearsal of the hosted Worker before deploying:
 
@@ -152,7 +159,7 @@ This builds the SPA and serves the standalone Worker config with local `DCAT_SES
 | Wrangler says application detection ran in the root of a workspace | The committed root `wrangler.jsonc` is missing, so Cloudflare tries to autoconfig the monorepo root. | Restore the root `wrangler.jsonc` and redeploy; keep Root directory blank. |
 | `/api/*` returns 404 on a static-only host | No Worker is serving the SPA origin. | Deploy with Workers Builds using the root `wrangler.jsonc`. |
 | API returns a 500 about `DCAT_SESSIONS` | KV binding is missing or named differently. | Add a KV binding named exactly `DCAT_SESSIONS`, then redeploy. |
-| Relay requests fail with a missing `RELAY_DO` binding | The deployed config does not declare the Durable Object. | Add the `durable_objects` binding and `exports` block from the root `wrangler.jsonc`, then redeploy. |
+| Pairing fails with `REQUEST_FAILED` on Pages | The Pages environment has no `RELAY_DO` binding, or the binding points at a different environment than the deployment. | Bind the `RelaySessionDO` namespace as `RELAY_DO` for Production and Preview as needed, then redeploy. |
 | CSRF errors after a redeploy | The browser cookie points at session state in another KV namespace. | Refresh the page; if needed, clear site data. |
 | Pairing command fails with npm 404 | npm is unreachable, or the command names a different package than the published one. | Run `npm view @dcat-toolkit/bridge version`; republish under the configured name if needed. |
 | Bridge shows “Offline” after about a minute | The agent stopped, is offline or asleep, or its pairing was revoked. | Restart with the printed command and check network access. If it still fails after repeated stale status, use **Create new pairing code** on **Connect org**, which unpairs first. |

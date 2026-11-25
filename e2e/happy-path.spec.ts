@@ -467,16 +467,19 @@ test('switching demo to live keeps the header height stable and freshness in a c
   await expect(page.locator('#main-content').getByTestId('inventory-freshness')).toBeVisible();
 });
 
-test('mode changes refresh diagnostics in the currently open view', async ({ page }) => {
+test('settings refreshes compatibility in place without duplicating the workspace mode', async ({ page }) => {
   await openDemo(page);
   await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
 
-  const modeFact = page.locator('dt').filter({ hasText: /^Mode$/ }).locator('..');
-  await expect(modeFact).toContainText('demo');
+  const modeFact = page.locator('dt').filter({ hasText: /^Mode$/ });
+  await expect(modeFact).toHaveCount(0);
+  const apiVersionFact = page.locator('dt').filter({ hasText: 'Salesforce API version' }).locator('..');
+  await expect(apiVersionFact).toContainText('v65.0');
 
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
   await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
-  await expect(modeFact).toContainText('live');
+  await expect(modeFact).toHaveCount(0);
+  await expect(apiVersionFact).toContainText('v67.0');
 });
 
 test('compatibility settings save a curated version and reuse the inventory refresh', async ({ page }) => {
@@ -499,6 +502,44 @@ test('compatibility settings save a curated version and reuse the inventory refr
   await expect(page.getByText('API version saved. DCAT is refreshing metadata.')).toBeVisible();
   await expect.poll(() => calls.inventory).toBeGreaterThan(inventoryBefore);
   await expect(apiVersionFact).toContainText('v68.0');
+});
+
+test('settings places the combined bridge panel beside appearance on desktop', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+
+  const bridgePanel = page.locator('.panel').filter({
+    has: page.getByRole('heading', { name: 'Bridge and API compatibility' }),
+  });
+  const appearancePanel = page.locator('.panel').filter({
+    has: page.getByRole('heading', { name: 'Appearance' }),
+  });
+
+  await expect(bridgePanel).toBeVisible();
+  await expect(appearancePanel).toBeVisible();
+  const boxes = await page.evaluate(() => {
+    const rect = (title: string) => {
+      const panel = Array.from(document.querySelectorAll<HTMLElement>('.panel')).find((candidate) =>
+        Array.from(candidate.querySelectorAll('h2')).some((heading) => heading.textContent?.trim() === title),
+      );
+      if (!panel) return null;
+      const { x, y, width, height } = panel.getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    return {
+      bridge: rect('Bridge and API compatibility'),
+      appearance: rect('Appearance'),
+    };
+  });
+
+  expect(boxes.bridge, 'bridge panel bounds').not.toBeNull();
+  expect(boxes.appearance, 'appearance panel bounds').not.toBeNull();
+  expect(boxes.bridge!.x).toBeLessThan(boxes.appearance!.x);
+  expect(Math.abs(boxes.bridge!.y - boxes.appearance!.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(boxes.bridge!.height - boxes.appearance!.height)).toBeLessThanOrEqual(1);
+  const gap = boxes.appearance!.x - (boxes.bridge!.x + boxes.bridge!.width);
+  expect(gap).toBeGreaterThan(0);
+  expect(gap).toBeLessThan(32);
 });
 
 test('switching live to demo clears live org setup state and disables live controls', async ({ page }) => {
