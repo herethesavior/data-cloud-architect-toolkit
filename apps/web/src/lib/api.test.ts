@@ -226,6 +226,43 @@ describe('web API session handling', () => {
     expect(relayPosts).toBe(2);
   });
 
+  it('cancels a relay request with the refreshed CSRF token', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let sessionCalls = 0;
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') {
+        sessionCalls += 1;
+        return jsonResponse({ ...session, token: sessionCalls === 1 ? 'old-token' : 'new-token', mode: 'live' });
+      }
+      if (path === '/api/relay/cancel') return jsonResponse({ cancelled: true });
+      if (path === '/api/relay/requests' && options?.method === 'POST') {
+        const token = (options.headers as Record<string, string>)['x-dcat-token'];
+        if (token === 'old-token') {
+          return jsonResponse({ error: { code: 'INVALID_SESSION_TOKEN', message: 'Refresh the page and try again.' } }, 401);
+        }
+        return jsonResponse({ id: 'req-refreshed' });
+      }
+      if (path.startsWith('/api/relay/requests/')) {
+        return jsonResponse({ id: 'req-refreshed', status: 'running', result: null, error: null });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const cancelled = api.inventory('prod-org', { force: true, signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ code: 'ABORTED' });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const cancelCall = fetchMock.mock.calls.find(([path]) => path === '/api/relay/cancel');
+    expect(cancelCall).toBeDefined();
+    expect(JSON.parse(String(cancelCall![1]?.body))).toEqual({ requestId: 'req-refreshed' });
+    expect((cancelCall![1]!.headers as Record<string, string>)['x-dcat-token']).toBe('new-token');
+  });
+
   it('upgrades unknown live org environments from CLI URL metadata', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     const org: OrgSummary = {

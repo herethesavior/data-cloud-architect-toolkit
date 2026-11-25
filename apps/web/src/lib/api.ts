@@ -222,11 +222,19 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
   const cancelRelayRequest = (id: string) => {
     if (cancelSent) return;
     cancelSent = true;
-    void request('/api/relay/cancel', {
+    // Long-running operations refresh the token mid-flight. Cancelling with the
+    // original token would leave the bridge operation running until its deadline.
+    const send = (cancelToken: string) => request('/api/relay/cancel', {
       method: 'POST',
-      token: session.token,
+      token: cancelToken,
       body: { requestId: id },
       timeoutMs: SESSION_TIMEOUT_MS,
+    });
+    void send(token).catch(async (error) => {
+      if (!(error instanceof ApiError) || error.code !== 'INVALID_SESSION_TOKEN') return;
+      clearCachedSession();
+      token = (await getSession()).token;
+      await send(token);
     }).catch(() => undefined);
   };
   let onAbort: (() => void) | undefined;
