@@ -418,11 +418,13 @@ export function App() {
     refreshError: refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
       ? ''
       : refreshInventory.error?.message ?? '',
+    refreshAttempt: refreshInventory.submittedAt,
     resumeDiscovery: onResumeDiscovery,
     isResumingDiscovery: resumeInventory.isPending,
     resumeError: resumeInventory.error instanceof ApiError && resumeInventory.error.code === 'ABORTED'
       ? ''
       : resumeInventory.error?.message ?? '',
+    resumeAttempt: resumeInventory.submittedAt,
   }), [
     context,
     mode,
@@ -434,9 +436,11 @@ export function App() {
     onCancelRefresh,
     refreshInventory.isPending,
     refreshInventory.error,
+    refreshInventory.submittedAt,
     onResumeDiscovery,
     resumeInventory.isPending,
     resumeInventory.error,
+    resumeInventory.submittedAt,
   ]);
 
   useEffect(() => {

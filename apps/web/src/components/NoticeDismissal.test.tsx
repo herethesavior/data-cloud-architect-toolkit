@@ -71,7 +71,7 @@ describe('dismissible notices', () => {
     expect(screen.queryAllByText('Inventory loaded with gaps')).toHaveLength(0);
   });
 
-  it('hides a refresh failure until the error clears and appears again', async () => {
+  it('hides a refresh failure for its attempt but shows the same failure after a retry', async () => {
     const context = createWorkspaceContext('live', demoOrgs[0]!)!;
     const query = {
       data: demoInventory,
@@ -82,7 +82,7 @@ describe('dismissible notices', () => {
       refetch: vi.fn(),
     } as unknown as UseQueryResult<InventorySnapshot, Error>;
 
-    const renderBoundary = (refreshError: string) => render(
+    const boundary = (refreshError: string, refreshAttempt: number) => (
       <InventoryActionsProvider value={{
         context,
         mode: 'live',
@@ -94,38 +94,24 @@ describe('dismissible notices', () => {
         cancelRefresh: vi.fn(),
         isRefreshingInventory: false,
         refreshError,
+        refreshAttempt,
       }}>
         <InventoryBoundary query={query} context={context}>
           {() => <div>Loaded rows</div>}
         </InventoryBoundary>
-      </InventoryActionsProvider>,
+      </InventoryActionsProvider>
     );
 
-    const { rerender } = renderBoundary('Bridge timed out');
+    const { rerender } = render(boundary('Bridge timed out', 1));
     expect(screen.getByRole('alert')).toHaveTextContent('Refresh failed: Bridge timed out');
 
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss refresh error' }));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
-    rerender(<InventoryActionsProvider value={{
-      context,
-      mode: 'live',
-      orgList: { status: 'idle' },
-      onGoToOrgs: vi.fn(),
-      onToggleMode: vi.fn(),
-      isTogglingMode: false,
-      refreshInventory: vi.fn(),
-      cancelRefresh: vi.fn(),
-      isRefreshingInventory: false,
-      refreshError: '',
-    }}>
-      <InventoryBoundary query={query} context={context}>
-        {() => <div>Loaded rows</div>}
-      </InventoryBoundary>
-    </InventoryActionsProvider>);
+    rerender(boundary('Bridge timed out', 1));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
-    renderBoundary('Bridge timed out');
+    rerender(boundary('Bridge timed out', 2));
     expect(screen.getByRole('alert')).toHaveTextContent('Refresh failed: Bridge timed out');
   });
 

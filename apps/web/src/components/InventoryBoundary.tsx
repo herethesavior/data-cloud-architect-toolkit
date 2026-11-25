@@ -156,14 +156,16 @@ interface InventoryBoundaryProps {
 export function InventoryBoundary({ query, context, children }: InventoryBoundaryProps) {
   const actions = useInventoryActions();
   const refreshError = actions?.refreshError ?? '';
+  // Include the mutation attempt so dismissing one failure does not hide the
+  // same error from a later retry.
   const { visible: refreshErrorVisible, dismiss: dismissRefreshError } = useDismissibleNotice(
     'inventory-refresh-error',
-    refreshError ? `${context?.contextId ?? 'none'}:${refreshError}` : 'none',
+    refreshError ? `${context?.contextId ?? 'none'}:${actions?.refreshAttempt ?? 0}:${refreshError}` : 'none',
   );
   const resumeError = actions?.resumeError ?? '';
   const { visible: resumeErrorVisible, dismiss: dismissResumeError } = useDismissibleNotice(
     'inventory-resume-error',
-    resumeError ? `${context?.contextId ?? 'none'}:${resumeError}` : 'none',
+    resumeError ? `${context?.contextId ?? 'none'}:${actions?.resumeAttempt ?? 0}:${resumeError}` : 'none',
   );
 
   // A disabled query is "pending" in React Query. Without this guard every
