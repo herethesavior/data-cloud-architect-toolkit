@@ -86,7 +86,7 @@ export function ResourceStatusNotice({ inventory, onReview }: { inventory: Inven
       ? `${failures.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} could not be retrieved. Other families are still available.`
       : `${partial.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} returned partial results.`;
   const statusSignature = inventory.capabilities
-    .map((capability) => `${capability.family}:${capability.status}:${capability.message ?? ''}`)
+    .map((capability) => `${capability.family}:${capability.status}`)
     .sort()
     .join('|');
   const noticeKey = `${inventory.mode}:${inventory.org.orgId ?? inventory.org.alias}:${

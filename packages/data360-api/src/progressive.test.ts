@@ -509,6 +509,41 @@ describe('progressive discovery', () => {
     ]));
   });
 
+  it('resumes a deadline-stopped session with a fresh window and its loaded rows', async () => {
+    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+    state.deadlineAt = Date.now() - 1;
+    await advanceProgressiveDiscovery(state);
+    expect(progressiveSnapshot(state).progress?.state).toBe('complete');
+
+    resumeProgressiveDiscovery(state);
+    expect(isProgressiveDiscoveryActive(state)).toBe(true);
+    expect(progressiveSnapshot(state).warnings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'DISCOVERY_DEADLINE' }),
+    ]));
+
+    await drain(state);
+    expect(progressiveSnapshot(state).progress?.state).toBe('complete');
+    expect(progressiveSnapshot(state).dlos.length).toBeGreaterThan(10);
+  });
+
+  it('resumes a background interruption without discarding earlier pages', async () => {
+    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+    await advanceProgressiveDiscovery(state);
+    const loadedBefore = progressiveSnapshot(state).dlos.length;
+    interruptProgressiveDiscovery(state, 'test failure');
+    expect(isProgressiveDiscoveryActive(state)).toBe(false);
+
+    resumeProgressiveDiscovery(state);
+    expect(isProgressiveDiscoveryActive(state)).toBe(true);
+    await drain(state);
+
+    expect(progressiveSnapshot(state).progress?.state).toBe('complete');
+    expect(progressiveSnapshot(state).warnings).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'DISCOVERY_INTERRUPTED' }),
+    ]));
+    expect(progressiveSnapshot(state).dlos.length).toBeGreaterThan(loadedBefore);
+  });
+
   it('does not keep polling a deadline-stopped family with an unmet expected count', async () => {
     const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
     const dlos = state.families.dlos;

@@ -1,4 +1,4 @@
-import { inferOrgEnvironment } from '@dcat/core';
+import { inferOrgEnvironment, RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
 import type {
   BridgeStatus,
   CliStatus,
@@ -98,15 +98,21 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       const payload = (await response.json().catch(() => null)) as ErrorPayload | null;
       throw new ApiError(
         payload?.error?.code ?? 'REQUEST_FAILED',
-        payload?.error?.message ?? `Request failed with status ${response.status}.`,
+        payload?.error?.message ?? 'The request could not be completed.',
       );
     }
 
-    return (await response.json()) as T;
+    try {
+      return (await response.json()) as T;
+    } catch {
+      // An HTML error page or a truncated body produces a native SyntaxError.
+      throw new ApiError('BAD_RESPONSE', 'The service returned an unexpected response. Try again.');
+    }
   } catch (error) {
     if (timed.didTimeout()) throw new ApiError('TIMEOUT', 'The request took too long. Try again.');
     if (options.signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
-    throw error;
+    if (error instanceof ApiError) throw error;
+    throw new ApiError('NETWORK_ERROR', "We couldn't reach the service. Check your connection and try again.");
   } finally {
     timed.cleanup();
   }
@@ -147,8 +153,12 @@ async function requestWithToken<T>(path: string, options: RequestOptions = {}): 
   }
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  return requestWithToken<T>(path, { method: 'POST', body });
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  options: Pick<RequestOptions, 'signal' | 'timeoutMs'> = {},
+): Promise<T> {
+  return requestWithToken<T>(path, { method: 'POST', body, ...options });
 }
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
@@ -183,19 +193,6 @@ export interface InventoryRequestOptions {
   onSnapshot?: (snapshot: InventorySnapshot) => void;
 }
 
-const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
-  'cli.status': 30_000,
-  'org.list': 120_000,
-  'org.connect': 6 * 60_000,
-  // Keep the browser deadline aligned with the Worker so a timed-out retry
-  // cannot hit BRIDGE_BUSY while the original request is still running.
-  'inventory.get': 60_000,
-  'inventory.start': 60_000,
-  'inventory.status': 30_000,
-  'transform.get': 60_000,
-  'mode.set': 30_000,
-  'bridge.update': 5 * 60_000,
-};
 
 // The Worker relay accepts one operation at a time. React Query can fire an
 // org-list refresh while an inventory load or org login is still in flight, so
@@ -210,6 +207,23 @@ async function hostedUsesFixtures(): Promise<boolean> {
 async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Promise<T> {
   if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
   const session = await getSession();
+  let token = session.token;
+
+  /**
+   * Discovery polls for minutes. A session replaced while it runs invalidates
+   * the token captured at the start, so every request refreshes it once instead
+   * of failing an otherwise valid operation at the next poll.
+   */
+  const relayRequest = async <T>(path: string, options: RequestOptions): Promise<T> => {
+    try {
+      return await request<T>(path, { ...options, token });
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== 'INVALID_SESSION_TOKEN') throw error;
+      clearCachedSession();
+      token = (await getSession()).token;
+      return request<T>(path, { ...options, token });
+    }
+  };
 
   // Abort releases the UI, then best-effort cancels the queued relay request so
   // a reload cannot hit BRIDGE_BUSY behind an abandoned operation.
@@ -218,11 +232,19 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
   const cancelRelayRequest = (id: string) => {
     if (cancelSent) return;
     cancelSent = true;
-    void request('/api/relay/cancel', {
+    // Long-running operations refresh the token mid-flight. Cancelling with the
+    // original token would leave the bridge operation running until its deadline.
+    const send = (cancelToken: string) => request('/api/relay/cancel', {
       method: 'POST',
-      token: session.token,
+      token: cancelToken,
       body: { requestId: id },
       timeoutMs: SESSION_TIMEOUT_MS,
+    });
+    void send(token).catch(async (error) => {
+      if (!(error instanceof ApiError) || error.code !== 'INVALID_SESSION_TOKEN') return;
+      clearCachedSession();
+      token = (await getSession()).token;
+      await send(token);
     }).catch(() => undefined);
   };
   let onAbort: (() => void) | undefined;
@@ -239,10 +261,9 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
     if (isHosted() && await hostedUsesFixtures() && operation.operation !== 'cli.status') {
       throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode to use the local bridge.');
     }
-    const deadline = Date.now() + OPERATION_TIMEOUT_MS[operation.operation];
-    const createRequest = () => request<{ id: string }>('/api/relay/requests', {
+    const deadline = Date.now() + RELAY_OPERATION_TIMEOUT_MS[operation.operation];
+    const createRequest = () => relayRequest<{ id: string }>('/api/relay/requests', {
       method: 'POST',
-      token: session.token,
       body: operation,
       signal,
       timeoutMs: RELAY_POLL_TIMEOUT_MS,
@@ -269,8 +290,7 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       try {
         // The Durable Object holds this read until the request settles, so
         // progressive discovery costs one session read per status poll.
-        state = await request<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}?wait=1`, {
-          token: session.token,
+        state = await relayRequest<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}?wait=1`, {
           signal,
           timeoutMs: RELAY_POLL_TIMEOUT_MS,
         });
@@ -287,7 +307,7 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
       if (state.status === 'completed') return state.result as T;
       if (state.status === 'failed' || state.status === 'expired') {
-        throw new ApiError(state.error?.code ?? 'RELAY_FAILED', state.error?.message ?? 'The local bridge request failed.');
+        throw new ApiError(state.error?.code ?? 'RELAY_FAILED', 'The local bridge request failed.');
       }
       await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
     }
@@ -325,7 +345,7 @@ async function startInventorySession(
     method: 'POST',
     body: { sessionId: options.sessionId, refresh: options.force },
     signal: options.signal,
-    timeoutMs: OPERATION_TIMEOUT_MS['inventory.start'],
+    timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.start'],
   });
 }
 
@@ -349,7 +369,7 @@ async function readInventorySession(
       method: 'POST',
       body: { resume: options.resume, family: options.family },
       signal: options.signal,
-      timeoutMs: OPERATION_TIMEOUT_MS['inventory.status'],
+      timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.status'],
     },
   );
 }
@@ -366,20 +386,23 @@ async function legacyInventory(
   return options.force
     ? requestWithToken<InventorySnapshot>(`${path}?refresh=1`, {
         signal: options.signal,
-        timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
+        timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.get'],
       })
     : request<InventorySnapshot>(path, {
         signal: options.signal,
-        timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
+        timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.get'],
       });
 }
 
-/** Only explicit capability gaps may fall back; transport and relay failures must surface. */
+/**
+ * Only a missing progressive endpoint may fall back; transport and relay
+ * failures must surface. Match on codes so a copy change cannot silently
+ * disable the legacy path.
+ */
 function isUnsupportedProgressiveError(error: unknown, hostedLive: boolean): boolean {
   if (!(error instanceof ApiError)) return false;
-  const message = error.message.toLowerCase();
-  if (error.code === 'INVALID_ARGUMENT') return message.includes('unsupported bridge operation');
-  if (!hostedLive && error.code === 'NOT_FOUND') return message.includes('unknown api route');
+  if (error.code === 'INVALID_ARGUMENT') return true;
+  if (!hostedLive && error.code === 'NOT_FOUND') return true;
   return false;
 }
 
@@ -443,9 +466,11 @@ export const api = {
     }
     return request<ConnectorHealth>('/api/health');
   },
-  orgs: async (): Promise<OrgSummary[]> => {
-    if (isHosted() && !await hostedUsesFixtures()) return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }));
-    return normalizeOrgs(await request<OrgSummary[]>('/api/orgs'));
+  orgs: async (options: { signal?: AbortSignal } = {}): Promise<OrgSummary[]> => {
+    if (isHosted() && !await hostedUsesFixtures()) {
+      return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }, options.signal));
+    }
+    return normalizeOrgs(await request<OrgSummary[]>('/api/orgs', { signal: options.signal }));
   },
   org: async (alias: string): Promise<OrgSummary> => {
     if (isHosted() && !await hostedUsesFixtures()) {
@@ -458,25 +483,31 @@ export const api = {
   },
   inventory: async (alias: string, options: InventoryRequestOptions = {}): Promise<InventorySnapshot> => {
     const hostedLive = isHosted() && !await hostedUsesFixtures();
-    try {
-      return await progressiveInventory(alias, options, hostedLive);
-    } catch (error) {
-      // An expired session is normal after a long-lived tab. Start a fresh one
-      // instead of silently dropping to an all-at-once legacy discovery.
-      if (error instanceof ApiError && error.code === 'SESSION_EXPIRED' && options.sessionId) {
-        return progressiveInventory(alias, { ...options, sessionId: undefined }, hostedLive);
+    // Two bounded recoveries: drop a stale session id, then force a brand new
+    // session. A connector that keeps reporting expiry must surface the error
+    // rather than sending the caller into an endless retry loop.
+    const run = async (attempt: number, requestOptions: InventoryRequestOptions): Promise<InventorySnapshot> => {
+      try {
+        return await progressiveInventory(alias, requestOptions, hostedLive);
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'SESSION_EXPIRED' && attempt < 2) {
+          const recovered: InventoryRequestOptions = {
+            ...requestOptions,
+            sessionId: undefined,
+            force: attempt > 0 ? true : requestOptions.force,
+          };
+          return run(attempt + 1, recovered);
+        }
+        // An older local bridge or connector may not expose the progressive
+        // operations yet. Preserve the previous all-at-once behavior only for
+        // that explicit capability gap, never for a transport failure.
+        if (!isUnsupportedProgressiveError(error, hostedLive)) throw error;
+        const snapshot = snapshotWithOrg(await legacyInventory(alias, requestOptions, hostedLive));
+        requestOptions.onSnapshot?.(snapshot);
+        return snapshot;
       }
-      if (error instanceof ApiError && error.code === 'SESSION_EXPIRED' && !options.sessionId) {
-        return progressiveInventory(alias, { ...options, sessionId: undefined, force: true }, hostedLive);
-      }
-      // An older local bridge or connector may not expose the progressive
-      // operations yet. Preserve the previous all-at-once behavior only for that
-      // explicit capability gap, never for a failed request or relay mismatch.
-      if (!isUnsupportedProgressiveError(error, hostedLive)) throw error;
-      const snapshot = snapshotWithOrg(await legacyInventory(alias, options, hostedLive));
-      options.onSnapshot?.(snapshot);
-      return snapshot;
-    }
+    };
+    return run(0, options);
   },
   transformBundle: async (alias: string, id: string, options: { signal?: AbortSignal } = {}): Promise<TransformBundle> => {
     if (isHosted() && !await hostedUsesFixtures()) {
@@ -484,12 +515,14 @@ export const api = {
     }
     return request<TransformBundle>(
       `/api/orgs/${encodeURIComponent(alias)}/data-transforms/${encodeURIComponent(id)}`,
-      { signal: options.signal },
+      { signal: options.signal, timeoutMs: RELAY_OPERATION_TIMEOUT_MS['transform.get'] },
     );
   },
-  refreshOrgs: async (): Promise<OrgSummary[]> => {
-    if (isHosted() && !await hostedUsesFixtures()) return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }));
-    return normalizeOrgs(await postJson<OrgSummary[]>('/api/orgs/refresh', {}));
+  refreshOrgs: async (options: { signal?: AbortSignal } = {}): Promise<OrgSummary[]> => {
+    if (isHosted() && !await hostedUsesFixtures()) {
+      return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }, options.signal));
+    }
+    return normalizeOrgs(await postJson<OrgSummary[]>('/api/orgs/refresh', {}, { signal: options.signal }));
   },
   refreshCli: async (): Promise<CliStatus> => {
     if (isHosted()) {
@@ -507,6 +540,7 @@ export const api = {
     alias: string,
     instanceUrl?: string,
     browser?: 'chrome' | 'edge' | 'firefox',
+    options: { signal?: AbortSignal } = {},
   ): Promise<OrgSummary> => {
     if (isHosted() && await hostedUsesFixtures()) {
       throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode before connecting an org.');
@@ -517,14 +551,14 @@ export const api = {
         alias,
         ...(instanceUrl ? { instanceUrl } : {}),
         ...(browser ? { browser } : {}),
-      });
+      }, options.signal);
       return normalizeOrg({ ...connected, instanceUrl: connected.instanceUrl ?? instanceUrl ?? null });
     }
     const connected = await postJson<OrgSummary>('/api/orgs/connect', {
       alias,
       ...(instanceUrl ? { instanceUrl } : {}),
       ...(browser ? { browser } : {}),
-    });
+    }, { signal: options.signal });
     return normalizeOrg({ ...connected, instanceUrl: connected.instanceUrl ?? instanceUrl ?? null });
   },
   bridgeStatus,

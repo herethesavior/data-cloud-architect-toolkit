@@ -31,7 +31,7 @@ describe('web API session handling', () => {
       .mockResolvedValueOnce(jsonResponse(session));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(getSession()).rejects.toThrow('connector offline');
+    await expect(getSession()).rejects.toThrow("We couldn't reach the service.");
     await expect(getSession()).resolves.toMatchObject({ token: 'old-token' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -159,6 +159,36 @@ describe('web API session handling', () => {
     ]);
   });
 
+  it('refreshes a stale hosted CSRF token instead of failing the relay call', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let sessionCalls = 0;
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') {
+        sessionCalls += 1;
+        return jsonResponse({ ...session, token: sessionCalls === 1 ? 'old-token' : 'new-token', mode: 'live' });
+      }
+      if (path === '/api/relay/requests' && options?.method === 'POST') {
+        const token = (options.headers as Record<string, string>)['x-dcat-token'];
+        if (token === 'old-token') {
+          return jsonResponse({ error: { code: 'INVALID_SESSION_TOKEN', message: 'Refresh the page and try again.' } }, 401);
+        }
+        return jsonResponse({ id: 'req-refreshed' });
+      }
+      if (path.startsWith('/api/relay/requests/')) {
+        return jsonResponse({ status: 'completed', result: [] });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.orgs()).resolves.toEqual([]);
+
+    expect(sessionCalls).toBe(2);
+    const posts = fetchMock.mock.calls.filter(([path, options]) => path === '/api/relay/requests' && options?.method === 'POST');
+    expect(posts).toHaveLength(2);
+    expect((posts[1]![1]!.headers as Record<string, string>)['x-dcat-token']).toBe('new-token');
+  });
+
   it('cancels the queued relay request on abort without breaking serialization', async () => {
     vi.useFakeTimers();
     vi.stubEnv('VITE_HOSTED', 'true');
@@ -194,6 +224,43 @@ describe('web API session handling', () => {
     await vi.advanceTimersByTimeAsync(0);
     await expect(next).resolves.toEqual([]);
     expect(relayPosts).toBe(2);
+  });
+
+  it('cancels a relay request with the refreshed CSRF token', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let sessionCalls = 0;
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') {
+        sessionCalls += 1;
+        return jsonResponse({ ...session, token: sessionCalls === 1 ? 'old-token' : 'new-token', mode: 'live' });
+      }
+      if (path === '/api/relay/cancel') return jsonResponse({ cancelled: true });
+      if (path === '/api/relay/requests' && options?.method === 'POST') {
+        const token = (options.headers as Record<string, string>)['x-dcat-token'];
+        if (token === 'old-token') {
+          return jsonResponse({ error: { code: 'INVALID_SESSION_TOKEN', message: 'Refresh the page and try again.' } }, 401);
+        }
+        return jsonResponse({ id: 'req-refreshed' });
+      }
+      if (path.startsWith('/api/relay/requests/')) {
+        return jsonResponse({ id: 'req-refreshed', status: 'running', result: null, error: null });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const cancelled = api.inventory('prod-org', { force: true, signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ code: 'ABORTED' });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const cancelCall = fetchMock.mock.calls.find(([path]) => path === '/api/relay/cancel');
+    expect(cancelCall).toBeDefined();
+    expect(JSON.parse(String(cancelCall![1]?.body))).toEqual({ requestId: 'req-refreshed' });
+    expect((cancelCall![1]!.headers as Record<string, string>)['x-dcat-token']).toBe('new-token');
   });
 
   it('upgrades unknown live org environments from CLI URL metadata', async () => {
@@ -263,6 +330,49 @@ describe('web API session handling', () => {
     await assertion;
   });
 
+  it('bounds a hanging local transform detail request with the relay deadline', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_path: string, options?: RequestInit) => new Promise((_resolve, reject) => {
+      if (options?.signal?.aborted) {
+        reject(new Error('aborted'));
+        return;
+      }
+      options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = api.transformBundle('prod-org', 'Transform/One');
+    const assertion = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await assertion;
+  });
+
+  it('forwards caller cancellation to org list, refresh, and connect requests', async () => {
+    const assertAborted = async (path: string, call: (signal: AbortSignal) => Promise<unknown>) => {
+      const fetchMock = vi.fn(async (requestPath: string, options?: RequestInit) => {
+        if (requestPath === '/api/session') return jsonResponse(session);
+        return new Promise((_resolve, reject) => {
+          if (options?.signal?.aborted) {
+            reject(new Error('aborted'));
+            return;
+          }
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const controller = new AbortController();
+      const pending = call(controller.signal);
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ code: 'ABORTED' });
+      expect(fetchMock.mock.calls.some(([requestPath]) => requestPath === path)).toBe(true);
+    };
+
+    await assertAborted('/api/orgs', (signal) => api.orgs({ signal }));
+    await assertAborted('/api/orgs/refresh', (signal) => api.refreshOrgs({ signal }));
+    await assertAborted('/api/orgs/connect', (signal) => api.connectOrg('prod-org', undefined, undefined, { signal }));
+  });
+
   it('aborts an inventory refresh when the caller cancels', async () => {
     const controller = new AbortController();
     const fetchMock = vi.fn((path: string, options?: RequestInit) => {
@@ -300,6 +410,22 @@ describe('web API session handling', () => {
 
     await expect(api.inventory('prod-org')).resolves.toMatchObject({ apiVersion: demoInventory.apiVersion });
     expect(starts).toBe(2);
+  });
+
+  it('stops retrying when a connector keeps reporting an expired session', async () => {
+    let starts = 0;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/orgs/prod-org/inventory/session') {
+        starts += 1;
+        return jsonResponse({ error: { code: 'SESSION_EXPIRED', message: 'Session expired.' } }, 502);
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.inventory('prod-org')).rejects.toMatchObject({ code: 'SESSION_EXPIRED' });
+    expect(starts).toBe(3);
   });
 
   it('falls back for an explicitly unsupported local inventory operation', async () => {

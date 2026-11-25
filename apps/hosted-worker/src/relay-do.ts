@@ -238,6 +238,13 @@ export class RelayDurableObjectCore {
     };
   }
 
+  private markSeen(now: number, force = false): void {
+    const seen = this.getMetaNumber('last_seen_at');
+    if (force || seen === null || now - seen >= SEEN_THROTTLE_MS) {
+      this.setMeta('last_seen_at', String(now));
+    }
+  }
+
   private updateAgent(body: Record<string, unknown>, now: number): void {
     const cli = parseCli(body.cli);
     if (cli && JSON.stringify(cli) !== this.getMeta('cli')) {
@@ -247,10 +254,7 @@ export class RelayDurableObjectCore {
     if (version && version !== this.getMeta('agent_version')) {
       this.setMeta('agent_version', version);
     }
-    const seen = this.getMetaNumber('last_seen_at');
-    if (seen === null || now - seen >= SEEN_THROTTLE_MS) {
-      this.setMeta('last_seen_at', String(now));
-    }
+    this.markSeen(now);
   }
 
   private claimPending(now: number): RelayTask | null {
@@ -326,6 +330,9 @@ export class RelayDurableObjectCore {
     if (!sessionId) {
       return error('INVALID_AGENT_TOKEN', 'The site reset this bridge pairing. Run setup again.', 401);
     }
+    // A bridge executing a long task cannot poll, but posting its result is
+    // proof it is alive. Refresh now so the next request is not falsely stale.
+    this.markSeen(Date.now(), true);
     const response = relayResponseSchema.safeParse(body.response);
     if (!response.success) {
       return error('INVALID_ARGUMENT', 'The bridge response is not valid.', 400);

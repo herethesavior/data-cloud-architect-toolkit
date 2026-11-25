@@ -9,8 +9,14 @@ import {
   trustedTotal,
 } from '../lib/inventoryDisplay.ts';
 import { formatUpdatedAt, isInventoryStale } from '../lib/inventory.ts';
-import { discoveryStages, humanizeResource, resumableProgressFamilies } from '../lib/resourceStatus.ts';
+import {
+  discoveryStages,
+  hasResumableDiscoveryGap,
+  humanizeResource,
+  resumableProgressFamilies,
+} from '../lib/resourceStatus.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
+import { describeError } from '../lib/userError.ts';
 import { useDismissibleNotice } from '../lib/noticeDismissal.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 import { Button } from './ui/index.ts';
@@ -21,7 +27,7 @@ import { DiscoveryProgress, ResourceStatusNotice } from './ResourceStatusPanel.t
 import { NoOrgState } from './NoOrgState.tsx';
 
 function stalledFamilies(inventory: InventorySnapshot): boolean {
-  return resumableProgressFamilies(inventory) > 0;
+  return resumableProgressFamilies(inventory) > 0 || hasResumableDiscoveryGap(inventory);
 }
 
 /** Visible, exact counters for partial snapshots; never hides loaded rows. */
@@ -29,23 +35,32 @@ function InventoryProgressBanner({
   progress,
   onResume,
   isResuming,
+  resumable = false,
+  interrupted = false,
 }: {
   progress: DiscoveryProgressData;
   onResume?: () => void;
   isResuming: boolean;
+  resumable?: boolean;
+  interrupted?: boolean;
 }) {
-  const stalled = progress.state === 'failed';
+  const stalled = resumable || progress.state === 'failed';
   const degraded = progress.families.some((family) =>
     family.status === 'partial' || family.status === 'failed');
-  const spinning = progress.state === 'running' || progress.families.some((family) => family.hasMore);
-  const title = stalled
-    ? 'Some collections stopped loading'
-    : progress.state === 'complete'
-      ? degraded ? 'Discovery finished with gaps' : 'Inventory complete'
-      : 'Loading inventory in batches';
+  const spinning = !interrupted
+    && (progress.state === 'running' || progress.families.some((family) => family.hasMore));
+  const title = interrupted
+    ? 'Inventory loading stopped'
+    : stalled
+      ? 'Some collections stopped loading'
+      : progress.state === 'complete'
+        ? degraded ? 'Discovery finished with gaps' : 'Inventory complete'
+        : 'Loading inventory in batches';
   const detail = loadedDetailLabel(progress.loaded, progressTotal(progress), spinning);
 
-  if (progress.state === 'complete') {
+  // A resumable gap must keep the action-bearing banner even when discovery's
+  // own state is terminal; the compact line is only for genuinely finished work.
+  if (progress.state === 'complete' && !stalled) {
     return (
       <p data-testid="inventory-progress" role="status" className="mb-4 text-xs text-ink-soft">
         <span aria-hidden="true">{degraded ? '! ' : '✓ '}</span>{title} · {detail}
@@ -57,7 +72,7 @@ function InventoryProgressBanner({
     <section
       data-testid="inventory-progress"
       role={stalled ? 'alert' : 'status'}
-      aria-busy={progress.state === 'running'}
+      aria-busy={progress.state === 'running' && !interrupted}
       className={`mb-4 rounded-lg border px-4 py-3 ${stalled ? 'border-danger/25 bg-danger-soft' : 'border-brand/20 bg-brand-soft'}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -151,9 +166,16 @@ interface InventoryBoundaryProps {
 export function InventoryBoundary({ query, context, children }: InventoryBoundaryProps) {
   const actions = useInventoryActions();
   const refreshError = actions?.refreshError ?? '';
+  // Include the mutation attempt so dismissing one failure does not hide the
+  // same error from a later retry.
   const { visible: refreshErrorVisible, dismiss: dismissRefreshError } = useDismissibleNotice(
     'inventory-refresh-error',
-    refreshError ? `${context?.contextId ?? 'none'}:${refreshError}` : 'none',
+    refreshError ? `${context?.contextId ?? 'none'}:${actions?.refreshAttempt ?? 0}:${refreshError}` : 'none',
+  );
+  const resumeError = actions?.resumeError ?? '';
+  const { visible: resumeErrorVisible, dismiss: dismissResumeError } = useDismissibleNotice(
+    'inventory-resume-error',
+    resumeError ? `${context?.contextId ?? 'none'}:${actions?.resumeAttempt ?? 0}:${resumeError}` : 'none',
   );
 
   // A disabled query is "pending" in React Query. Without this guard every
@@ -171,10 +193,12 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
     return <InventoryRefreshSkeleton onCancel={manualRefresh ? actions?.cancelRefresh : undefined} />;
   }
   if (query.isError && !query.data) {
+    const described = describeError(query.error, 'inventory');
     return (
       <ErrorState
         title="Couldn't load the inventory"
-        message={query.error.message}
+        message={described.message}
+        hint={described.hint}
         onRetry={() => void query.refetch()}
         secondary={actions && actions.mode === 'live' ? (
           <Button variant="quiet" onClick={actions.onToggleMode} disabled={actions.isTogglingMode}>Use demo mode</Button>
@@ -192,12 +216,17 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   }
 
   const inventory = query.data;
+  const loadError = query.isError ? describeError(query.error, 'inventory').message : '';
   const timestamp = Date.parse(inventory.generatedAt);
   const absolute = Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : 'time unavailable';
   const live = context.mode === 'live';
   const stale = live && isInventoryStale(inventory.generatedAt);
-  const working = isInventoryLoading(inventory)
-    || Boolean(actions?.isRefreshingInventory || actions?.isResumingDiscovery);
+  // A failed poll leaves the last partial snapshot in React Query. Spinning on
+  // that stale `running` state would promise work nobody is doing anymore.
+  const working = !loadError && (
+    isInventoryLoading(inventory)
+    || Boolean(actions?.isRefreshingInventory || actions?.isResumingDiscovery)
+  );
 
   const freshness = (
     <span data-testid="inventory-freshness" className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-surface-alt px-2 text-xs text-ink-soft">
@@ -244,11 +273,21 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
 
   return (
     <>
+      {loadError ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
+          <span className="min-w-0 flex-1">Loading stopped: {loadError}</span>
+          <button type="button" onClick={() => void query.refetch()} className="font-semibold underline underline-offset-2">
+            Retry
+          </button>
+        </div>
+      ) : null}
       {inventory.progress ? (
         <InventoryProgressBanner
           progress={inventory.progress}
           onResume={stalledFamilies(inventory) ? () => actions?.resumeDiscovery?.() : undefined}
           isResuming={Boolean(actions?.isResumingDiscovery)}
+          resumable={stalledFamilies(inventory)}
+          interrupted={Boolean(loadError)}
         />
       ) : null}
       <ResourceStatusNotice inventory={inventory} />
@@ -257,6 +296,13 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           <span className="min-w-0 flex-1">Refresh failed: {refreshError}</span>
           <button type="button" onClick={actions?.refreshInventory} className="font-semibold underline underline-offset-2">Retry</button>
           <NoticeDismissButton label="Dismiss refresh error" onClick={dismissRefreshError} />
+        </p>
+      ) : null}
+      {resumeError && resumeErrorVisible ? (
+        <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
+          <span className="min-w-0 flex-1">Resume failed: {resumeError}</span>
+          <button type="button" onClick={() => actions?.resumeDiscovery?.()} className="font-semibold underline underline-offset-2">Retry</button>
+          <NoticeDismissButton label="Dismiss resume error" onClick={dismissResumeError} />
         </p>
       ) : null}
       {children(inventory, freshness)}

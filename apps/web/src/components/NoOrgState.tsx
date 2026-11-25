@@ -24,6 +24,7 @@ export function NoOrgState() {
       <ErrorState
         title="Couldn't check for Salesforce orgs"
         message={actions.orgList.message}
+        hint={actions.orgList.hint}
         onRetry={actions.orgList.retry}
         retryLabel="Retry org check"
         secondary={recovery}

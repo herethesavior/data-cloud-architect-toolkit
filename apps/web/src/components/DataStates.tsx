@@ -47,6 +47,7 @@ export function EmptyState({ title, description, icon = 'database', action }: Em
 
 interface ErrorStateProps {
   message: string;
+  hint?: string;
   onRetry?: () => void;
   title?: string;
   retryLabel?: string;
@@ -55,6 +56,7 @@ interface ErrorStateProps {
 
 export function ErrorState({
   message,
+  hint,
   onRetry,
   title = 'Something went wrong',
   retryLabel = 'Try again',
@@ -67,6 +69,7 @@ export function ErrorState({
         <div>
           <p className="font-semibold text-danger">{title}</p>
           <p className="mt-1 text-sm text-danger">{message}</p>
+          {hint ? <p className="mt-1 text-sm text-danger">{hint}</p> : null}
           {onRetry || secondary ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {onRetry ? (

@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { UseQueryResult } from '@tanstack/react-query';
 import { RESOURCE_FAMILIES } from '@dcat/core';
 import type { DiscoveryProgress, InventorySnapshot } from '@dcat/core';
 import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
 import { api } from '../lib/api.ts';
+import { InventoryBoundary } from './InventoryBoundary.tsx';
 import { InventoryActionsProvider } from '../lib/inventoryActions.tsx';
 import type { InventoryActions } from '../lib/inventoryActions.tsx';
 import { createWorkspaceContext } from '../lib/workspace.ts';
@@ -170,6 +172,22 @@ describe('InventoryBoundary progressive state', () => {
     expect(resumeDiscovery).toHaveBeenCalledTimes(1);
   });
 
+  it('offers resume when a complete snapshot was stopped by a deadline', async () => {
+    const snapshot = snapshotFor('complete');
+    snapshot.warnings = [{
+      family: 'dlos',
+      code: 'DISCOVERY_DEADLINE',
+      message: 'Discovery stopped after 480 second(s); earlier results were kept.',
+      severity: 'warning',
+    }];
+    const resumeDiscovery = renderExplorer(snapshot);
+
+    expect(await screen.findByTestId('inventory-progress')).toHaveTextContent('Some collections stopped loading');
+    expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole('button', { name: /Resume loading/ }));
+    expect(resumeDiscovery).toHaveBeenCalledTimes(1);
+  });
+
   it('renders a persisted snapshot immediately and marks an old live snapshot stale', () => {
     renderExplorer(snapshotFor('complete'), vi.fn(), true);
 
@@ -177,5 +195,55 @@ describe('InventoryBoundary progressive state', () => {
     expect(screen.getByLabelText('Cached snapshot')).toBeInTheDocument();
     expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
     expect(api.inventory).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a failed resume with a retry action', async () => {
+    const resumeDiscovery = vi.fn();
+    renderExplorer(snapshotFor('failed'), resumeDiscovery, true, {
+      resumeError: 'The local bridge is offline.',
+    });
+
+    const alert = screen.getAllByRole('alert').find((element) => element.textContent?.includes('Resume failed:'));
+    expect(alert).toHaveTextContent('Resume failed: The local bridge is offline.');
+    await userEvent.click(within(alert!).getByRole('button', { name: 'Retry' }));
+    expect(resumeDiscovery).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a retryable error instead of spinning on a failed partial load', async () => {
+    const refetch = vi.fn();
+    const query = {
+      data: snapshotFor('running'),
+      isPending: false,
+      isFetching: false,
+      isError: true,
+      error: new Error('The local bridge did not answer in time.'),
+      refetch,
+    } as unknown as UseQueryResult<InventorySnapshot, Error>;
+
+    render(
+      <InventoryActionsProvider value={{
+        context,
+        mode: 'live',
+        orgList: { status: 'idle' },
+        onGoToOrgs: vi.fn(),
+        onToggleMode: vi.fn(),
+        isTogglingMode: false,
+        refreshInventory: vi.fn(),
+        cancelRefresh: vi.fn(),
+        isRefreshingInventory: false,
+        refreshError: '',
+      }}>
+        <InventoryBoundary query={query} context={context}>
+          {() => <div>Loaded rows</div>}
+        </InventoryBoundary>
+      </InventoryActionsProvider>,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent("Loading stopped: We couldn't load this org's metadata.");
+    expect(screen.queryByRole('img', { name: 'Inventory loading' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Inventory still loading' })).not.toBeInTheDocument();
+    expect(screen.getByText('Loaded rows')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });

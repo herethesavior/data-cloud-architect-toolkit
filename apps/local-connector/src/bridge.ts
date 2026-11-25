@@ -207,6 +207,27 @@ async function taskCancelled(http: RelayHttp, token: string, taskId: string): Pr
   }
 }
 
+const RESPOND_ATTEMPTS = 3;
+const RESPOND_RETRY_MS = 250;
+
+/**
+ * Work already done is worth delivering. A dropped respond POST would otherwise
+ * leave the request claimed forever and time the browser out; the relay accepts
+ * a repeat response for the same id while it has no stored result.
+ */
+async function postResponse(http: RelayHttp, token: string, response: RelayResponse, signal?: AbortSignal): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await http.post('/api/relay/respond', { agentToken: token, response }, signal);
+      return;
+    } catch (error) {
+      if (signal?.aborted || error instanceof RelayTerminalError || error instanceof RelayAuthError) throw error;
+      if (attempt >= RESPOND_ATTEMPTS) throw error;
+      await sleep(RESPOND_RETRY_MS * 2 ** (attempt - 1), signal);
+    }
+  }
+}
+
 /** Long-lived outbound agent. It never opens a listener or accepts inbound connections. */
 export async function runBridge(options: BridgeOptions): Promise<void> {
   const logger = options.logger ?? (() => {});
@@ -258,7 +279,7 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
           response = errorResponse(task.id, error);
         }
         try {
-          await http.post('/api/relay/respond', { agentToken: token, response }, options.signal);
+          await postResponse(http, token, response, options.signal);
         } catch (error) {
           if (error instanceof RelayTerminalError) {
             // The Worker has stored a terminal failure for the browser; the

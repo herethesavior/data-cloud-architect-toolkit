@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
+import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
+import { describeError } from './lib/userError.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
 import { resetNoticeDismissals } from './lib/noticeDismissal.ts';
@@ -16,6 +18,7 @@ import {
   setModePreference,
   setSelectedOrg,
 } from './lib/preferences.ts';
+import { refreshModeOrgList } from './lib/orgListRefresh.ts';
 import { orgsQueryOptions, persistedQueryOptions } from './lib/queryPersistence.ts';
 import { useTheme } from './lib/useTheme.ts';
 import { usePageMetadata } from './lib/seo.ts';
@@ -42,7 +45,7 @@ import { ChangeImpactAnalyzer } from './pages/ChangeImpactAnalyzer.tsx';
 import { isLegacyPageHash, pageFromLocation, pagePath, writePagePath } from './navigation.ts';
 import type { Page } from './navigation.ts';
 
-function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: string; onRetry?: () => void }) {
+function BootScreen({ hosted, error, hint, onRetry }: { hosted: boolean; error?: string; hint?: string; onRetry?: () => void }) {
   return (
     <div className="grid min-h-screen place-items-center px-4 py-10">
       <div className="w-full max-w-md">
@@ -59,7 +62,7 @@ function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: strin
           </div>
         </div>
         {error ? (
-          <ErrorState message={error} onRetry={onRetry} />
+          <ErrorState message={error} hint={hint} onRetry={onRetry} />
         ) : (
           <LoadingState label={hosted ? 'Loading the hosted workbench...' : 'Connecting to the local connector...'} />
         )}
@@ -79,7 +82,7 @@ export function App() {
   const sessionReady = Boolean(sessionQuery.data);
   const orgsQuery = useQuery({
     queryKey: orgsQueryKey(mode),
-    queryFn: api.orgs,
+    queryFn: ({ signal }) => api.orgs({ signal }),
     // The mode lives in the session response. Waiting for it prevents a live
     // reload from briefly retrieving orgs under the demo key.
     enabled: sessionReady,
@@ -119,6 +122,7 @@ export function App() {
 
   const modeAppliedRef = useRef<string | null>(null);
   const failedModeRef = useRef<WorkspaceMode>('demo');
+  const orgsControllerRef = useRef<AbortController | null>(null);
   const theme = useTheme();
 
   const visibleOrgs = useMemo(
@@ -133,7 +137,8 @@ export function App() {
   const orgList = useMemo<OrgListState>(() => {
     if (orgsQuery.isFetching) return { status: 'checking' };
     if (orgsQuery.isError) {
-      return { status: 'error', message: orgsQuery.error.message, retry: retryOrgs };
+      const described = describeError(orgsQuery.error, 'orgs');
+      return { status: 'error', ...described, retry: retryOrgs };
     }
     return { status: 'idle' };
   }, [orgsQuery.isFetching, orgsQuery.isError, orgsQuery.error, retryOrgs]);
@@ -232,6 +237,8 @@ export function App() {
         // this, a late response could repopulate one mode's orgs under the other
         // mode's label. Removing the old mode also drops its persisted snapshot.
         const previousMode = session?.mode ?? mode;
+        orgsControllerRef.current?.abort();
+        orgsControllerRef.current = null;
         await queryClient.cancelQueries({ queryKey: orgsQueryKey(previousMode) });
         queryClient.removeQueries({ queryKey: orgsQueryKey(previousMode) });
         resetWorkspaceState(null);
@@ -241,16 +248,21 @@ export function App() {
         queryClient.removeQueries({ queryKey: ['health'] });
         refreshInventory.reset();
         resumeInventory.reset();
-        queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(result.mode), []);
         setFocusObject(null);
         if (persistPreferencesRef.current) setModePreference(requestedMode);
         setSelectedAlias(null);
         if (persistPreferencesRef.current) setSelectedOrg(null);
         // The connector exposes a different org list in each mode. Refresh it so
         // a mode switch cannot leave the UI stuck on the previous mode's orgs.
-        // The new key is not observed yet, so invalidation alone cannot fetch it.
-        invalidateWorkspaceState(queryClient);
-        void queryClient.refetchQueries({ queryKey: orgsQueryKey(result.mode) });
+        // Seed then fetch with an explicit queryFn so the unobserved new key
+        // cannot flash "Missing queryFn" before its observer attaches.
+        const controller = new AbortController();
+        orgsControllerRef.current = controller;
+        void refreshModeOrgList(queryClient, result.mode, hosted, controller.signal)
+          .catch(() => undefined)
+          .finally(() => {
+            if (orgsControllerRef.current === controller) orgsControllerRef.current = null;
+          });
         setModeError('');
         setModeNotice(requestedMode === 'demo'
           ? 'Now using demo mode - sample metadata only.'
@@ -265,7 +277,8 @@ export function App() {
       modePendingRef.current = false;
       modeAppliedRef.current = null;
       failedModeRef.current = requestedMode;
-      setModeError(`Couldn't switch to ${requestedMode} mode. ${error.message}`);
+      const described = describeError(error, 'mode');
+      setModeError(`${described.message}${described.hint ? ` ${described.hint}` : ''}`);
     },
   });
 
@@ -307,32 +320,43 @@ export function App() {
 
   const refreshInventory = useMutation({
     mutationFn: async (target: WorkspaceContext | null) => {
+      if (!target?.alias) throw new Error('Select an org first.');
       // Supersede any refresh started under a previous org or mode.
       refreshControllerRef.current?.abort();
       const controller = new AbortController();
       refreshControllerRef.current = controller;
-      refreshContextRef.current = target?.contextId ?? null;
+      refreshContextRef.current = target.contextId;
+      const key = ['inventory', target.contextId] as const;
+      const previous = queryClient.getQueryData<InventorySnapshot>(key);
       try {
-        if (!target?.alias) throw new Error('Select an org first.');
-        return await api.inventory(target.alias, {
+        // The automatic query owns the same relay slot. Stop it before queueing
+        // refresh work so two generations cannot interleave in one cache key.
+        await queryClient.cancelQueries({ queryKey: key });
+        const snapshot = await api.inventory(target.alias, {
           force: true,
           signal: controller.signal,
-          onSnapshot: (snapshot) => {
-            // Stream refresh batches into the same cache so existing rows stay
-            // usable and the shared progress banner can show live counts.
-            if (target.contextId === activeContextIdRef.current) {
-              queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
-            }
+          onSnapshot: (incoming) => {
+            if (refreshControllerRef.current !== controller || target.contextId !== activeContextIdRef.current) return;
+            queryClient.setQueryData<InventorySnapshot>(
+              key,
+              mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), incoming),
+            );
           },
         });
+        if (refreshControllerRef.current === controller && target.contextId === activeContextIdRef.current) {
+          queryClient.setQueryData<InventorySnapshot>(key, mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), snapshot));
+        }
+        return snapshot;
+      } catch (error) {
+        // A cancelled or failed refresh must not leave an empty running snapshot
+        // behind: the last good rows are still the truth until new ones land.
+        if (previous && target.contextId === activeContextIdRef.current) {
+          queryClient.setQueryData<InventorySnapshot>(key, previous);
+        }
+        throw error;
       } finally {
         if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
       }
-    },
-    onSuccess: (snapshot: InventorySnapshot, target) => {
-      // A late response must never replace a different org's cached snapshot.
-      if (!target || target.contextId !== activeContextIdRef.current) return;
-      queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
     },
     onError: (error) => {
       // Cancellation is a user action, not a failure worth surfacing as an error.
@@ -346,23 +370,37 @@ export function App() {
       sessionId: string;
       family?: ResourceFamily;
     }) => {
+      if (!target?.alias) throw new Error('Select an org first.');
       resumeControllerRef.current?.abort();
       const controller = new AbortController();
       resumeControllerRef.current = controller;
-      refreshContextRef.current = target?.contextId ?? null;
+      refreshContextRef.current = target.contextId;
+      const key = ['inventory', target.contextId] as const;
+      const previous = queryClient.getQueryData<InventorySnapshot>(key);
       try {
-        if (!target?.alias) throw new Error('Select an org first.');
-        return await api.inventory(target.alias, {
+        await queryClient.cancelQueries({ queryKey: key });
+        const snapshot = await api.inventory(target.alias, {
           sessionId,
           resume: true,
           family,
           signal: controller.signal,
-          onSnapshot: (snapshot) => {
-            if (target.contextId === activeContextIdRef.current) {
-              queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
-            }
+          onSnapshot: (incoming) => {
+            if (resumeControllerRef.current !== controller || target.contextId !== activeContextIdRef.current) return;
+            queryClient.setQueryData<InventorySnapshot>(
+              key,
+              mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), incoming),
+            );
           },
         });
+        if (resumeControllerRef.current === controller && target.contextId === activeContextIdRef.current) {
+          queryClient.setQueryData<InventorySnapshot>(key, mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), snapshot));
+        }
+        return snapshot;
+      } catch (error) {
+        if (previous && target.contextId === activeContextIdRef.current) {
+          queryClient.setQueryData<InventorySnapshot>(key, previous);
+        }
+        throw error;
       } finally {
         if (resumeControllerRef.current === controller) resumeControllerRef.current = null;
       }
@@ -375,7 +413,12 @@ export function App() {
   refreshInventoryRef.current = () => refreshInventory.mutate(actionsContextRef.current);
   resumeInventoryRef.current = (family) => {
     const sessionId = actionsInventoryRef.current?.progress?.sessionId;
-    if (!sessionId) return;
+    // A failed resume can leave no resumable session. Retrying must still do
+    // something visible, so start a fresh inventory load in that case.
+    if (!sessionId) {
+      refreshInventory.mutate(actionsContextRef.current);
+      return;
+    }
     resumeInventory.mutate({ target: actionsContextRef.current, sessionId, family });
   };
 
@@ -389,11 +432,16 @@ export function App() {
     refreshInventory: onRefreshInventory,
     cancelRefresh: onCancelRefresh,
     isRefreshingInventory: refreshInventory.isPending,
-    refreshError: refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
+    refreshError: !refreshInventory.error || refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
       ? ''
-      : refreshInventory.error?.message ?? '',
+      : describeError(refreshInventory.error, 'inventory').message,
+    refreshAttempt: refreshInventory.submittedAt,
     resumeDiscovery: onResumeDiscovery,
     isResumingDiscovery: resumeInventory.isPending,
+    resumeError: !resumeInventory.error || resumeInventory.error instanceof ApiError && resumeInventory.error.code === 'ABORTED'
+      ? ''
+      : describeError(resumeInventory.error, 'inventory').message,
+    resumeAttempt: resumeInventory.submittedAt,
   }), [
     context,
     mode,
@@ -405,8 +453,11 @@ export function App() {
     onCancelRefresh,
     refreshInventory.isPending,
     refreshInventory.error,
+    refreshInventory.submittedAt,
     onResumeDiscovery,
     resumeInventory.isPending,
+    resumeInventory.error,
+    resumeInventory.submittedAt,
   ]);
 
   useEffect(() => {
@@ -427,6 +478,7 @@ export function App() {
   useEffect(() => () => {
     refreshControllerRef.current?.abort();
     resumeControllerRef.current?.abort();
+    orgsControllerRef.current?.abort();
   }, []);
 
   // Feedback is transient: it confirms the switch without becoming permanent chrome.
@@ -489,12 +541,12 @@ export function App() {
 
   if (sessionQuery.isPending) return <BootScreen hosted={hosted} />;
   if (sessionQuery.isError) {
+    const described = describeError(sessionQuery.error, 'session');
     return (
       <BootScreen
         hosted={hosted}
-        error={hosted
-          ? `${sessionQuery.error.message} Reload the page to try again.`
-          : `${sessionQuery.error.message} Start the connector with npm run dev before opening the UI.`}
+        error={described.message}
+        hint={hosted ? described.hint : 'Start the local connector, then reload the page.'}
         onRetry={() => void sessionQuery.refetch()}
       />
     );
@@ -502,10 +554,13 @@ export function App() {
 
   const selectOrg = (alias: string) => {
     resumePreferencePersistence();
+    // A connect can finish after a mode switch, invoking a callback whose
+    // closure still holds the previous mode. The cached session is authoritative.
+    const currentMode = queryClient.getQueryData<SessionInfo>(['session'])?.mode ?? mode;
     // Read the cache directly: a just-connected org may be present before the
     // observing query has re-rendered, and inventory must start in this tick.
-    const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(orgsQueryKey(mode)) ?? [];
-    const next = createWorkspaceContext(mode, cachedOrgs.find((org) => org.alias === alias) ?? null);
+    const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(orgsQueryKey(currentMode)) ?? [];
+    const next = createWorkspaceContext(currentMode, cachedOrgs.find((org) => org.alias === alias) ?? null);
     resetWorkspaceState(next?.contextId ?? null);
     setFocusObject(null);
     setSelectedAlias(alias);

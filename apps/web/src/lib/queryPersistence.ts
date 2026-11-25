@@ -1,5 +1,6 @@
 import type { Query } from '@tanstack/react-query';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
+import type { InventorySnapshot } from '@dcat/core';
 import { del, get, set } from 'idb-keyval';
 import type { WorkspaceMode } from './workspace.ts';
 import { isWorkspaceContextId } from './workspace.ts';
@@ -73,5 +74,11 @@ function isInventoryQueryKey(key: readonly unknown[]): key is readonly ['invento
  */
 export function shouldPersistQuery(query: Query): boolean {
   if (query.state.status !== 'success') return false;
-  return isOrgQueryKey(query.queryKey) || isInventoryQueryKey(query.queryKey);
+  if (isOrgQueryKey(query.queryKey)) return true;
+  if (!isInventoryQueryKey(query.queryKey)) return false;
+  // A running snapshot is work in progress, not a result. Reloading it would
+  // show a spinner for a discovery nobody is running anymore. Terminal partial
+  // snapshots stay cached so a reload can render rows while revalidating.
+  const snapshot = query.state.data as InventorySnapshot | undefined;
+  return !snapshot?.progress || snapshot.progress.state !== 'running';
 }

@@ -1,6 +1,8 @@
 import { useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { InventorySnapshot } from '@dcat/core';
 import { api } from './api.ts';
+import { mergeInventorySnapshot } from './inventoryMerge.ts';
 import { persistedQueryOptions } from './queryPersistence.ts';
 import type { WorkspaceContext } from './workspace.ts';
 
@@ -25,11 +27,27 @@ export function useInventory(context: WorkspaceContext | null) {
         signal,
         onSnapshot: (snapshot) => {
           if (contextRef.current?.contextId !== context.contextId) return;
-          queryClient.setQueryData(queryKey, snapshot);
+          const merged = mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(queryKey), snapshot);
+          queryClient.setQueryData(queryKey, merged);
         },
-      });
+      }).then((snapshot) => mergeInventorySnapshot(
+        queryClient.getQueryData<InventorySnapshot>(queryKey),
+        snapshot,
+      ));
     },
     enabled: Boolean(context?.alias),
+    // The connector already retries individual pages. A second whole-session
+    // retry here duplicates CLI discovery and can collide with the manual
+    // refresh that owns the same relay slot.
+    retry: false,
     ...persistedQueryOptions,
+    // A complete snapshot (including one with no progress envelope) is enough
+    // on reload. A running or terminal-partial snapshot revalidates in the
+    // background while its rows stay visible. A failed snapshot is deliberate:
+    // resume/retry is an explicit user action.
+    refetchOnMount: (query) => {
+      const state = (query.state.data as InventorySnapshot | undefined)?.progress?.state;
+      return state === 'running' || state === 'partial' ? 'always' : false;
+    },
   });
 }

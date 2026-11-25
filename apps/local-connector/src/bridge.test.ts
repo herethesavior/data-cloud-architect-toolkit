@@ -269,6 +269,45 @@ describe('runBridge', () => {
     });
   });
 
+  it('retries a dropped result POST so completed work is not lost', async () => {
+    const controller = new AbortController();
+    const relay = new FakeRelayHttp([task({ operation: 'cli.status' })], controller);
+    let respondCalls = 0;
+    const http: RelayHttp = {
+      async post<T>(path: string, body: unknown): Promise<T> {
+        if (path === '/api/relay/respond') {
+          respondCalls += 1;
+          if (respondCalls === 1) throw new Error('Connection reset.');
+        }
+        return relay.post<T>(path, body);
+      },
+    };
+
+    vi.useFakeTimers();
+    try {
+      const running = runBridge({
+        relayUrl: 'https://dcat.example',
+        token: 'agent-token',
+        state: createState(),
+        http,
+        signal: controller.signal,
+        pollIntervalMs: 1,
+        logger: () => {},
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await running;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(respondCalls).toBe(2);
+    expect(respondBody(relay).response).toMatchObject({
+      id: 'task-1',
+      ok: true,
+      result: { installed: true, version: '2.116.6' },
+    });
+  });
+
   it('responds to a bridge update and stops the old agent after the restart handoff', async () => {
     const controller = new AbortController();
     const http = new FakeRelayHttp([task({ operation: 'bridge.update' })], controller);

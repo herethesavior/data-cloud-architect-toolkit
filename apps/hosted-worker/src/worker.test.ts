@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
 import app from './index.ts';
 import { getBridgeUpdateStatus, resetNpmVersionCache } from './relay.ts';
 import { createSession } from './session.ts';
@@ -237,6 +238,40 @@ describe('hosted bridge relay', () => {
     expect(kv.deletes.some((key) => key.startsWith('relay:'))).toBe(false);
   });
 
+  it('refreshes bridge liveness when a long task posts its result', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const nowSpy = vi.spyOn(Date, 'now');
+    const now = Date.now();
+    nowSpy.mockReturnValue(now + 61_000);
+    try {
+      await postJson('/api/relay/respond', {
+        agentToken: paired.agentToken,
+        response: { id: created.id, ok: true, result: cli },
+      }, {}, env);
+
+      // The bridge could not poll while it was busy, but its result is proof of
+      // life. The next request must not be rejected as an offline bridge.
+      const next = await postJson<{ id: string }>('/api/relay/requests', {
+        operation: 'org.list',
+      }, session.headers, env);
+      expect(next.id).not.toBe(created.id);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('performs zero KV operations while an agent polls', async () => {
     const kv = new FakeKV();
     const env = makeEnv(kv);
@@ -438,6 +473,35 @@ describe('hosted bridge relay', () => {
     expect(paired.agentToken).toMatch(/\S/);
   });
 
+  it('gives a status poll enough time for a slow CLI org refresh', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    let queued: { createdAt: number; expiresAt: number } | null = null;
+    env.RELAY_DO = stubRelayDo(async (request) => {
+      queued = await request.json() as { createdAt: number; expiresAt: number };
+      return new Response(JSON.stringify({ id: 'req-status', status: 'pending' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    await postJson('/api/relay/requests', {
+      operation: 'inventory.status',
+      alias: 'prod-org',
+      sessionId: 'session-1',
+    }, session.headers, env);
+
+    expect(queued).not.toBeNull();
+    expect(queued!.expiresAt - queued!.createdAt).toBe(RELAY_OPERATION_TIMEOUT_MS['inventory.status']);
+    expect(RELAY_OPERATION_TIMEOUT_MS['inventory.status']).toBeGreaterThanOrEqual(120_000);
+  });
+
   it('uses the shared transform-id validator for relayed requests', async () => {
     const env = makeEnv();
     const session = await startSession(env);
@@ -478,6 +542,31 @@ describe('hosted bridge relay', () => {
     try {
       const status = await app.request('/api/relay/status', { headers: session.headers }, env);
       expect(await status.json()).toMatchObject({ paired: true, relay: 'stale', canRepairPairing: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits since the last check-in before offering repair for a stale bridge', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(now + 61_000);
+      const stale = await app.request('/api/relay/status', { headers: session.headers }, env);
+      expect(await stale.json()).toMatchObject({ paired: true, relay: 'stale', canRepairPairing: false });
+
+      vi.setSystemTime(now + 121_000);
+      const repairable = await app.request('/api/relay/status', { headers: session.headers }, env);
+      expect(await repairable.json()).toMatchObject({ paired: true, relay: 'stale', canRepairPairing: true });
     } finally {
       vi.useRealTimers();
     }

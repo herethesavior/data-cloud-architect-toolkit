@@ -20,6 +20,17 @@ describe('inventory cache persistence', () => {
     ]);
   });
 
+  it('does not persist a snapshot whose discovery is still running', () => {
+    const client = new QueryClient();
+    const contextId = 'live:prod-org:00DXX0000001PROD';
+    client.setQueryData(['inventory', contextId], {
+      progress: { state: 'running' },
+      dlos: [{ id: 'partial' }],
+    });
+
+    expect(client.getQueryCache().getAll().filter(shouldPersistQuery)).toEqual([]);
+  });
+
   it('keeps tokens, pairing state, transforms, and placeholders out of the persisted client', () => {
     const client = new QueryClient();
     client.setQueryData(orgsQueryKey('live'), [{ alias: 'prod-org' }]);

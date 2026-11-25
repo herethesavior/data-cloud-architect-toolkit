@@ -5,7 +5,7 @@ import type { WorkspaceContext } from './workspace.ts';
 
 export type OrgListState =
   | { status: 'checking' }
-  | { status: 'error'; message: string; retry: () => void }
+  | { status: 'error'; message: string; hint?: string; retry: () => void }
   | { status: 'idle' };
 
 export interface InventoryActions {
@@ -19,8 +19,12 @@ export interface InventoryActions {
   cancelRefresh: () => void;
   isRefreshingInventory: boolean;
   refreshError: string;
+  /** Mutation submission timestamp: distinguishes a retry with the same message. */
+  refreshAttempt?: number;
   resumeDiscovery?: (family?: ResourceFamily) => void;
   isResumingDiscovery?: boolean;
+  resumeError?: string;
+  resumeAttempt?: number;
 }
 
 const InventoryActionsContext = createContext<InventoryActions | null>(null);

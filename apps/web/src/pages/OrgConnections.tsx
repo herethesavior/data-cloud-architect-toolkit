@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { BridgeStatus, OrgSummary } from '@dcat/core';
-import { api } from '../lib/api.ts';
+import type { BridgeStatus, OrgSummary, SessionInfo } from '@dcat/core';
+import { api, ApiError } from '../lib/api.ts';
 import { isHosted } from '../lib/hosted.ts';
 import { orgsQueryOptions } from '../lib/queryPersistence.ts';
+import { describeError, sanitizeDetail } from '../lib/userError.ts';
 import { invalidateBridgeState, invalidateDiagnosticsState, orgsQueryKey } from '../lib/workspace.ts';
 import type { WorkspaceMode } from '../lib/workspace.ts';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates.tsx';
@@ -15,6 +16,7 @@ import type { DataTableColumn } from '../components/ui/index.ts';
 
 const aliasPattern = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
 const manualUpdateCommand = 'npm install -g @dcat-toolkit/bridge@latest';
+const bridgeStartCommand = 'npx -y @dcat-toolkit/bridge@latest start';
 
 function validateInstanceUrl(value: string): string | null {
   if (!value.trim()) return null;
@@ -71,6 +73,17 @@ function Step({ number, title, description, badge, action, children }: StepProps
   );
 }
 
+function BridgeStartCommand() {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <code className="mono min-w-0 flex-1 overflow-x-auto rounded border border-line bg-surface-alt px-2 py-1.5 text-xs text-ink">
+        {bridgeStartCommand}
+      </code>
+      <CopyButton value={bridgeStartCommand} label="Copy start command" />
+    </div>
+  );
+}
+
 function setupLabel(status: BridgeStatus | undefined, hosted: boolean, installed: boolean | null): string {
   if (status === undefined) return 'Checking...';
   if (installed === false || status.cli.installed === false) return 'SF CLI missing';
@@ -105,6 +118,8 @@ export function OrgConnections({
   const [showHidden, setShowHidden] = useState(false);
   const [removalNotice, setRemovalNotice] = useState('');
   const connectStarted = useRef(false);
+  const connectController = useRef<AbortController | null>(null);
+  const refreshController = useRef<AbortController | null>(null);
   const aliasInputId = useId();
   const instanceInputId = useId();
   const browserSelectId = useId();
@@ -126,7 +141,7 @@ export function OrgConnections({
   const bridgeStatus = bridgeStatusQuery.data;
   const orgsQuery = useQuery({
     queryKey: orgsQueryKey(mode),
-    queryFn: api.orgs,
+    queryFn: ({ signal }) => api.orgs({ signal }),
     enabled: !hosted || demo || bridgeStatus?.mode === 'demo' || bridgeStatus?.paired === true,
     ...orgsQueryOptions(hosted),
   });
@@ -139,7 +154,10 @@ export function OrgConnections({
       setSetupError('');
       invalidateDiagnosticsState(queryClient);
     },
-    onError: (error: Error) => setSetupError(error.message),
+    onError: (error: Error) => {
+      const described = describeError(error, 'setup');
+      setSetupError(`${described.message}${described.hint ? ` ${described.hint}` : ''}`);
+    },
   });
 
   const createPairing = useMutation({
@@ -148,32 +166,49 @@ export function OrgConnections({
       return api.relayPairing();
     },
     onSuccess: () => setSetupError(''),
-    onError: (error: Error) => setSetupError(error.message),
+    onError: (error: Error) => {
+      const described = describeError(error, 'setup');
+      setSetupError(`${described.message}${described.hint ? ` ${described.hint}` : ''}`);
+    },
     // If unpairing succeeded but pairing failed, the cached status still says
     // "paired". Refetch it on every outcome so recovery does not wait for a poll.
     onSettled: () => invalidateSetup(),
   });
 
+  // The page remounts on a mode switch, so the captured `mode` prop is not
+  // authoritative for a mutation that started before the switch.
+  const currentMode = () => queryClient.getQueryData<SessionInfo>(['session'])?.mode ?? mode;
+
+  useEffect(() => () => {
+    connectController.current?.abort();
+    refreshController.current?.abort();
+  }, []);
+
   const connectOrg = useMutation({
-    // The caller's mode travels with the mutation: a mode switch does not
-    // remount this page, so reading the current prop on success would write a
-    // live result into the demo cache (or the other way around).
-    mutationFn: async (mutationMode: WorkspaceMode) => ({
-      org: await api.connectOrg(newAlias, instanceUrl, loginBrowser || undefined),
-      mutationMode,
-    }),
+    mutationFn: async (mutationMode: WorkspaceMode) => {
+      const controller = new AbortController();
+      connectController.current = controller;
+      try {
+        return {
+          org: await api.connectOrg(newAlias, instanceUrl, loginBrowser || undefined, { signal: controller.signal }),
+          mutationMode,
+        };
+      } finally {
+        if (connectController.current === controller) connectController.current = null;
+      }
+    },
     onMutate: () => {
       connectStarted.current = true;
     },
     onSuccess: ({ org, mutationMode }) => {
-      if (mutationMode !== mode) return;
+      if (mutationMode !== currentMode()) return;
       setConnectError('');
       setConnectedAlias(org.alias);
       // Seed the shared org cache before selection so the workbench has a
       // context immediately. Do not invalidate the org list here: an invalidated
       // observer can refetch on a later mount and put a blocking `org.list`
       // between the connect request and the first inventory load.
-      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), (current = []) => [
+      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mutationMode), (current = []) => [
         org,
         ...current.filter((entry) => entry.alias !== org.alias),
       ]);
@@ -181,26 +216,42 @@ export function OrgConnections({
       onRestoreOrg(org.alias);
       onSelect(org.alias);
     },
-    onError: (error: Error) => setConnectError(error.message),
+    onError: (error: Error, mutationMode) => {
+      if (mutationMode !== currentMode() || error instanceof ApiError && error.code === 'ABORTED') return;
+      const described = describeError(error, 'connect');
+      setConnectError(`${described.message}${described.hint ? ` ${described.hint}` : ''}`);
+    },
     onSettled: () => {
       connectStarted.current = false;
     },
   });
 
   const refreshOrgs = useMutation({
-    mutationFn: async (mutationMode: WorkspaceMode) => ({
-      orgs: await api.refreshOrgs(),
-      mutationMode,
-    }),
+    mutationFn: async (mutationMode: WorkspaceMode) => {
+      const controller = new AbortController();
+      refreshController.current = controller;
+      try {
+        return {
+          orgs: await api.refreshOrgs({ signal: controller.signal }),
+          mutationMode,
+        };
+      } finally {
+        if (refreshController.current === controller) refreshController.current = null;
+      }
+    },
     onSuccess: ({ orgs, mutationMode }) => {
-      if (mutationMode !== mode) return;
+      if (mutationMode !== currentMode()) return;
       // This is the explicit user refresh: replace the persisted list with the
       // newly retrieved one instead of waiting for an observer-mount refetch.
       setRefreshError('');
-      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), orgs);
+      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mutationMode), orgs);
       invalidateBridgeState(queryClient);
     },
-    onError: (error: Error) => setRefreshError(error.message),
+    onError: (error: Error, mutationMode) => {
+      if (mutationMode !== currentMode() || error instanceof ApiError && error.code === 'ABORTED') return;
+      const refreshDescription = describeError(error, 'refresh');
+      setRefreshError(`${refreshDescription.message}${refreshDescription.hint ? ` ${refreshDescription.hint}` : ''}`);
+    },
   });
 
   const status = bridgeStatusQuery.data;
@@ -404,7 +455,12 @@ export function OrgConnections({
           ) : null}
           {!demo && bridgeStatusQuery.isPending ? <LoadingState label="Checking the local bridge..." /> : null}
           {!demo && bridgeStatusQuery.isError ? (
-            <ErrorState message={bridgeStatusQuery.error.message} onRetry={() => void bridgeStatusQuery.refetch()} />
+            <ErrorState
+              message={describeError(bridgeStatusQuery.error, 'bridge').message}
+              hint={describeError(bridgeStatusQuery.error, 'bridge').hint}
+              onRetry={() => void bridgeStatusQuery.refetch()}
+              retryLabel="Refresh status"
+            />
           ) : null}
 
           {!demo && status && hosted && status.paired && status.updateAvailable ? (
@@ -470,11 +526,13 @@ export function OrgConnections({
               </p>
               <p>
                 {status.relay === 'stale'
-                  ? 'Check its network connection or sleep state, then restart it with '
-                  : 'Keep the installer running with '}
-                <code className="mono">npx -y @dcat-toolkit/bridge@latest start</code>.
-                {status.canRepairPairing ? ' If it does not reconnect, create a fresh pairing code.' : ''}
+                  ? 'Check its network connection or sleep state, then restart it with:'
+                  : 'Keep the installer running with:'}
               </p>
+              <BridgeStartCommand />
+              {status.canRepairPairing ? (
+                <p>If it does not reconnect, create a fresh pairing code.</p>
+              ) : null}
               {status.canRepairPairing ? (
                 <Button
                   variant="secondary"
@@ -502,7 +560,11 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {!demo && status?.cli.error ? <p className="mt-3 text-sm text-warning">{status.cli.error}</p> : null}
+          {!demo && status?.cli.error ? (
+            <p className="mt-3 text-sm text-warning">
+              {sanitizeDetail(status.cli.error, "Salesforce CLI is installed, but its version check failed. Re-check, or reinstall it if the problem continues.")}
+            </p>
+          ) : null}
           {!demo && setupError ? <p className="mt-3 text-sm text-danger" role="alert">{setupError}</p> : null}
         </Step>
 
@@ -642,7 +704,7 @@ export function OrgConnections({
           ) : null}
           {refreshError ? (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">
-              <span>Couldn't refresh the org list: {refreshError}</span>
+              <span>{refreshError}</span>
               <button
                 type="button"
                 onClick={() => {
@@ -659,7 +721,8 @@ export function OrgConnections({
           {!orgListChecking && orgsQuery.isError ? (
             <ErrorState
               title="Couldn't check for Salesforce orgs"
-              message={orgsQuery.error.message}
+              message={describeError(orgsQuery.error, 'orgs').message}
+              hint={describeError(orgsQuery.error, 'orgs').hint}
               onRetry={() => void orgsQuery.refetch()}
               retryLabel="Retry org check"
             />
