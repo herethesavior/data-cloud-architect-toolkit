@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
+import { keepRowsUntilRefreshReports } from './lib/inventoryRefresh.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
 import { resetNoticeDismissals } from './lib/noticeDismissal.ts';
@@ -307,32 +308,40 @@ export function App() {
 
   const refreshInventory = useMutation({
     mutationFn: async (target: WorkspaceContext | null) => {
+      if (!target?.alias) throw new Error('Select an org first.');
       // Supersede any refresh started under a previous org or mode.
       refreshControllerRef.current?.abort();
       const controller = new AbortController();
       refreshControllerRef.current = controller;
-      refreshContextRef.current = target?.contextId ?? null;
+      refreshContextRef.current = target.contextId;
+      const key = ['inventory', target.contextId] as const;
+      const previous = queryClient.getQueryData<InventorySnapshot>(key);
       try {
-        if (!target?.alias) throw new Error('Select an org first.');
-        return await api.inventory(target.alias, {
+        // The automatic query owns the same relay slot. Stop it before queueing
+        // refresh work so two generations cannot interleave in one cache key.
+        await queryClient.cancelQueries({ queryKey: key });
+        const snapshot = await api.inventory(target.alias, {
           force: true,
           signal: controller.signal,
-          onSnapshot: (snapshot) => {
-            // Stream refresh batches into the same cache so existing rows stay
-            // usable and the shared progress banner can show live counts.
-            if (target.contextId === activeContextIdRef.current) {
-              queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
-            }
+          onSnapshot: (incoming) => {
+            if (refreshControllerRef.current !== controller || target.contextId !== activeContextIdRef.current) return;
+            queryClient.setQueryData<InventorySnapshot>(key, keepRowsUntilRefreshReports(previous, incoming));
           },
         });
+        if (refreshControllerRef.current === controller && target.contextId === activeContextIdRef.current) {
+          queryClient.setQueryData<InventorySnapshot>(key, snapshot);
+        }
+        return snapshot;
+      } catch (error) {
+        // A cancelled or failed refresh must not leave an empty running snapshot
+        // behind: the last good rows are still the truth until new ones land.
+        if (previous && target.contextId === activeContextIdRef.current) {
+          queryClient.setQueryData<InventorySnapshot>(key, previous);
+        }
+        throw error;
       } finally {
         if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
       }
-    },
-    onSuccess: (snapshot: InventorySnapshot, target) => {
-      // A late response must never replace a different org's cached snapshot.
-      if (!target || target.contextId !== activeContextIdRef.current) return;
-      queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
     },
     onError: (error) => {
       // Cancellation is a user action, not a failure worth surfacing as an error.
@@ -346,23 +355,34 @@ export function App() {
       sessionId: string;
       family?: ResourceFamily;
     }) => {
+      if (!target?.alias) throw new Error('Select an org first.');
       resumeControllerRef.current?.abort();
       const controller = new AbortController();
       resumeControllerRef.current = controller;
-      refreshContextRef.current = target?.contextId ?? null;
+      refreshContextRef.current = target.contextId;
+      const key = ['inventory', target.contextId] as const;
+      const previous = queryClient.getQueryData<InventorySnapshot>(key);
       try {
-        if (!target?.alias) throw new Error('Select an org first.');
-        return await api.inventory(target.alias, {
+        await queryClient.cancelQueries({ queryKey: key });
+        const snapshot = await api.inventory(target.alias, {
           sessionId,
           resume: true,
           family,
           signal: controller.signal,
-          onSnapshot: (snapshot) => {
-            if (target.contextId === activeContextIdRef.current) {
-              queryClient.setQueryData<InventorySnapshot>(['inventory', target.contextId], snapshot);
-            }
+          onSnapshot: (incoming) => {
+            if (resumeControllerRef.current !== controller || target.contextId !== activeContextIdRef.current) return;
+            queryClient.setQueryData<InventorySnapshot>(key, keepRowsUntilRefreshReports(previous, incoming));
           },
         });
+        if (resumeControllerRef.current === controller && target.contextId === activeContextIdRef.current) {
+          queryClient.setQueryData<InventorySnapshot>(key, snapshot);
+        }
+        return snapshot;
+      } catch (error) {
+        if (previous && target.contextId === activeContextIdRef.current) {
+          queryClient.setQueryData<InventorySnapshot>(key, previous);
+        }
+        throw error;
       } finally {
         if (resumeControllerRef.current === controller) resumeControllerRef.current = null;
       }
