@@ -17,6 +17,7 @@ import {
   setModePreference,
   setSelectedOrg,
 } from './lib/preferences.ts';
+import { refreshModeOrgList } from './lib/orgListRefresh.ts';
 import { orgsQueryOptions, persistedQueryOptions } from './lib/queryPersistence.ts';
 import { useTheme } from './lib/useTheme.ts';
 import { usePageMetadata } from './lib/seo.ts';
@@ -80,7 +81,7 @@ export function App() {
   const sessionReady = Boolean(sessionQuery.data);
   const orgsQuery = useQuery({
     queryKey: orgsQueryKey(mode),
-    queryFn: api.orgs,
+    queryFn: ({ signal }) => api.orgs({ signal }),
     // The mode lives in the session response. Waiting for it prevents a live
     // reload from briefly retrieving orgs under the demo key.
     enabled: sessionReady,
@@ -120,6 +121,7 @@ export function App() {
 
   const modeAppliedRef = useRef<string | null>(null);
   const failedModeRef = useRef<WorkspaceMode>('demo');
+  const orgsControllerRef = useRef<AbortController | null>(null);
   const theme = useTheme();
 
   const visibleOrgs = useMemo(
@@ -233,6 +235,8 @@ export function App() {
         // this, a late response could repopulate one mode's orgs under the other
         // mode's label. Removing the old mode also drops its persisted snapshot.
         const previousMode = session?.mode ?? mode;
+        orgsControllerRef.current?.abort();
+        orgsControllerRef.current = null;
         await queryClient.cancelQueries({ queryKey: orgsQueryKey(previousMode) });
         queryClient.removeQueries({ queryKey: orgsQueryKey(previousMode) });
         resetWorkspaceState(null);
@@ -242,16 +246,21 @@ export function App() {
         queryClient.removeQueries({ queryKey: ['health'] });
         refreshInventory.reset();
         resumeInventory.reset();
-        queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(result.mode), []);
         setFocusObject(null);
         if (persistPreferencesRef.current) setModePreference(requestedMode);
         setSelectedAlias(null);
         if (persistPreferencesRef.current) setSelectedOrg(null);
         // The connector exposes a different org list in each mode. Refresh it so
         // a mode switch cannot leave the UI stuck on the previous mode's orgs.
-        // The new key is not observed yet, so invalidation alone cannot fetch it.
-        invalidateWorkspaceState(queryClient);
-        void queryClient.refetchQueries({ queryKey: orgsQueryKey(result.mode) });
+        // Seed then fetch with an explicit queryFn so the unobserved new key
+        // cannot flash "Missing queryFn" before its observer attaches.
+        const controller = new AbortController();
+        orgsControllerRef.current = controller;
+        void refreshModeOrgList(queryClient, result.mode, hosted, controller.signal)
+          .catch(() => undefined)
+          .finally(() => {
+            if (orgsControllerRef.current === controller) orgsControllerRef.current = null;
+          });
         setModeError('');
         setModeNotice(requestedMode === 'demo'
           ? 'Now using demo mode - sample metadata only.'
@@ -461,6 +470,7 @@ export function App() {
   useEffect(() => () => {
     refreshControllerRef.current?.abort();
     resumeControllerRef.current?.abort();
+    orgsControllerRef.current?.abort();
   }, []);
 
   // Feedback is transient: it confirms the switch without becoming permanent chrome.
@@ -536,10 +546,13 @@ export function App() {
 
   const selectOrg = (alias: string) => {
     resumePreferencePersistence();
+    // A connect can finish after a mode switch, invoking a callback whose
+    // closure still holds the previous mode. The cached session is authoritative.
+    const currentMode = queryClient.getQueryData<SessionInfo>(['session'])?.mode ?? mode;
     // Read the cache directly: a just-connected org may be present before the
     // observing query has re-rendered, and inventory must start in this tick.
-    const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(orgsQueryKey(mode)) ?? [];
-    const next = createWorkspaceContext(mode, cachedOrgs.find((org) => org.alias === alias) ?? null);
+    const cachedOrgs = queryClient.getQueryData<OrgSummary[]>(orgsQueryKey(currentMode)) ?? [];
+    const next = createWorkspaceContext(currentMode, cachedOrgs.find((org) => org.alias === alias) ?? null);
     resetWorkspaceState(next?.contextId ?? null);
     setFocusObject(null);
     setSelectedAlias(alias);

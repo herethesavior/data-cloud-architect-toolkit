@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { BridgeStatus, OrgSummary } from '@dcat/core';
+import type { BridgeStatus, OrgSummary, SessionInfo } from '@dcat/core';
 import { api } from '../lib/api.ts';
 import { orgsQueryKey } from '../lib/workspace.ts';
 import { OrgConnections } from './OrgConnections.tsx';
@@ -43,11 +43,12 @@ interface RenderOptions {
   seedOrgs?: OrgSummary[];
   invalidateSeededOrgs?: boolean;
   mode?: 'demo' | 'live';
+  queryClient?: QueryClient;
 }
 
 function renderOrgConnections(onSelect = vi.fn(), options: RenderOptions = {}) {
   const mode = options.mode ?? 'live';
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryClient = options.queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
   if (options.seedOrgs) {
     queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), options.seedOrgs);
     if (options.invalidateSeededOrgs) void queryClient.invalidateQueries({ queryKey: orgsQueryKey(mode) });
@@ -66,21 +67,26 @@ function renderOrgConnections(onSelect = vi.fn(), options: RenderOptions = {}) {
       />
     </QueryClientProvider>,
   );
-  const rerenderWithMode = (nextMode: 'demo' | 'live') => {
-    view.rerender(
-      <QueryClientProvider client={queryClient}>
-        <OrgConnections
-          mode={nextMode}
-          selectedAlias={null}
-          onSelect={onSelect}
-          hiddenAliases={options.hiddenAliases ?? []}
-          onRemoveOrg={onRemoveOrg}
-          onRestoreOrg={onRestoreOrg}
-        />
-      </QueryClientProvider>,
-    );
+  const viewFor = (nextMode: 'demo' | 'live') => (
+    <QueryClientProvider client={queryClient}>
+      <OrgConnections
+        mode={nextMode}
+        selectedAlias={null}
+        onSelect={onSelect}
+        hiddenAliases={options.hiddenAliases ?? []}
+        onRemoveOrg={onRemoveOrg}
+        onRestoreOrg={onRestoreOrg}
+      />
+    </QueryClientProvider>
+  );
+  const rerenderWithMode = (nextMode: 'demo' | 'live') => view.rerender(viewFor(nextMode));
+  // App keys the page by mode, so a real switch unmounts this component instead
+  // of merely rerendering it with a new prop.
+  const remountWithMode = (nextMode: 'demo' | 'live') => {
+    view.unmount();
+    return render(viewFor(nextMode));
   };
-  return { onSelect, onRemoveOrg, onRestoreOrg, queryClient, rerenderWithMode };
+  return { onSelect, onRemoveOrg, onRestoreOrg, queryClient, rerenderWithMode, remountWithMode };
 }
 
 describe('OrgConnections connect wizard', () => {
@@ -218,7 +224,9 @@ describe('OrgConnections connect wizard', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: 'Connect org' }));
 
-    await waitFor(() => expect(connect).toHaveBeenCalledWith('my-data360-org', '', undefined));
+    await waitFor(() => expect(connect).toHaveBeenCalledWith(
+      'my-data360-org', '', undefined, { signal: expect.any(AbortSignal) },
+    ));
     await waitFor(() => expect(queryClient.getQueryData<OrgSummary[]>(orgsQueryKey('live'))).toEqual([connectedOrg]));
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('prod-org'));
     expect(onRestoreOrg).toHaveBeenCalledWith('prod-org');
@@ -389,15 +397,21 @@ describe('OrgConnections connect wizard', () => {
 
   it('does not write a connect result into the new mode cache after a mode switch', async () => {
     let finish!: (org: OrgSummary) => void;
+    let signal: AbortSignal | undefined;
     const pending = new Promise<OrgSummary>((resolve) => { finish = resolve; });
-    vi.spyOn(api, 'connectOrg').mockReturnValue(pending);
+    vi.spyOn(api, 'connectOrg').mockImplementation(async (_alias, _url, _browser, options) => {
+      signal = options?.signal;
+      return pending;
+    });
     vi.mocked(api.orgs).mockResolvedValue([]);
-    const { onSelect, queryClient, rerenderWithMode } = renderOrgConnections();
+    const { onSelect, queryClient, remountWithMode } = renderOrgConnections();
 
     const button = await screen.findByRole('button', { name: 'Connect org' });
     await waitFor(() => expect(button).toBeEnabled());
     await userEvent.click(button);
-    rerenderWithMode('demo');
+    queryClient.setQueryData<SessionInfo>(['session'], { token: 'test-token', mode: 'demo' });
+    remountWithMode('demo');
+    expect(signal?.aborted).toBe(true);
     finish(connectedOrg);
     await pending;
 
@@ -411,11 +425,12 @@ describe('OrgConnections connect wizard', () => {
     const pending = new Promise<OrgSummary[]>((resolve) => { finish = resolve; });
     vi.spyOn(api, 'refreshOrgs').mockReturnValue(pending);
     vi.mocked(api.orgs).mockResolvedValue([]);
-    const { queryClient, rerenderWithMode } = renderOrgConnections(vi.fn(), { seedOrgs: [connectedOrg] });
+    const { queryClient, remountWithMode } = renderOrgConnections(vi.fn(), { seedOrgs: [connectedOrg] });
     await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' });
 
     await userEvent.click(screen.getByRole('button', { name: 'Refresh org list' }));
-    rerenderWithMode('demo');
+    queryClient.setQueryData<SessionInfo>(['session'], { token: 'test-token', mode: 'demo' });
+    remountWithMode('demo');
     await waitFor(() => expect(api.orgs).toHaveBeenCalled());
     finish([connectedOrg]);
     await pending;

@@ -347,6 +347,32 @@ describe('web API session handling', () => {
     await assertion;
   });
 
+  it('forwards caller cancellation to org list, refresh, and connect requests', async () => {
+    const assertAborted = async (path: string, call: (signal: AbortSignal) => Promise<unknown>) => {
+      const fetchMock = vi.fn(async (requestPath: string, options?: RequestInit) => {
+        if (requestPath === '/api/session') return jsonResponse(session);
+        return new Promise((_resolve, reject) => {
+          if (options?.signal?.aborted) {
+            reject(new Error('aborted'));
+            return;
+          }
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const controller = new AbortController();
+      const pending = call(controller.signal);
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ code: 'ABORTED' });
+      expect(fetchMock.mock.calls.some(([requestPath]) => requestPath === path)).toBe(true);
+    };
+
+    await assertAborted('/api/orgs', (signal) => api.orgs({ signal }));
+    await assertAborted('/api/orgs/refresh', (signal) => api.refreshOrgs({ signal }));
+    await assertAborted('/api/orgs/connect', (signal) => api.connectOrg('prod-org', undefined, undefined, { signal }));
+  });
+
   it('aborts an inventory refresh when the caller cancels', async () => {
     const controller = new AbortController();
     const fetchMock = vi.fn((path: string, options?: RequestInit) => {

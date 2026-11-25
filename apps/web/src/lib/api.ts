@@ -147,8 +147,12 @@ async function requestWithToken<T>(path: string, options: RequestOptions = {}): 
   }
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  return requestWithToken<T>(path, { method: 'POST', body });
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  options: Pick<RequestOptions, 'signal' | 'timeoutMs'> = {},
+): Promise<T> {
+  return requestWithToken<T>(path, { method: 'POST', body, ...options });
 }
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
@@ -453,9 +457,11 @@ export const api = {
     }
     return request<ConnectorHealth>('/api/health');
   },
-  orgs: async (): Promise<OrgSummary[]> => {
-    if (isHosted() && !await hostedUsesFixtures()) return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }));
-    return normalizeOrgs(await request<OrgSummary[]>('/api/orgs'));
+  orgs: async (options: { signal?: AbortSignal } = {}): Promise<OrgSummary[]> => {
+    if (isHosted() && !await hostedUsesFixtures()) {
+      return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }, options.signal));
+    }
+    return normalizeOrgs(await request<OrgSummary[]>('/api/orgs', { signal: options.signal }));
   },
   org: async (alias: string): Promise<OrgSummary> => {
     if (isHosted() && !await hostedUsesFixtures()) {
@@ -497,9 +503,11 @@ export const api = {
       { signal: options.signal, timeoutMs: RELAY_OPERATION_TIMEOUT_MS['transform.get'] },
     );
   },
-  refreshOrgs: async (): Promise<OrgSummary[]> => {
-    if (isHosted() && !await hostedUsesFixtures()) return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }));
-    return normalizeOrgs(await postJson<OrgSummary[]>('/api/orgs/refresh', {}));
+  refreshOrgs: async (options: { signal?: AbortSignal } = {}): Promise<OrgSummary[]> => {
+    if (isHosted() && !await hostedUsesFixtures()) {
+      return normalizeOrgs(await relayCall<OrgSummary[]>({ operation: 'org.list' }, options.signal));
+    }
+    return normalizeOrgs(await postJson<OrgSummary[]>('/api/orgs/refresh', {}, { signal: options.signal }));
   },
   refreshCli: async (): Promise<CliStatus> => {
     if (isHosted()) {
@@ -517,6 +525,7 @@ export const api = {
     alias: string,
     instanceUrl?: string,
     browser?: 'chrome' | 'edge' | 'firefox',
+    options: { signal?: AbortSignal } = {},
   ): Promise<OrgSummary> => {
     if (isHosted() && await hostedUsesFixtures()) {
       throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode before connecting an org.');
@@ -527,14 +536,14 @@ export const api = {
         alias,
         ...(instanceUrl ? { instanceUrl } : {}),
         ...(browser ? { browser } : {}),
-      });
+      }, options.signal);
       return normalizeOrg({ ...connected, instanceUrl: connected.instanceUrl ?? instanceUrl ?? null });
     }
     const connected = await postJson<OrgSummary>('/api/orgs/connect', {
       alias,
       ...(instanceUrl ? { instanceUrl } : {}),
       ...(browser ? { browser } : {}),
-    });
+    }, { signal: options.signal });
     return normalizeOrg({ ...connected, instanceUrl: connected.instanceUrl ?? instanceUrl ?? null });
   },
   bridgeStatus,

@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { BridgeStatus, OrgSummary } from '@dcat/core';
-import { api } from '../lib/api.ts';
+import type { BridgeStatus, OrgSummary, SessionInfo } from '@dcat/core';
+import { api, ApiError } from '../lib/api.ts';
 import { isHosted } from '../lib/hosted.ts';
 import { orgsQueryOptions } from '../lib/queryPersistence.ts';
 import { invalidateBridgeState, invalidateDiagnosticsState, orgsQueryKey } from '../lib/workspace.ts';
@@ -105,6 +105,8 @@ export function OrgConnections({
   const [showHidden, setShowHidden] = useState(false);
   const [removalNotice, setRemovalNotice] = useState('');
   const connectStarted = useRef(false);
+  const connectController = useRef<AbortController | null>(null);
+  const refreshController = useRef<AbortController | null>(null);
   const aliasInputId = useId();
   const instanceInputId = useId();
   const browserSelectId = useId();
@@ -126,7 +128,7 @@ export function OrgConnections({
   const bridgeStatus = bridgeStatusQuery.data;
   const orgsQuery = useQuery({
     queryKey: orgsQueryKey(mode),
-    queryFn: api.orgs,
+    queryFn: ({ signal }) => api.orgs({ signal }),
     enabled: !hosted || demo || bridgeStatus?.mode === 'demo' || bridgeStatus?.paired === true,
     ...orgsQueryOptions(hosted),
   });
@@ -154,26 +156,40 @@ export function OrgConnections({
     onSettled: () => invalidateSetup(),
   });
 
+  // The page remounts on a mode switch, so the captured `mode` prop is not
+  // authoritative for a mutation that started before the switch.
+  const currentMode = () => queryClient.getQueryData<SessionInfo>(['session'])?.mode ?? mode;
+
+  useEffect(() => () => {
+    connectController.current?.abort();
+    refreshController.current?.abort();
+  }, []);
+
   const connectOrg = useMutation({
-    // The caller's mode travels with the mutation: a mode switch does not
-    // remount this page, so reading the current prop on success would write a
-    // live result into the demo cache (or the other way around).
-    mutationFn: async (mutationMode: WorkspaceMode) => ({
-      org: await api.connectOrg(newAlias, instanceUrl, loginBrowser || undefined),
-      mutationMode,
-    }),
+    mutationFn: async (mutationMode: WorkspaceMode) => {
+      const controller = new AbortController();
+      connectController.current = controller;
+      try {
+        return {
+          org: await api.connectOrg(newAlias, instanceUrl, loginBrowser || undefined, { signal: controller.signal }),
+          mutationMode,
+        };
+      } finally {
+        if (connectController.current === controller) connectController.current = null;
+      }
+    },
     onMutate: () => {
       connectStarted.current = true;
     },
     onSuccess: ({ org, mutationMode }) => {
-      if (mutationMode !== mode) return;
+      if (mutationMode !== currentMode()) return;
       setConnectError('');
       setConnectedAlias(org.alias);
       // Seed the shared org cache before selection so the workbench has a
       // context immediately. Do not invalidate the org list here: an invalidated
       // observer can refetch on a later mount and put a blocking `org.list`
       // between the connect request and the first inventory load.
-      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), (current = []) => [
+      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mutationMode), (current = []) => [
         org,
         ...current.filter((entry) => entry.alias !== org.alias),
       ]);
@@ -181,26 +197,40 @@ export function OrgConnections({
       onRestoreOrg(org.alias);
       onSelect(org.alias);
     },
-    onError: (error: Error) => setConnectError(error.message),
+    onError: (error: Error, mutationMode) => {
+      if (mutationMode !== currentMode() || error instanceof ApiError && error.code === 'ABORTED') return;
+      setConnectError(error.message);
+    },
     onSettled: () => {
       connectStarted.current = false;
     },
   });
 
   const refreshOrgs = useMutation({
-    mutationFn: async (mutationMode: WorkspaceMode) => ({
-      orgs: await api.refreshOrgs(),
-      mutationMode,
-    }),
+    mutationFn: async (mutationMode: WorkspaceMode) => {
+      const controller = new AbortController();
+      refreshController.current = controller;
+      try {
+        return {
+          orgs: await api.refreshOrgs({ signal: controller.signal }),
+          mutationMode,
+        };
+      } finally {
+        if (refreshController.current === controller) refreshController.current = null;
+      }
+    },
     onSuccess: ({ orgs, mutationMode }) => {
-      if (mutationMode !== mode) return;
+      if (mutationMode !== currentMode()) return;
       // This is the explicit user refresh: replace the persisted list with the
       // newly retrieved one instead of waiting for an observer-mount refetch.
       setRefreshError('');
-      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mode), orgs);
+      queryClient.setQueryData<OrgSummary[]>(orgsQueryKey(mutationMode), orgs);
       invalidateBridgeState(queryClient);
     },
-    onError: (error: Error) => setRefreshError(error.message),
+    onError: (error: Error, mutationMode) => {
+      if (mutationMode !== currentMode() || error instanceof ApiError && error.code === 'ABORTED') return;
+      setRefreshError(error.message);
+    },
   });
 
   const status = bridgeStatusQuery.data;
