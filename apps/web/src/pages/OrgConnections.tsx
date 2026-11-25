@@ -15,6 +15,7 @@ import type { DataTableColumn } from '../components/ui/index.ts';
 
 const aliasPattern = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
 const manualUpdateCommand = 'npm install -g @dcat-toolkit/bridge@latest';
+const bridgeStartCommand = 'npx -y @dcat-toolkit/bridge@latest start';
 
 function validateInstanceUrl(value: string): string | null {
   if (!value.trim()) return null;
@@ -68,6 +69,17 @@ function Step({ number, title, description, badge, action, children }: StepProps
       </div>
       {children}
     </Panel>
+  );
+}
+
+function BridgeStartCommand() {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <code className="mono min-w-0 flex-1 overflow-x-auto rounded border border-line bg-surface-alt px-2 py-1.5 text-xs text-ink">
+        {bridgeStartCommand}
+      </code>
+      <CopyButton value={bridgeStartCommand} label="Copy start command" />
+    </div>
   );
 }
 
@@ -500,11 +512,13 @@ export function OrgConnections({
               </p>
               <p>
                 {status.relay === 'stale'
-                  ? 'Check its network connection or sleep state, then restart it with '
-                  : 'Keep the installer running with '}
-                <code className="mono">npx -y @dcat-toolkit/bridge@latest start</code>.
-                {status.canRepairPairing ? ' If it does not reconnect, create a fresh pairing code.' : ''}
+                  ? 'Check its network connection or sleep state, then restart it with:'
+                  : 'Keep the installer running with:'}
               </p>
+              <BridgeStartCommand />
+              {status.canRepairPairing ? (
+                <p>If it does not reconnect, create a fresh pairing code.</p>
+              ) : null}
               {status.canRepairPairing ? (
                 <Button
                   variant="secondary"

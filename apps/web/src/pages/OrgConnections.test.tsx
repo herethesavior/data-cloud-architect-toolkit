@@ -119,6 +119,38 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.queryByRole('button', { name: 'Re-check CLI' })).not.toBeInTheDocument();
   });
 
+  it('offers a copyable start command when a paired bridge is stale', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({ relay: 'stale' }));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    renderOrgConnections();
+
+    expect(await screen.findByText('The bridge stopped responding.')).toBeInTheDocument();
+    expect(screen.getByText('npx -y @dcat-toolkit/bridge@latest start')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Copy start command' }));
+    expect(writeText).toHaveBeenCalledWith('npx -y @dcat-toolkit/bridge@latest start');
+  });
+
+  it('offers the start command while a newly paired bridge checks in', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({ relay: 'waiting', lastSeenAt: null }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('Bridge paired. Waiting for its first check-in.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy start command' })).toBeInTheDocument();
+  });
+
+  it('keeps the unavailable state focused on the deployment instead of restart instructions', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({ relay: 'unavailable' }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('Bridge status is temporarily unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('npx -y @dcat-toolkit/bridge@latest start')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy start command' })).not.toBeInTheDocument();
+  });
+
   it('shows the one-time pairing command and keeps Connect org locked when hosted setup is pending', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     vi.mocked(api.bridgeStatus).mockResolvedValue(status({
