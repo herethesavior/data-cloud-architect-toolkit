@@ -77,6 +77,24 @@ export const relayOperationSchema = z.discriminatedUnion('operation', [
 export type RelayOperation = z.infer<typeof relayOperationSchema>;
 export type RelayOperationName = RelayOperation['operation'];
 
+/**
+ * Shared by the browser and hosted Worker so a client deadline can never expire
+ * before the Worker's relay deadline for the same operation.
+ */
+export const RELAY_OPERATION_TIMEOUT_MS: Record<RelayOperationName, number> = {
+  'cli.status': 30_000,
+  'org.list': 120_000,
+  'org.connect': 6 * 60_000,
+  'inventory.get': 60_000,
+  'inventory.start': 60_000,
+  // A status poll may need to refresh the org cache, and that CLI call has a
+  // 90-second deadline of its own.
+  'inventory.status': 120_000,
+  'transform.get': 60_000,
+  'mode.set': 30_000,
+  'bridge.update': 5 * 60_000,
+};
+
 export const relayPairingSchema = z.object({
   code: z.string(),
   expiresAt: z.string(),

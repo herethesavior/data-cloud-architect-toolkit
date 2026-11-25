@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import {
   cliStatusSchema,
+  RELAY_OPERATION_TIMEOUT_MS,
   relayAgentCancelRequestSchema,
   relayCancelRequestSchema,
   relayOperationSchema,
@@ -9,7 +10,6 @@ import {
   relayRespondRequestSchema,
   type BridgeStatus,
   type CliStatus,
-  type RelayOperation,
   type RelayPairing,
   type RelayRequestState,
 } from '@dcat/core';
@@ -93,20 +93,6 @@ const PAIRING_TTL_SECONDS = 10 * 60;
 const STALE_AFTER_MS = 60_000;
 /** A bridge that has just paired needs a moment to check in before we suggest re-pairing. */
 const REPAIR_GRACE_MS = 2 * 60_000;
-
-const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
-  'cli.status': 30_000,
-  'org.list': 120_000,
-  'org.connect': 6 * 60_000,
-  // Match the browser deadline so a client retry cannot arrive while the
-  // original inventory request is still running on the bridge.
-  'inventory.get': 60_000,
-  'inventory.start': 60_000,
-  'inventory.status': 30_000,
-  'transform.get': 60_000,
-  'mode.set': 30_000,
-  'bridge.update': 5 * 60_000,
-};
 
 const RELAY_DO_ORIGIN = 'https://relay.invalid';
 
@@ -522,7 +508,7 @@ export function relayRoutes() {
           operation: parsed.data,
           now,
           createdAt: now,
-          expiresAt: now + OPERATION_TIMEOUT_MS[parsed.data.operation],
+          expiresAt: now + RELAY_OPERATION_TIMEOUT_MS[parsed.data.operation],
         },
       );
       if (response.status === 401) {

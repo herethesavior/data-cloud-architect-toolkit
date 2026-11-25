@@ -1,4 +1,4 @@
-import { inferOrgEnvironment } from '@dcat/core';
+import { inferOrgEnvironment, RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
 import type {
   BridgeStatus,
   CliStatus,
@@ -183,19 +183,6 @@ export interface InventoryRequestOptions {
   onSnapshot?: (snapshot: InventorySnapshot) => void;
 }
 
-const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
-  'cli.status': 30_000,
-  'org.list': 120_000,
-  'org.connect': 6 * 60_000,
-  // Keep the browser deadline aligned with the Worker so a timed-out retry
-  // cannot hit BRIDGE_BUSY while the original request is still running.
-  'inventory.get': 60_000,
-  'inventory.start': 60_000,
-  'inventory.status': 30_000,
-  'transform.get': 60_000,
-  'mode.set': 30_000,
-  'bridge.update': 5 * 60_000,
-};
 
 // The Worker relay accepts one operation at a time. React Query can fire an
 // org-list refresh while an inventory load or org login is still in flight, so
@@ -239,7 +226,7 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
     if (isHosted() && await hostedUsesFixtures() && operation.operation !== 'cli.status') {
       throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode to use the local bridge.');
     }
-    const deadline = Date.now() + OPERATION_TIMEOUT_MS[operation.operation];
+    const deadline = Date.now() + RELAY_OPERATION_TIMEOUT_MS[operation.operation];
     const createRequest = () => request<{ id: string }>('/api/relay/requests', {
       method: 'POST',
       token: session.token,
@@ -325,7 +312,7 @@ async function startInventorySession(
     method: 'POST',
     body: { sessionId: options.sessionId, refresh: options.force },
     signal: options.signal,
-    timeoutMs: OPERATION_TIMEOUT_MS['inventory.start'],
+    timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.start'],
   });
 }
 
@@ -349,7 +336,7 @@ async function readInventorySession(
       method: 'POST',
       body: { resume: options.resume, family: options.family },
       signal: options.signal,
-      timeoutMs: OPERATION_TIMEOUT_MS['inventory.status'],
+      timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.status'],
     },
   );
 }
@@ -366,11 +353,11 @@ async function legacyInventory(
   return options.force
     ? requestWithToken<InventorySnapshot>(`${path}?refresh=1`, {
         signal: options.signal,
-        timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
+        timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.get'],
       })
     : request<InventorySnapshot>(path, {
         signal: options.signal,
-        timeoutMs: OPERATION_TIMEOUT_MS['inventory.get'],
+        timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.get'],
       });
 }
 

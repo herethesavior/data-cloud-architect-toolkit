@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
 import app from './index.ts';
 import { getBridgeUpdateStatus, resetNpmVersionCache } from './relay.ts';
 import { createSession } from './session.ts';
@@ -436,6 +437,35 @@ describe('hosted bridge relay', () => {
       cli,
     }, {}, env);
     expect(paired.agentToken).toMatch(/\S/);
+  });
+
+  it('gives a status poll enough time for a slow CLI org refresh', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    let queued: { createdAt: number; expiresAt: number } | null = null;
+    env.RELAY_DO = stubRelayDo(async (request) => {
+      queued = await request.json() as { createdAt: number; expiresAt: number };
+      return new Response(JSON.stringify({ id: 'req-status', status: 'pending' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    await postJson('/api/relay/requests', {
+      operation: 'inventory.status',
+      alias: 'prod-org',
+      sessionId: 'session-1',
+    }, session.headers, env);
+
+    expect(queued).not.toBeNull();
+    expect(queued!.expiresAt - queued!.createdAt).toBe(RELAY_OPERATION_TIMEOUT_MS['inventory.status']);
+    expect(RELAY_OPERATION_TIMEOUT_MS['inventory.status']).toBeGreaterThanOrEqual(120_000);
   });
 
   it('uses the shared transform-id validator for relayed requests', async () => {
