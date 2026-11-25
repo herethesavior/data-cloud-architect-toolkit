@@ -1,8 +1,10 @@
 /// <reference types="@cloudflare/workers-types" />
 import {
+  apiVersionStatusSchema,
   cliStatusSchema,
   relayOperationSchema,
   relayResponseSchema,
+  type ApiVersionStatus,
   type CliStatus,
   type RelayOperation,
   type RelayRequestState,
@@ -42,6 +44,7 @@ export interface RelayAgentSnapshot {
   lastSeenAt: number | null;
   agentVersion: string | null;
   cli: CliStatus;
+  compatibility: ApiVersionStatus | null;
   working: boolean;
 }
 
@@ -74,6 +77,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function parseCli(value: unknown): CliStatus | null {
   const parsed = cliStatusSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function parseCompatibility(value: unknown): ApiVersionStatus | null {
+  const parsed = apiVersionStatusSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -230,10 +238,20 @@ export class RelayDurableObjectCore {
         cli = null;
       }
     }
+    let compatibility: ApiVersionStatus | null = null;
+    const rawCompatibility = this.getMeta('compatibility');
+    if (rawCompatibility) {
+      try {
+        compatibility = parseCompatibility(JSON.parse(rawCompatibility));
+      } catch {
+        compatibility = null;
+      }
+    }
     return {
       lastSeenAt: this.getMetaNumber('last_seen_at'),
       agentVersion: this.getMeta('agent_version'),
       cli: cli ?? emptyCli(),
+      compatibility,
       working,
     };
   }
@@ -249,6 +267,10 @@ export class RelayDurableObjectCore {
     const cli = parseCli(body.cli);
     if (cli && JSON.stringify(cli) !== this.getMeta('cli')) {
       this.setMeta('cli', JSON.stringify(cli));
+    }
+    const compatibility = parseCompatibility(body.compatibility);
+    if (compatibility && JSON.stringify(compatibility) !== this.getMeta('compatibility')) {
+      this.setMeta('compatibility', JSON.stringify(compatibility));
     }
     const version = typeof body.version === 'string' ? body.version.slice(0, 64) : null;
     if (version && version !== this.getMeta('agent_version')) {
@@ -285,6 +307,10 @@ export class RelayDurableObjectCore {
     this.setMeta('revoked', '0');
     const cli = parseCli(body.cli) ?? emptyCli();
     this.setMeta('cli', JSON.stringify(cli));
+    const compatibility = parseCompatibility(body.compatibility);
+    if (compatibility) {
+      this.setMeta('compatibility', JSON.stringify(compatibility));
+    }
     if (typeof body.agentVersion === 'string') {
       this.setMeta('agent_version', body.agentVersion.slice(0, 64));
     }

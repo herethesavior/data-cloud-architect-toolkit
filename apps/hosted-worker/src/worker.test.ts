@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
+import { RELAY_OPERATION_TIMEOUT_MS, createApiVersionStatus } from '@dcat/core';
 import app from './index.ts';
 import { getBridgeUpdateStatus, resetNpmVersionCache } from './relay.ts';
 import { createSession } from './session.ts';
@@ -140,10 +140,12 @@ describe('hosted bridge relay', () => {
     expect(pairing.installCommand).toContain(pairing.code);
     expect(pairing.installCommand).toContain('--relay');
 
+    const compatibility = createApiVersionStatus();
     const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
       code: pairing.code,
       version: '0.1.0',
       cli,
+      compatibility,
     }, {}, env);
     expect(paired.agentToken).toMatch(/\S/);
 
@@ -155,11 +157,12 @@ describe('hosted bridge relay', () => {
     expect(replay.status).toBe(400);
 
     const waiting = await app.request('/api/relay/status', { headers: session.headers }, env);
-    expect(await waiting.json()).toMatchObject({ paired: true, relay: 'waiting', cli });
+    expect(await waiting.json()).toMatchObject({ paired: true, relay: 'waiting', cli, compatibility });
 
     const firstPoll = await postJson<{ tasks: unknown[] }>('/api/relay/poll', {
       agentToken: paired.agentToken,
       cli,
+      compatibility,
     }, {}, env);
     expect(firstPoll.tasks).toEqual([]);
 

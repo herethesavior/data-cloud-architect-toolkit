@@ -1,5 +1,6 @@
 import type {
   ApiCapability,
+  ApiVersionSelection,
   DataMapping,
   InventorySnapshot,
   OrgSummary,
@@ -9,7 +10,7 @@ import type {
 } from '@dcat/core';
 import { RESOURCE_FAMILIES, inventorySnapshotSchema } from '@dcat/core';
 import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
-import { classifyRestFailure } from './capabilities.ts';
+import { classifyRestFailure, extractHttpStatus } from './capabilities.ts';
 import { enrichStreamConnectors } from './connectors.ts';
 import {
   buildData360Path,
@@ -37,7 +38,7 @@ import {
 } from './normalize.ts';
 import type { NormalizeContext, NormalizedCollection, NormalizedDmos } from './normalize.ts';
 import { buildNextPath, extractContinuation, offsetContinuation } from './pagination.ts';
-import { selectLatestApiVersion } from './versions.ts';
+import { describeApiVersionResult, resolveApiVersion, type ResolvedApiVersion } from './versions.ts';
 
 // A high safety ceiling rather than a result limit. Progressive discovery uses
 // checkpoints and stops on exhaustion; this only guards against a looping token.
@@ -55,24 +56,11 @@ export interface DiscoverOptions {
   alias: string;
   org: OrgSummary;
   maxPages?: number;
+  apiVersionSelection?: ApiVersionSelection;
+  onApiVersionResolved?: (result: ResolvedApiVersion) => void;
 }
 
-/** Pull a numeric HTTP status out of a redacted CLI error message when present. */
-export function extractHttpStatus(message: string): number | null {
-  const patterns = [
-    /\b(?:http\s+)?status(?:\s+code)?\s*[:=]?\s*([45]\d{2})\b/i,
-    /\b(?:exit(?:ed)?(?:\s+with)?\s+code|error\s+code)\s*[:=]?\s*([45]\d{2})\b/i,
-    /\((\d{3})\)/,
-    /\b([45]\d{2})\s+(?:Forbidden|Unauthorized|Not Found|Bad Request|Server Error|error)/i,
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(message);
-    if (!match) continue;
-    const status = Number(match[1]);
-    if (status >= 400 && status <= 599) return status;
-  }
-  return null;
-}
+export { extractHttpStatus } from './capabilities.ts';
 
 /** Backward-compatible helper for callers that only need the opaque cursor. */
 export function extractContinuationToken(value: unknown): string | null {
@@ -605,47 +593,37 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
 
   const versionsPath = buildVersionsPath();
   const versionsStarted = Date.now();
-  let apiVersion: string | null = null;
-  try {
-    apiVersion = selectLatestApiVersion(await cli.restGet(alias, versionsPath));
-    capabilities.push({
-      family: 'api-versions',
-      status: 'available',
-      endpoint: versionsPath,
-      apiVersion,
-      message: `Using API version ${apiVersion}.`,
-      durationMs: Date.now() - versionsStarted,
-      itemCount: null,
-    });
-  } catch (error) {
-    const message = safeErrorMessage(error);
-    const classified = classifyRestFailure(extractHttpStatus(message), message);
-    capabilities.push({
-      family: 'api-versions',
-      status: classified.status,
-      endpoint: versionsPath,
-      apiVersion: null,
-      message: classified.message,
-      durationMs: Date.now() - versionsStarted,
-      itemCount: null,
-    });
+  const resolved = await resolveApiVersion(
+    () => cli.restGet(alias, versionsPath),
+    options.apiVersionSelection,
+    options.onApiVersionResolved,
+  );
+  const described = describeApiVersionResult(resolved);
+  capabilities.push({
+    family: 'api-versions',
+    status: resolved.apiVersion ? 'available' : resolved.probe.status,
+    endpoint: versionsPath,
+    apiVersion: resolved.apiVersion,
+    message: described.message,
+    durationMs: Date.now() - versionsStarted,
+    itemCount: null,
+  });
+
+  if (!resolved.apiVersion) {
     warnings.push({
       family: 'api-versions',
       code: 'API_VERSION_UNAVAILABLE',
-      message: `API version discovery failed. ${classified.message}`,
+      message: `API version discovery failed. ${resolved.probe.message}`,
       severity: 'error',
     });
-  }
-
-  if (!apiVersion) {
-    const unavailableStatus = capabilities[0]?.status === 'unsupported' ? 'unsupported' : 'error';
+    const unavailableStatus = resolved.probe.status === 'unsupported' ? 'unsupported' : 'error';
     for (const family of RESOURCE_FAMILIES) {
       capabilities.push({
         family,
         status: unavailableStatus,
         endpoint: DATA360_ENDPOINT_REGISTRY[family],
         apiVersion: null,
-        message: 'API version could not be discovered; no metadata was requested.',
+        message: 'No API version could be selected; no metadata was requested.',
         durationMs: null,
         itemCount: null,
       });
@@ -667,7 +645,16 @@ export async function discoverInventory(options: DiscoverOptions): Promise<Inven
     });
   }
 
-  const version = apiVersion;
+  if (described.warning) {
+    warnings.push({
+      family: 'api-versions',
+      code: 'API_VERSION_PROBE_UNAVAILABLE',
+      message: described.warning,
+      severity: 'warning',
+    });
+  }
+
+  const version = resolved.apiVersion;
   const [spaces, dlos, dmos, streams, transforms] = await Promise.all([
     retrieveFamily(cli, alias, 'data-spaces', version, base, normalizeDataSpaces, maxPages),
     retrieveFamily(cli, alias, 'dlos', version, base, normalizeDlos, maxPages),

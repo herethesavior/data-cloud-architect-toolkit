@@ -646,6 +646,7 @@ export function App() {
             onClearCachedMetadata={clearCachedMetadata}
             onResetSavedLayouts={resetSavedLayouts}
             onEraseLocalData={eraseLocalData}
+            onRefreshInventory={onRefreshInventory}
           />
         );
       case 'data-spaces':

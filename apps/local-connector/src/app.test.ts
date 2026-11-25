@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProcessRunner, RunOptions } from '@dcat/salesforce-cli';
 import {
   cliVersionOutput,
@@ -20,31 +23,46 @@ import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
 
 const localHeaders = { host: 'localhost:3847' };
+const testCompatibilityPath = join(tmpdir(), 'dcat-app-test-compatibility.json');
+
+function testConfig(mode: 'demo' | 'live') {
+  return {
+    ...loadConfig({ DCAT_API_COMPATIBILITY_PATH: testCompatibilityPath }, []),
+    mode,
+    sessionToken: 'phase1-test-token',
+  };
+}
+
+beforeEach(() => rmSync(testCompatibilityPath, { force: true }));
+afterEach(() => rmSync(testCompatibilityPath, { force: true }));
 
 async function demoApp() {
-  const config = { ...loadConfig({}, []), mode: 'demo' as const, sessionToken: 'phase1-test-token' };
+  const config = testConfig('demo');
   // Starting in demo must not call it, but switching to live refreshes status.
   return buildApp({ config, runner: liveCliRunner() });
 }
 
 /** Fake CLI that answers version, org-list, and every Data 360 REST path. */
 function liveCliRunner(): ProcessRunner {
-  const restBodies: Record<string, string> = {
-    '/services/data/': versionsJson,
-    '/services/data/v65.0/ssot/data-spaces': dataSpacesJson,
-    '/services/data/v65.0/ssot/data-lake-objects': dlosJson,
-    '/services/data/v65.0/ssot/data-model-objects?limit=100&offset=0': dmosJson,
-    '/services/data/v65.0/ssot/data-model-object-mappings': mappingsJson,
-    '/services/data/v65.0/ssot/data-streams': dataStreamsJson,
-    '/services/data/v65.0/ssot/connectors': connectorCatalogJson,
-    '/services/data/v65.0/ssot/connections?connectorType=SalesforceDotCom': connectorConnectionsJson,
-    '/services/data/v65.0/ssot/data-transforms': dataTransformsJson,
-    '/services/data/v65.0/ssot/data-transforms/Account_Transform': transformDetailJson,
-    '/services/data/v65.0/ssot/data-transforms/Account_Transform/run-history': transformRunHistoryJson,
-    '/services/data/v65.0/ssot/data-transforms/Account_Transform/schedule': transformScheduleJson,
-  };
+  const restBodies: Record<string, string> = { '/services/data/': versionsJson };
+  for (const version of ['65.0', '67.0']) {
+    const base = `/services/data/v${version}/ssot`;
+    Object.assign(restBodies, {
+      [`${base}/data-spaces`]: dataSpacesJson,
+      [`${base}/data-lake-objects`]: dlosJson,
+      [`${base}/data-model-objects?limit=100&offset=0`]: dmosJson,
+      [`${base}/data-model-object-mappings`]: mappingsJson,
+      [`${base}/data-streams`]: dataStreamsJson,
+      [`${base}/connectors`]: connectorCatalogJson,
+      [`${base}/connections?connectorType=SalesforceDotCom`]: connectorConnectionsJson,
+      [`${base}/data-transforms`]: dataTransformsJson,
+      [`${base}/data-transforms/Account_Transform`]: transformDetailJson,
+      [`${base}/data-transforms/Account_Transform/run-history`]: transformRunHistoryJson,
+      [`${base}/data-transforms/Account_Transform/schedule`]: transformScheduleJson,
+    });
+  }
   const restBody = (path: string): string | undefined => restBodies[path]
-    ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?')
+    ?? (/^\/services\/data\/v(?:65|67)\.0\/ssot\/data-model-object-mappings\?/.test(path)
       && path.includes('dmoDeveloperName=')
       ? mappingsJson
       : path.includes('/relationships?')
@@ -82,8 +100,61 @@ describe('local connector API', () => {
     await app.close();
   });
 
+  it('exposes the bridge-local API compatibility setting', async () => {
+    const app = await demoApp();
+    const response = await app.inject({ method: 'GET', url: '/api/compatibility', headers: localHeaders });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      selection: { mode: 'recommended' },
+      recommended: '67.0',
+      supported: ['65.0', '66.0', '67.0', '68.0'],
+    });
+    await app.close();
+  });
+
+  it('rejects an arbitrary API version without saving it', async () => {
+    const app = await demoApp();
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/api/compatibility',
+      payload: { mode: 'specific', version: '99.0' },
+      headers: { ...localHeaders, 'x-dcat-token': 'phase1-test-token' },
+    });
+    expect(denied.statusCode).toBe(400);
+    const status = await app.inject({ method: 'GET', url: '/api/compatibility', headers: localHeaders });
+    expect(status.json().selection).toEqual({ mode: 'recommended' });
+    await app.close();
+  });
+
+  it('saves a curated API version behind the session token', async () => {
+    const app = await demoApp();
+    const unauthenticated = await app.inject({
+      method: 'POST',
+      url: '/api/compatibility',
+      payload: { mode: 'specific', version: '68.0' },
+      headers: localHeaders,
+    });
+    expect(unauthenticated.statusCode).toBe(401);
+
+    const saved = await app.inject({
+      method: 'POST',
+      url: '/api/compatibility',
+      payload: { mode: 'specific', version: '68.0' },
+      headers: { ...localHeaders, 'x-dcat-token': 'phase1-test-token' },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().selection).toEqual({ mode: 'specific', version: '68.0' });
+
+    const status = await app.inject({ method: 'GET', url: '/api/compatibility', headers: localHeaders });
+    expect(status.json().selection).toEqual({ mode: 'specific', version: '68.0' });
+    const health = await app.inject({ method: 'GET', url: '/api/health', headers: localHeaders });
+    expect(health.json().compatibility.selection).toEqual({ mode: 'specific', version: '68.0' });
+    await app.close();
+  });
+
   it('does not probe the CLI when starting in demo mode', async () => {
-    const config = { ...loadConfig({}, []), mode: 'demo' as const, sessionToken: 'phase1-test-token' };
+    const config = testConfig('demo');
     const run = vi.fn(async () => ({ stdout: cliVersionOutput, stderr: '', exitCode: 0 }));
     const app = await buildApp({ config, runner: { run } });
 
@@ -112,7 +183,7 @@ describe('local connector API', () => {
   });
 
   it('requires the per-run token to connect an org and runs only the fixed web login command', async () => {
-    const config = { ...loadConfig({}, []), mode: 'live' as const, sessionToken: 'phase1-test-token' };
+    const config = testConfig('live');
     const runner = liveCliRunner();
     const app = await buildApp({ config, runner });
 
@@ -151,7 +222,7 @@ describe('local connector API', () => {
     expect(deniedDemo.json().error.code).toBe('INVALID_ARGUMENT');
     await demo.close();
 
-    const config = { ...loadConfig({}, []), mode: 'live' as const, sessionToken: 'phase1-test-token' };
+    const config = testConfig('live');
     const runner = liveCliRunner();
     const live = await buildApp({ config, runner });
     const badUrl = await live.inject({
@@ -216,7 +287,7 @@ describe('local connector API', () => {
   });
 
   it('discovers live inventory through the CLI and labels it live', async () => {
-    const config = { ...loadConfig({}, []), mode: 'live' as const, sessionToken: 'phase1-test-token' };
+    const config = testConfig('live');
     const app = await buildApp({ config, runner: liveCliRunner() });
 
     const health = await app.inject({ method: 'GET', url: '/api/health', headers: localHeaders });
@@ -230,7 +301,7 @@ describe('local connector API', () => {
     expect(inventory.statusCode).toBe(200);
     const body = inventory.json();
     expect(body.mode).toBe('live');
-    expect(body.apiVersion).toBe('65.0');
+    expect(body.apiVersion).toBe('67.0');
     expect(body.dlos.length).toBeGreaterThan(0);
     expect(body.dmos.length).toBeGreaterThan(0);
     expect(body.dataSpaces.length).toBeGreaterThan(0);
@@ -238,12 +309,12 @@ describe('local connector API', () => {
     expect(body.capabilities.every((capability: { status: string }) => capability.status === 'available')).toBe(true);
     expect(body.warnings).toHaveLength(0);
     expect(JSON.stringify(body)).not.toContain('DISCOVERY_PENDING');
-    expect(body.dlos[0].provenance).toMatchObject({ apiVersion: '65.0', confidence: 'source' });
+    expect(body.dlos[0].provenance).toMatchObject({ apiVersion: '67.0', confidence: 'source' });
     await app.close();
   });
 
   it('clears live discovery sessions when the mode changes directly', async () => {
-    const config = { ...loadConfig({}, []), mode: 'live' as const, sessionToken: 'phase1-test-token' };
+    const config = testConfig('live');
     const app = await buildApp({ config, runner: liveCliRunner() });
     const headers = { ...localHeaders, 'x-dcat-token': 'phase1-test-token' };
 
@@ -316,7 +387,7 @@ describe('local connector API', () => {
   });
 
   it('fetches a live transform bundle through the allowlisted GET paths without a token', async () => {
-    const config = { ...loadConfig({}, []), mode: 'live' as const, sessionToken: 'phase1-test-token' };
+    const config = testConfig('live');
     const runner = liveCliRunner();
     const app = await buildApp({ config, runner });
 
@@ -330,16 +401,16 @@ describe('local connector API', () => {
     expect(bundle.transform).toMatchObject({ apiName: 'Account_Transform', type: 'Batch' });
     expect(bundle.runs).toHaveLength(2);
     expect(bundle.schedule).toMatchObject({ cadence: 'Daily', enabled: true });
-    expect(bundle.transform.provenance).toMatchObject({ apiVersion: '65.0', confidence: 'source' });
+    expect(bundle.transform.provenance).toMatchObject({ apiVersion: '67.0', confidence: 'source' });
     expect(bundle.sections).toEqual({ detail: 'available', runHistory: 'available', schedule: 'available' });
 
     const restPaths = vi.mocked(runner.run).mock.calls
       .map(([args]) => args[3])
       .filter((path) => path?.includes('/data-transforms/'));
     expect(restPaths).toEqual(expect.arrayContaining([
-      '/services/data/v65.0/ssot/data-transforms/Account_Transform',
-      '/services/data/v65.0/ssot/data-transforms/Account_Transform/run-history',
-      '/services/data/v65.0/ssot/data-transforms/Account_Transform/schedule',
+      '/services/data/v67.0/ssot/data-transforms/Account_Transform',
+      '/services/data/v67.0/ssot/data-transforms/Account_Transform/run-history',
+      '/services/data/v67.0/ssot/data-transforms/Account_Transform/schedule',
     ]));
     await app.close();
   });

@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export type ConnectorMode = 'live' | 'demo';
@@ -11,6 +13,8 @@ export interface ConnectorConfig {
   sessionToken: string;
   webDist: string;
   version: string;
+  /** Bridge-local setting path. Hosted KV never stores API-version preferences. */
+  compatibilityPath: string;
 }
 
 function parsePort(value: string | undefined): number {
@@ -31,5 +35,6 @@ export function loadConfig(
     sessionToken: randomBytes(32).toString('hex'),
     webDist: fileURLToPath(new URL('../../web/dist/', import.meta.url)),
     version: '0.1.0',
+    compatibilityPath: env.DCAT_API_COMPATIBILITY_PATH || join(homedir(), '.dcat', 'api-compatibility.json'),
   };
 }

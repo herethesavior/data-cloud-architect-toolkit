@@ -1,5 +1,6 @@
 import type {
   ApiCapability,
+  ApiVersionSelection,
   DataModelObject,
   DiscoveryProgress,
   DiscoverySessionState,
@@ -51,7 +52,7 @@ import {
 } from './normalize.ts';
 import type { NormalizeContext, NormalizedCollection, NormalizedDmos } from './normalize.ts';
 import { buildNextPath, extractContinuation, offsetContinuation } from './pagination.ts';
-import { selectLatestApiVersion } from './versions.ts';
+import { describeApiVersionResult, resolveApiVersion, type ResolvedApiVersion } from './versions.ts';
 
 const NON_MAPPING_FAMILIES = [
   'data-spaces',
@@ -179,6 +180,8 @@ export interface ProgressiveDiscoveryOptions {
   maxMappingQueries?: number;
   maxRelationshipQueries?: number;
   maxDurationMs?: number;
+  apiVersionSelection?: ApiVersionSelection;
+  onApiVersionResolved?: (result: ResolvedApiVersion) => void;
   /** Called after every committed page so a caller can publish partial rows. */
   onProgress?: (state: ProgressiveDiscoveryState) => void;
   retry?: Partial<PageRetryOptions>;
@@ -1159,16 +1162,17 @@ export async function initializeProgressiveDiscovery(
   const sessionId = options.sessionId ?? `session-${Date.now().toString(36)}`;
   const generation = options.generation ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const versionsPath = buildVersionsPath();
-  let apiVersion: string | null = null;
-  let versionMessage = '';
-  try {
-    apiVersion = selectLatestApiVersion(await options.cli.restGet(options.alias, versionsPath));
-    versionMessage = `Using API version ${apiVersion}.`;
-  } catch (error) {
-    const message = safeErrorMessage(error);
-    const classified = classifyRestFailure(extractHttpStatus(message), message);
-    return unavailableState({ ...options, sessionId, generation }, classified.message, classified.status);
+  const resolved = await resolveApiVersion(
+    () => options.cli.restGet(options.alias, versionsPath),
+    options.apiVersionSelection,
+    options.onApiVersionResolved,
+  );
+  const described = describeApiVersionResult(resolved);
+  if (!resolved.apiVersion) {
+    const status = resolved.probe.status === 'unsupported' ? 'unsupported' : 'error';
+    return unavailableState({ ...options, sessionId, generation }, resolved.probe.message, status);
   }
+  const apiVersion = resolved.apiVersion;
 
   const state: ProgressiveDiscoveryState = {
     cli: options.cli,
@@ -1217,11 +1221,18 @@ export async function initializeProgressiveDiscovery(
       status: 'available',
       endpoint: versionsPath,
       apiVersion,
-      message: versionMessage,
+      message: described.message,
       durationMs: null,
       itemCount: null,
     }],
-    warnings: [],
+    warnings: described.warning
+      ? [{
+          family: 'api-versions',
+          code: 'API_VERSION_PROBE_UNAVAILABLE',
+          message: described.warning,
+          severity: 'warning' as const,
+        }]
+      : [],
     relationships: [],
   };
   recompute(state);

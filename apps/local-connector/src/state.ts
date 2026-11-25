@@ -1,7 +1,9 @@
-import type { CliStatus, InventorySnapshot, OrgSummary } from '@dcat/core';
+import type { ApiVersionSelection, ApiVersionStatus, CliStatus, InventorySnapshot, OrgSummary } from '@dcat/core';
+import { createApiVersionStatus } from '@dcat/core';
 import { SalesforceCliAdapter } from '@dcat/salesforce-cli';
 import type { ProcessRunner } from '@dcat/salesforce-cli';
-import type { ProgressiveDiscoveryState } from '@dcat/data360-api';
+import type { ProgressiveDiscoveryState, ResolvedApiVersion } from '@dcat/data360-api';
+import { loadApiVersionSelection, saveApiVersionSelection } from './api-compatibility-store.ts';
 import type { ConnectorConfig, ConnectorMode } from './config.ts';
 
 /**
@@ -25,6 +27,7 @@ export interface AppState {
   cli: SalesforceCliAdapter;
   mode: ConnectorMode;
   cliStatus: CliStatus;
+  compatibility: ApiVersionStatus;
   orgsCache: { at: number; orgs: OrgSummary[] } | null;
   inventoryCache: { at: number; alias: string; inventory: InventorySnapshot } | null;
   discoverySessions: Map<string, DiscoverySessionRecord>;
@@ -37,6 +40,7 @@ export function createAppState(config: ConnectorConfig, runner?: ProcessRunner):
     cli: new SalesforceCliAdapter(runner),
     mode: config.mode,
     cliStatus: { installed: false, version: null, error: null },
+    compatibility: createApiVersionStatus(loadApiVersionSelection(config.compatibilityPath)),
     orgsCache: null,
     inventoryCache: null,
     discoverySessions: new Map(),
@@ -46,4 +50,23 @@ export function createAppState(config: ConnectorConfig, runner?: ProcessRunner):
 
 export async function refreshCliStatus(state: AppState): Promise<void> {
   state.cliStatus = await state.cli.status();
+}
+
+/** Discovery reports the resolved version back to health and relay status. */
+export function recordApiVersionResolution(state: AppState): (result: ResolvedApiVersion) => void {
+  return (result) => {
+    state.compatibility = {
+      ...createApiVersionStatus(result.selection),
+      used: result.apiVersion,
+      latest: result.probe.latest,
+      verifiedAt: result.probe.failed ? null : new Date().toISOString(),
+      probeStatus: result.probe.status,
+    };
+  };
+}
+
+export function setApiVersionSelection(state: AppState, selection: ApiVersionSelection): ApiVersionStatus {
+  saveApiVersionSelection(state.config.compatibilityPath, selection);
+  state.compatibility = createApiVersionStatus(selection);
+  return state.compatibility;
 }

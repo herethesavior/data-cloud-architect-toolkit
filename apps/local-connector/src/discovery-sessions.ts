@@ -9,6 +9,7 @@ import {
   progressiveSnapshot,
   resumeProgressiveDiscovery,
 } from '@dcat/data360-api';
+import { recordApiVersionResolution } from './state.ts';
 import type { AppState, DiscoverySessionRecord } from './state.ts';
 import { demoInventory } from '@dcat/test-fixtures';
 
@@ -163,6 +164,8 @@ export async function startDiscoverySession(
     sessionId,
     generation,
     signal: controller.signal,
+    apiVersionSelection: state.compatibility.selection,
+    onApiVersionResolved: recordApiVersionResolution(state),
   });
   const record: DiscoverySessionRecord = {
     id: sessionId,

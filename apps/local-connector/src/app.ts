@@ -7,6 +7,7 @@ import type { ProcessRunner } from '@dcat/salesforce-cli';
 import type { ConnectorConfig } from './config.ts';
 import { registerSecurity } from './security.ts';
 import { createAppState, refreshCliStatus } from './state.ts';
+import { registerCompatibilityRoutes } from './routes/compatibility.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerOrgRoutes } from './routes/orgs.ts';
 import { registerSessionRoutes } from './routes/session.ts';
@@ -28,6 +29,7 @@ export async function buildApp({ config, runner }: BuildAppOptions): Promise<Fas
 
   registerHealthRoutes(app, state);
   registerSessionRoutes(app, state);
+  registerCompatibilityRoutes(app, state);
   registerOrgRoutes(app, state);
   registerTransformRoutes(app, state);
 

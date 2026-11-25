@@ -77,6 +77,7 @@ export function createSession(mode: ConnectorMode = 'live'): SessionRecord {
       working: false,
       agentVersion: null,
       cli: { installed: false, version: null, error: null },
+      compatibility: null,
       pairingCode: null,
       pairingExpiresAt: null,
       request: null,

@@ -1,5 +1,7 @@
-import { inferOrgEnvironment, RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
+import { createApiVersionStatus, inferOrgEnvironment, RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
 import type {
+  ApiVersionSelection,
+  ApiVersionStatus,
   BridgeStatus,
   CliStatus,
   ConnectorHealth,
@@ -440,6 +442,7 @@ async function bridgeStatus(): Promise<BridgeStatus> {
     mode: session.mode,
     version: health.version,
     cli: health.cli,
+    compatibility: health.compatibility ?? createApiVersionStatus(),
     lastSeenAt: health.time,
     relay: 'connected',
     working: false,
@@ -462,6 +465,7 @@ export const api = {
         version: status.version,
         time: new Date().toISOString(),
         cli: status.cli,
+        compatibility: status.compatibility ?? createApiVersionStatus(),
       };
     }
     return request<ConnectorHealth>('/api/health');
@@ -530,6 +534,19 @@ export const api = {
       return status.cli;
     }
     return postJson<CliStatus>('/api/cli/refresh', {});
+  },
+  compatibility: async (): Promise<ApiVersionStatus> => {
+    if (isHosted()) return (await bridgeStatus()).compatibility ?? createApiVersionStatus();
+    return request<ApiVersionStatus>('/api/compatibility');
+  },
+  setCompatibility: async (selection: ApiVersionSelection): Promise<ApiVersionStatus> => {
+    if (isHosted()) {
+      if (await hostedUsesFixtures()) {
+        throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode before changing the API version.');
+      }
+      return relayCall<ApiVersionStatus>({ operation: 'compatibility.set', selection });
+    }
+    return postJson<ApiVersionStatus>('/api/compatibility', selection);
   },
   setMode: async (mode: 'live' | 'demo'): Promise<{ mode: 'live' | 'demo' }> => {
     const result = await postJson<{ mode: 'live' | 'demo' }>('/api/mode', { mode });

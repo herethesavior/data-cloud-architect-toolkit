@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createApiVersionStatus } from '@dcat/core';
+import type { ApiVersionSelection, ApiVersionStatus } from '@dcat/core';
 import { api } from '../lib/api.ts';
 import { describeError, sanitizeDetail } from '../lib/userError.ts';
 import { isHosted } from '../lib/hosted.ts';
 import type { WorkspaceMode } from '../lib/workspace.ts';
 import { invalidateDiagnosticsState } from '../lib/workspace.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
+import { CompatibilityPanel } from '../components/CompatibilityPanel.tsx';
 import { ErrorState, LoadingState } from '../components/DataStates.tsx';
 import { Icon } from '../components/Icon.tsx';
 import type { IconName } from '../components/Icon.tsx';
@@ -55,12 +58,22 @@ interface SettingsProps {
   onClearCachedMetadata: () => Promise<void>;
   onResetSavedLayouts: () => void;
   onEraseLocalData: () => Promise<void>;
+  onRefreshInventory?: () => void;
 }
 
-export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayouts, onEraseLocalData }: SettingsProps) {
+export function Settings({
+  theme,
+  mode,
+  onClearCachedMetadata,
+  onResetSavedLayouts,
+  onEraseLocalData,
+  onRefreshInventory = () => undefined,
+}: SettingsProps) {
   const queryClient = useQueryClient();
   const hosted = isHosted();
   const [refreshError, setRefreshError] = useState('');
+  const [compatibilityError, setCompatibilityError] = useState('');
+  const [compatibilityNotice, setCompatibilityNotice] = useState('');
   const [dataNotice, setDataNotice] = useState('');
   const [dataError, setDataError] = useState('');
   const [eraseOpen, setEraseOpen] = useState(false);
@@ -68,7 +81,11 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
 
   // Settings stays mounted across mode switches so its action results survive.
   // A diagnostic error from the previous mode must not survive with them.
-  useEffect(() => setRefreshError(''), [mode]);
+  useEffect(() => {
+    setRefreshError('');
+    setCompatibilityError('');
+    setCompatibilityNotice('');
+  }, [mode]);
 
   // In hosted mode both the health badge and the bridge badge come from the
   // same relay status read; polling /api/health separately doubles KV reads and
@@ -97,6 +114,19 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
       invalidateDiagnosticsState(queryClient);
     },
     onError: (error: Error) => setRefreshError(describeError(error, 'diagnostics').message),
+  });
+  const saveCompatibility = useMutation({
+    mutationFn: (selection: ApiVersionSelection) => api.setCompatibility(selection),
+    onSuccess: () => {
+      setCompatibilityError('');
+      setCompatibilityNotice('API version saved. DCAT is refreshing metadata.');
+      invalidateDiagnosticsState(queryClient);
+      onRefreshInventory();
+    },
+    onError: (error: Error) => {
+      setCompatibilityNotice('');
+      setCompatibilityError(describeError(error, 'compatibility').message);
+    },
   });
 
   if (!hosted && healthQuery.isPending && !healthQuery.data) {
@@ -129,8 +159,23 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
         version: bridge?.version ?? '',
         time: bridge?.lastSeenAt ?? new Date().toISOString(),
         cli: bridge?.cli ?? { installed: false, version: null, error: null },
+        compatibility: bridge?.compatibility ?? createApiVersionStatus(),
       }
     : localHealth!;
+
+  const liveCompatibility = health.compatibility ?? createApiVersionStatus();
+  // Demo fixtures are deliberately fixed; a live bridge setting must never leak into them.
+  const compatibility: ApiVersionStatus = mode === 'demo'
+    ? { ...createApiVersionStatus(), used: '65.0' }
+    : liveCompatibility;
+  const canChangeCompatibility = mode !== 'demo' && (!hosted || (bridge?.paired === true && bridge.relay === 'connected'));
+  const compatibilityDisabledReason = mode === 'demo'
+    ? 'Demo mode always uses the sample API version. Switch to live mode to change it.'
+    : !hosted
+      ? ''
+      : bridge?.paired !== true
+        ? 'Connect a bridge before changing the API version.'
+        : 'Wait for the bridge to reconnect before changing the API version.';
 
   const clearMetadata = async () => {
     setDataNotice('');
@@ -226,7 +271,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
     <>
       <PageIntro
         title="Settings & Diagnostics"
-        description="Bridge health, appearance, and the data DCAT keeps in this browser."
+        description="Bridge health, API compatibility, appearance, and the data DCAT keeps in this browser."
       />
 
       <div className="grid gap-5 xl:grid-cols-2">
@@ -301,6 +346,18 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
             </p>
           ) : null}
         </Panel>
+
+        <CompatibilityPanel
+          status={compatibility}
+          cliVersion={health.cli.version ?? null}
+          demo={mode === 'demo'}
+          canChange={canChangeCompatibility}
+          disabledReason={compatibilityDisabledReason}
+          saving={saveCompatibility.isPending}
+          error={compatibilityError}
+          notice={compatibilityNotice}
+          onSave={(selection) => saveCompatibility.mutateAsync(selection).then(() => undefined)}
+        />
 
         <Panel>
           <SectionHeading title="Appearance" description="Switch themes here or use the toggle in the header." />

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { apiVersionStatusSchema } from './compatibility.ts';
 
 export const RESOURCE_FAMILIES = [
   'data-spaces',
@@ -372,6 +373,7 @@ export const connectorHealthSchema = z.object({
   version: z.string(),
   time: z.string(),
   cli: cliStatusSchema,
+  compatibility: apiVersionStatusSchema.nullish(),
 });
 
 export type ConnectorHealth = z.infer<typeof connectorHealthSchema>;

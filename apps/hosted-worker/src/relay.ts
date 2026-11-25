@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import {
+  apiVersionStatusSchema,
   cliStatusSchema,
   RELAY_OPERATION_TIMEOUT_MS,
   relayAgentCancelRequestSchema,
@@ -8,6 +9,7 @@ import {
   relayPairRequestSchema,
   relayPollRequestSchema,
   relayRespondRequestSchema,
+  type ApiVersionStatus,
   type BridgeStatus,
   type CliStatus,
   type RelayPairing,
@@ -108,6 +110,7 @@ function resetSessionRelay(session: SessionRecord): void {
     working: false,
     agentVersion: null,
     cli: emptyCli(),
+    compatibility: null,
     pairingCode: null,
     pairingExpiresAt: null,
     request: null,
@@ -116,6 +119,11 @@ function resetSessionRelay(session: SessionRecord): void {
 
 function parseCli(value: unknown): CliStatus | null {
   const parsed = cliStatusSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function parseCompatibility(value: unknown): ApiVersionStatus | null {
+  const parsed = apiVersionStatusSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -203,6 +211,7 @@ export function getBridgeStatus(session: SessionRecord, origin: string, override
     latestVersion: null,
     updateAvailable: false,
     selfUpdateSupported: false,
+    compatibility: session.relay.compatibility ?? null,
   };
 }
 
@@ -290,6 +299,7 @@ export async function bridgeStatusForSession(
       lastSeenAt: body.lastSeenAt,
       agentVersion: body.agentVersion,
       cli: body.cli,
+      compatibility: body.compatibility ?? session.relay.compatibility,
       working: body.working === true,
     },
   }, origin);
@@ -407,6 +417,7 @@ export function relayRoutes() {
       const pairedAt = Date.now();
       const agentVersion = parsed.data.version ?? null;
       const cli = parseCli(parsed.data.cli) ?? emptyCli();
+      const compatibility = parseCompatibility(parsed.data.compatibility);
       const initialized = await relayFetch(context.env, agentToken, '/init', {
         agentToken,
         sessionId: session.id,
@@ -414,6 +425,7 @@ export function relayRoutes() {
         expiresAt: session.expiresAt ?? Date.now() + sessionTtl(context.env) * 1000,
         agentVersion,
         cli,
+        compatibility,
       });
       if (!initialized.ok) {
         // Never leave a usable-looking command behind when the relay cannot
@@ -434,6 +446,7 @@ export function relayRoutes() {
         working: false,
         agentVersion,
         cli,
+        compatibility,
         pairingCode: null,
         pairingExpiresAt: null,
         request: null,
@@ -456,6 +469,7 @@ export function relayRoutes() {
         agentToken: parsed.data.agentToken,
         version: parsed.data.version,
         cli: parsed.data.cli,
+        compatibility: parsed.data.compatibility,
         wait: parsed.data.wait === true,
       });
       if (response.status === 401) {

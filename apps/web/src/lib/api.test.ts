@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createApiVersionStatus } from '@dcat/core';
 import type { OrgSummary, SessionInfo } from '@dcat/core';
 import { demoInventory } from '@dcat/test-fixtures';
 import { api, clearCachedSession, getSession } from './api.ts';
@@ -70,6 +71,22 @@ describe('web API session handling', () => {
       .filter(([url, options]) => url === '/api/mode' && options?.method === 'POST')
       .map(([, options]) => (options?.headers as Record<string, string>)['x-dcat-token']);
     expect(postHeaders).toEqual(['old-token', 'new-token']);
+  });
+
+  it('posts a constrained compatibility selection to the local bridge', async () => {
+    const status = createApiVersionStatus({ mode: 'latest' });
+    const fetchMock = vi.fn(async (path: string, _options?: RequestInit) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/compatibility') return jsonResponse(status);
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.setCompatibility({ mode: 'latest' })).resolves.toEqual(status);
+
+    const call = fetchMock.mock.calls.find(([path, options]) => path === '/api/compatibility' && options?.method === 'POST');
+    expect(call).toBeDefined();
+    expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({ mode: 'latest' });
   });
 
   it('reads hosted bridge status from the relay endpoint without a token', async () => {

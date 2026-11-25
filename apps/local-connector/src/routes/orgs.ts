@@ -6,6 +6,7 @@ import { discoverInventory } from '@dcat/data360-api';
 import { validateAlias } from '@dcat/salesforce-cli';
 import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
 import { clearDiscoverySessions, getDiscoverySession, startDiscoverySession } from '../discovery-sessions.ts';
+import { recordApiVersionResolution } from '../state.ts';
 import type { AppState } from '../state.ts';
 import { hasSessionToken, requireSessionToken } from '../security.ts';
 import { sendRouteError } from './shared.ts';
@@ -42,7 +43,13 @@ export async function resolveInventory(state: AppState, org: OrgSummary, force =
   if (!force && cached && cached.alias === org.alias && Date.now() - cached.at < INVENTORY_CACHE_TTL_MS) {
     return cached.inventory;
   }
-  const inventory = await discoverInventory({ cli: state.cli, alias: org.alias, org });
+  const inventory = await discoverInventory({
+    cli: state.cli,
+    alias: org.alias,
+    org,
+    apiVersionSelection: state.compatibility.selection,
+    onApiVersionResolved: recordApiVersionResolution(state),
+  });
   state.inventoryCache = { at: Date.now(), alias: org.alias, inventory };
   return inventory;
 }

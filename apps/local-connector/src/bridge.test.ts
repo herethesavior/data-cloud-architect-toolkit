@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CliStatus, InventorySnapshot, OrgSummary, RelayTask, TransformBundle } from '@dcat/core';
 import type { ProcessRunner, RunOptions } from '@dcat/salesforce-cli';
 import { CliError } from '@dcat/salesforce-cli';
@@ -27,26 +30,30 @@ import {
   type RelayHttp,
 } from './bridge.ts';
 import { loadConfig } from './config.ts';
+import { loadApiVersionSelection } from './api-compatibility-store.ts';
 import { createAppState, type AppState, type DiscoverySessionRecord } from './state.ts';
 
-const restBodies: Record<string, string> = {
-  '/services/data/': versionsJson,
-  '/services/data/v65.0/ssot/data-spaces': dataSpacesJson,
-  '/services/data/v65.0/ssot/data-lake-objects': dlosJson,
-  '/services/data/v65.0/ssot/data-model-objects?limit=100&offset=0': dmosJson,
-  '/services/data/v65.0/ssot/data-model-object-mappings': mappingsJson,
-  '/services/data/v65.0/ssot/data-streams': dataStreamsJson,
-  '/services/data/v65.0/ssot/connectors': connectorCatalogJson,
-  '/services/data/v65.0/ssot/connections?connectorType=SalesforceDotCom': connectorConnectionsJson,
-  '/services/data/v65.0/ssot/data-transforms': dataTransformsJson,
-  '/services/data/v65.0/ssot/data-transforms/Account_Transform': transformDetailJson,
-  '/services/data/v65.0/ssot/data-transforms/Account_Transform/run-history': transformRunHistoryJson,
-  '/services/data/v65.0/ssot/data-transforms/Account_Transform/schedule': transformScheduleJson,
-};
+const restBodies: Record<string, string> = { '/services/data/': versionsJson };
+for (const version of ['65.0', '67.0']) {
+  const base = `/services/data/v${version}/ssot`;
+  Object.assign(restBodies, {
+    [`${base}/data-spaces`]: dataSpacesJson,
+    [`${base}/data-lake-objects`]: dlosJson,
+    [`${base}/data-model-objects?limit=100&offset=0`]: dmosJson,
+    [`${base}/data-model-object-mappings`]: mappingsJson,
+    [`${base}/data-streams`]: dataStreamsJson,
+    [`${base}/connectors`]: connectorCatalogJson,
+    [`${base}/connections?connectorType=SalesforceDotCom`]: connectorConnectionsJson,
+    [`${base}/data-transforms`]: dataTransformsJson,
+    [`${base}/data-transforms/Account_Transform`]: transformDetailJson,
+    [`${base}/data-transforms/Account_Transform/run-history`]: transformRunHistoryJson,
+    [`${base}/data-transforms/Account_Transform/schedule`]: transformScheduleJson,
+  });
+}
 
 function restBody(path: string): string | undefined {
   return restBodies[path]
-    ?? (path.startsWith('/services/data/v65.0/ssot/data-model-object-mappings?')
+    ?? (/^\/services\/data\/v(?:65|67)\.0\/ssot\/data-model-object-mappings\?/.test(path)
       && path.includes('dmoDeveloperName=')
       ? mappingsJson
       : path.includes('/relationships?')
@@ -73,8 +80,17 @@ function createRunner(loginResult?: { stdout: string; stderr: string; exitCode: 
   };
 }
 
+const testCompatibilityPath = join(tmpdir(), 'dcat-bridge-test-compatibility.json');
+
+beforeEach(() => rmSync(testCompatibilityPath, { force: true }));
+afterEach(() => rmSync(testCompatibilityPath, { force: true }));
+
 function createState(runner = createRunner()): AppState {
-  const config = { ...loadConfig({}, []), mode: 'live' as const, sessionToken: 'bridge-test-token' };
+  const config = {
+    ...loadConfig({ DCAT_API_COMPATIBILITY_PATH: testCompatibilityPath }, []),
+    mode: 'live' as const,
+    sessionToken: 'bridge-test-token',
+  };
   return createAppState(config, runner);
 }
 
@@ -142,7 +158,7 @@ describe('executeRelayOperation', () => {
     expect(connected.connectedStatus).toBe('Connected');
 
     const inventory = await operation<InventorySnapshot>(state, { operation: 'inventory.get', alias: 'demo-uat' });
-    expect(inventory).toMatchObject({ mode: 'live', apiVersion: '65.0' });
+    expect(inventory).toMatchObject({ mode: 'live', apiVersion: '67.0' });
     expect(inventory.warnings).toEqual([]);
 
     const bundle = await operation<TransformBundle>(state, {
@@ -200,6 +216,22 @@ describe('executeRelayOperation', () => {
     })).resolves.toMatchObject({ sessionId: 'shared' });
 
     await operation(state, { operation: 'mode.set', mode: 'demo' });
+  });
+
+  it('changes the bridge-local API version through a typed relay operation', async () => {
+    const state = createState();
+    const saved = await operation(state, {
+      operation: 'compatibility.set',
+      selection: { mode: 'latest' },
+    });
+    expect(saved).toMatchObject({ selection: { mode: 'latest' }, recommended: '67.0' });
+    expect(loadApiVersionSelection(testCompatibilityPath)).toEqual({ mode: 'latest' });
+
+    const inventory = await operation<InventorySnapshot>(state, {
+      operation: 'inventory.get',
+      alias: 'demo-uat',
+    });
+    expect(inventory.apiVersion).toBe('65.0');
   });
 
   it('runs a bridge update only through the injected CLI hook', async () => {
@@ -265,6 +297,7 @@ describe('runBridge', () => {
     expect(JSON.stringify(http.calls)).not.toMatch(/password|accessToken|refreshToken|sfdxAuthUrl/i);
     expect(http.calls.find((call) => call.path === '/api/relay/poll')?.body).toMatchObject({
       version: state.config.version,
+      compatibility: state.compatibility,
       wait: true,
     });
   });
