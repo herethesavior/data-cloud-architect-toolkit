@@ -74,6 +74,18 @@ describe('useInventory', () => {
     expect(inventory).not.toHaveBeenCalled();
   });
 
+  it('does not refetch a complete cached snapshot when navigating between explorers', async () => {
+    const inventory = vi.spyOn(api, 'inventory').mockResolvedValue(demoInventory);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
+    client.setQueryData(['inventory', context.contextId], demoInventory);
+
+    const { result } = renderHook(() => useInventory(context), { wrapper: wrapperWith(client) });
+
+    expect(result.current.data).toBeDefined();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(inventory).not.toHaveBeenCalled();
+  });
+
   it('revalidates an incomplete cached snapshot while keeping its rows visible', async () => {
     const inventory = vi.spyOn(api, 'inventory').mockResolvedValue(runningSnapshot());
     const client = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
