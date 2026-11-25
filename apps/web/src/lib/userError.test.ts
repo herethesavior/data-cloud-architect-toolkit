@@ -11,22 +11,42 @@ describe('describeError', () => {
 
     expect(described).toEqual({
       message: "We couldn't check your Salesforce orgs.",
-      hint: "Try again. If it keeps happening, check that you're on the production site and the bridge is running.",
+      hint: 'Try again. If it keeps happening, open Org Connections and check the bridge.',
+      recovery: 'retry',
+    });
+  });
+
+  it('points a disconnected bridge to the setup steps', () => {
+    expect(describeError(new ApiError('BRIDGE_NOT_CONNECTED', 'raw detail'), 'orgs')).toEqual({
+      message: 'The bridge is not connected.',
+      hint: 'Open Org Connections and run the bridge setup command shown there.',
+      recovery: 'connect',
     });
   });
 
   it('prefers a specific recovery path when the code is known', () => {
     expect(describeError(new ApiError('BRIDGE_PAIRING_RESET', 'raw reset detail'), 'refresh')).toEqual({
       message: 'The bridge pairing was reset.',
-      hint: 'Create a new pairing code in Connect an Org and run setup again.',
+      hint: 'Open Org Connections, create a new pairing code, and run the setup command again.',
+      recovery: 'connect',
     });
   });
 
   it('uses the context fallback for unmapped codes', () => {
     expect(describeError(new ApiError('COMMAND_FAILED', 'Production CLI is unavailable.'), 'refresh')).toEqual({
       message: "We couldn't refresh the org list.",
-      hint: 'Try again. If it keeps happening, check the bridge connection.',
+      hint: 'Try again. If it keeps happening, open Org Connections and check the bridge.',
     });
+  });
+
+  it('never asks hosted users to switch sites', () => {
+    const copy = [
+      describeError(new TypeError('unexpected failure'), 'orgs'),
+      describeError(new ApiError('BRIDGE_RELAY_UNAVAILABLE', 'raw detail'), 'bridge'),
+      describeError(new ApiError('BRIDGE_STATUS_UNAVAILABLE', 'raw detail'), 'bridge'),
+    ].flatMap((described) => [described.message, described.hint ?? '']);
+
+    expect(copy.some((text) => /production site/i.test(text))).toBe(false);
   });
 });
 

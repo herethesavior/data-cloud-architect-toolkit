@@ -2,10 +2,11 @@ import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import type { ResourceFamily } from '@dcat/core';
 import type { WorkspaceContext } from './workspace.ts';
+import type { ErrorRecovery } from './userError.ts';
 
 export type OrgListState =
   | { status: 'checking' }
-  | { status: 'error'; message: string; hint?: string; retry: () => void }
+  | { status: 'error'; message: string; hint?: string; recovery?: ErrorRecovery; retry: () => void }
   | { status: 'idle' };
 
 export interface InventoryActions {

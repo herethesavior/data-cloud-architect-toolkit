@@ -22,9 +22,13 @@ export type UserErrorContext =
   | 'mode'
   | 'compatibility';
 
+export type ErrorRecovery = 'connect' | 'retry';
+
 export interface UserError {
   message: string;
   hint?: string;
+  /** The next step the UI should offer for this failure, when it has one. */
+  recovery?: ErrorRecovery;
 }
 
 const contextCopy: Record<UserErrorContext, UserError> = {
@@ -34,11 +38,12 @@ const contextCopy: Record<UserErrorContext, UserError> = {
   },
   orgs: {
     message: "We couldn't check your Salesforce orgs.",
-    hint: "Try again. If it keeps happening, check that you're on the production site and the bridge is running.",
+    hint: 'Try again. If it keeps happening, open Org Connections and check the bridge.',
+    recovery: 'retry',
   },
   refresh: {
     message: "We couldn't refresh the org list.",
-    hint: 'Try again. If it keeps happening, check the bridge connection.',
+    hint: 'Try again. If it keeps happening, open Org Connections and check the bridge.',
   },
   connect: {
     message: "We couldn't connect that org.",
@@ -46,7 +51,7 @@ const contextCopy: Record<UserErrorContext, UserError> = {
   },
   inventory: {
     message: "We couldn't load this org's metadata.",
-    hint: 'Try again. If it keeps happening, check the bridge connection or use demo mode.',
+    hint: 'Try again. If it keeps happening, check the bridge in Org Connections or use demo mode.',
   },
   transform: {
     message: "We couldn't load this transform detail.",
@@ -54,7 +59,8 @@ const contextCopy: Record<UserErrorContext, UserError> = {
   },
   bridge: {
     message: "We couldn't check the bridge status.",
-    hint: "Refresh status. If it keeps failing, check that you're on the production site.",
+    hint: 'Refresh status. If it keeps failing, open Org Connections and check the bridge.',
+    recovery: 'retry',
   },
   diagnostics: {
     message: "We couldn't read diagnostics.",
@@ -70,7 +76,7 @@ const contextCopy: Record<UserErrorContext, UserError> = {
   },
   compatibility: {
     message: "We couldn't save the API version.",
-    hint: 'Try again. If it keeps happening, check the bridge connection.',
+    hint: 'Try again. If it keeps happening, check the bridge in Org Connections.',
   },
 };
 
@@ -87,7 +93,7 @@ const codeCopy: Record<string, UserError> = {
   },
   RELAY_FAILED: {
     message: "The bridge couldn't complete that request.",
-    hint: 'Try again. If it keeps happening, check the bridge connection.',
+    hint: 'Try again. If it keeps happening, check the bridge in Org Connections.',
   },
   NETWORK_ERROR: {
     message: "We couldn't reach the service.",
@@ -107,31 +113,38 @@ const codeCopy: Record<string, UserError> = {
   },
   INVALID_AGENT_TOKEN: {
     message: 'The bridge pairing is no longer valid.',
-    hint: 'Create a new pairing code in Connect an Org and run setup again.',
+    hint: 'Open Org Connections, create a new pairing code, and run the setup command again.',
+    recovery: 'connect',
   },
   BRIDGE_PAIRING_RESET: {
     message: 'The bridge pairing was reset.',
-    hint: 'Create a new pairing code in Connect an Org and run setup again.',
+    hint: 'Open Org Connections, create a new pairing code, and run the setup command again.',
+    recovery: 'connect',
   },
   BRIDGE_NOT_CONNECTED: {
     message: 'The bridge is not connected.',
-    hint: 'Start the bridge on your computer, then try again.',
+    hint: 'Open Org Connections and run the bridge setup command shown there.',
+    recovery: 'connect',
   },
   BRIDGE_BUSY: {
     message: 'Another request is still running.',
     hint: 'Wait a moment, then try again.',
+    recovery: 'retry',
   },
   BRIDGE_STATUS_UNAVAILABLE: {
     message: "We couldn't reach the bridge service.",
-    hint: "Check that you're on the production site, then refresh status.",
+    hint: 'Open Org Connections to check the bridge, then try again.',
+    recovery: 'connect',
   },
   BRIDGE_RELAY_UNAVAILABLE: {
     message: "We couldn't reach the bridge service.",
-    hint: "Check that you're on the production site, then try again.",
+    hint: 'Open Org Connections, create a new pairing code, and run setup again.',
+    recovery: 'connect',
   },
   CLI_NOT_FOUND: {
     message: "Salesforce CLI wasn't found on this computer.",
-    hint: 'Install Salesforce CLI, then re-check.',
+    hint: 'Install Salesforce CLI, then open Org Connections to check again.',
+    recovery: 'connect',
   },
   ORG_NOT_FOUND: {
     message: "That Salesforce org wasn't found.",
@@ -147,11 +160,13 @@ const codeCopy: Record<string, UserError> = {
   },
   INVALID_PAIRING_CODE: {
     message: "That pairing code isn't valid.",
-    hint: 'Create a fresh pairing code in Connect an Org and run setup again.',
+    hint: 'Open Org Connections, create a fresh pairing code, and run setup again.',
+    recovery: 'connect',
   },
   COMPATIBILITY_SAVE_FAILED: {
     message: "We couldn't save the API version on the bridge computer.",
     hint: 'Check that the bridge is running, then try again.',
+    recovery: 'retry',
   },
 };
 

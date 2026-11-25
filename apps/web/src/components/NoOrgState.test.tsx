@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { InventoryActions } from '../lib/inventoryActions.tsx';
 import { InventoryActionsProvider } from '../lib/inventoryActions.tsx';
 import { NoOrgState } from './NoOrgState.tsx';
@@ -72,14 +72,41 @@ describe('NoOrgState', () => {
     expect(screen.queryByRole('button', { name: 'Use demo mode' })).not.toBeInTheDocument();
   });
 
-  it('shows an org-check error with a retry while recovery actions stay available', () => {
+  it('keeps retry for org-check errors that a retry can resolve', () => {
     const retry = vi.fn();
     renderState(actions({ orgList: { status: 'error', message: 'Org list timed out.', retry } }));
 
     expect(screen.getByRole('alert')).toHaveTextContent('Org list timed out.');
     expect(screen.getByRole('button', { name: 'Retry org check' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Select an org' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Select an org' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use demo mode' })).toBeInTheDocument();
-    expect(screen.queryByText('No org selected')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry org check' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it('sends bridge setup errors to Org Connections instead of offering a retry', () => {
+    const onGoToOrgs = vi.fn();
+    const retry = vi.fn();
+    renderState(actions({
+      onGoToOrgs,
+      orgList: {
+        status: 'error',
+        message: 'The bridge is not connected.',
+        hint: 'Open Org Connections and run the bridge setup command shown there.',
+        recovery: 'connect',
+        retry,
+      },
+    }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The bridge is not connected.');
+    expect(screen.getByRole('button', { name: 'Go to Org Connections' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use demo mode' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry org check' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Select an org' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to Org Connections' }));
+    expect(onGoToOrgs).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
   });
 });
