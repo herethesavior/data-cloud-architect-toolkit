@@ -3,7 +3,7 @@ import { relayOperationSchema } from '@dcat/core';
 import { fetchTransformBundle, validateTransformId } from '@dcat/data360-api';
 import { CliError, safeErrorMessage, validateAlias } from '@dcat/salesforce-cli';
 import { clearDiscoverySessions, getDiscoverySession, startDiscoverySession } from './discovery-sessions.ts';
-import { refreshCliStatus } from './state.ts';
+import { refreshCliStatus, setApiVersionSelection } from './state.ts';
 import type { AppState } from './state.ts';
 import { invalidateOrgState, resolveInventory, resolveOrgs } from './routes/orgs.ts';
 
@@ -184,6 +184,11 @@ export async function executeRelayOperation(
       state.inventoryCache = null;
       clearDiscoverySessions(state);
       return { mode: state.mode };
+    case 'compatibility.set': {
+      const compatibility = setApiVersionSelection(state, task.selection);
+      invalidateOrgState(state);
+      return compatibility;
+    }
     case 'bridge.update':
       if (!onUpdate) throw new CliError('INVALID_ARGUMENT', 'Bridge updates require the installed bridge CLI.');
       return onUpdate();
@@ -242,6 +247,7 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
       code: options.code,
       version: state.config.version,
       cli: state.cliStatus,
+      compatibility: state.compatibility,
     });
     token = paired.agentToken;
     await options.onPaired?.(token);
@@ -258,6 +264,7 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
         agentToken: token,
         version: state.config.version,
         cli: state.cliStatus,
+        compatibility: state.compatibility,
         // The relay holds this request until work arrives, so a queued browser
         // action reaches the bridge without a two-second polling delay.
         wait: true,

@@ -6,6 +6,8 @@ export const CLI_ERROR_CODES = [
   'UNEXPECTED_RESPONSE',
   'INVALID_ARGUMENT',
   'SESSION_EXPIRED',
+  // Bridge-owned settings use the same typed error transport as CLI failures.
+  'COMPATIBILITY_SAVE_FAILED',
 ] as const;
 
 export type CliErrorCode = (typeof CLI_ERROR_CODES)[number];

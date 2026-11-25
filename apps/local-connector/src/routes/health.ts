@@ -11,6 +11,7 @@ export function registerHealthRoutes(app: FastifyInstance, state: AppState): voi
     version: state.config.version,
     time: new Date().toISOString(),
     cli: state.cliStatus,
+    compatibility: state.compatibility,
   }));
 
   app.get('/api/cli/status', async () => state.cliStatus);

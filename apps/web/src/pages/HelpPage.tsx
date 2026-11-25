@@ -554,8 +554,13 @@ export function HelpPage({ onNavigate }: HelpPageProps) {
             <PanelTitle
               icon="refresh"
               title="Refresh and caching"
-              description="DCAT reads the current Salesforce API version first. If that probe fails, it requests no metadata and explains the gap."
+              description="DCAT uses the API version saved on the bridge: DCAT-recommended v67.0 by default, latest available, or a curated specific version. Demo mode stays on v65.0."
             />
+            <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-soft">
+              Open Settings & Diagnostics to see the Salesforce CLI and API versions DCAT is using. Saving a version there
+              reloads metadata while keeping the rows already on screen. Salesforce CLI updates stay manual: the page shows a
+              copyable command for the machine that runs the bridge.
+            </p>
             <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-soft">
               Org lists and inventory snapshots are saved in this browser and restored after a reload, so menu navigation does
               not retrieve them again. The Updated chip shows the inventory snapshot's age; a warning dot means a live snapshot

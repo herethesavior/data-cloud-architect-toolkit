@@ -19,7 +19,8 @@ export type UserErrorContext =
   | 'bridge'
   | 'diagnostics'
   | 'setup'
-  | 'mode';
+  | 'mode'
+  | 'compatibility';
 
 export interface UserError {
   message: string;
@@ -66,6 +67,10 @@ const contextCopy: Record<UserErrorContext, UserError> = {
   mode: {
     message: "We couldn't switch modes.",
     hint: 'Try again.',
+  },
+  compatibility: {
+    message: "We couldn't save the API version.",
+    hint: 'Try again. If it keeps happening, check the bridge connection.',
   },
 };
 
@@ -143,6 +148,10 @@ const codeCopy: Record<string, UserError> = {
   INVALID_PAIRING_CODE: {
     message: "That pairing code isn't valid.",
     hint: 'Create a fresh pairing code in Connect an Org and run setup again.',
+  },
+  COMPATIBILITY_SAVE_FAILED: {
+    message: "We couldn't save the API version on the bridge computer.",
+    hint: 'Check that the bridge is running, then try again.',
   },
 };
 

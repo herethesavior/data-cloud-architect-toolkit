@@ -101,7 +101,7 @@ The same three use cases are told as a story on **About DCAT**, including a pres
 
 - Salesforce CLI owns authentication. DCAT never asks for or stores usernames, passwords, tokens, SFDX auth URLs, or client secrets. The browser's inventory cache holds metadata snapshots only.
 - The browser never runs `sf`. Hosted mode uses an outbound bridge that long-polls the Worker; it needs no open inbound port or tunnel.
-- The relay accepts only nine typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `inventory.start`, `inventory.status`, `transform.get`, `mode.set`, and `bridge.update`. There is no arbitrary command or URL proxy, no shell, and no SOQL.
+- The relay accepts only ten typed operations: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `inventory.start`, `inventory.status`, `transform.get`, `mode.set`, `compatibility.set`, and `bridge.update`. There is no arbitrary command or URL proxy, no shell, and no SOQL. The API version setting is stored by the bridge at `~/.dcat/api-compatibility.json`; the Worker only sees reported status in the Durable Object.
 - Process output is redacted before it is returned to the browser. Bridge storage contains only the relay URL, agent token, and version, written with mode `600`; it never reads the CLI credential store.
 - The local connector binds only to `127.0.0.1` and validates Host and Origin headers.
 - There is no hosted OAuth. `/api/auth/*` paths are intentionally removed and return `404`.
@@ -187,7 +187,7 @@ The demo inventory is fully labelled and intentionally healthy. It contains eigh
 
 ## How live discovery works
 
-1. DCAT reads the latest supported Salesforce API version. If that fails, it requests no metadata.
+1. DCAT uses a bridge-owned API version setting: DCAT-recommended `v67.0` by default, latest available, or one of a curated set of specific versions. The version list is checked for diagnostics; in pinned modes a failed check does not stop metadata loading. Demo mode stays fixed at `v65.0`.
 2. It probes Data Spaces, DLOs, DMOs, streams, and transforms independently. Mappings are queried per DMO developer name, limited to DMOs the source marks enabled, custom, or externally mapped.
 3. A `403` is shown as **forbidden** and an endpoint-level `404` or unsupported endpoint as **unsupported**. A mapping-specific `NOT_FOUND` means that DMO has no mappings and is recorded as no result; malformed responses remain **errors**.
 4. Successful families still populate the inventory when other families fail. Discovery Health and **Needs attention** explain the gaps and stay inside the viewport.
@@ -207,6 +207,7 @@ Copy `.env.example` to `.env` only if you need to change a local setting. It hol
 | `DCAT_PORT` | `3847` | Connector port, always bound to `127.0.0.1`. |
 | `DCAT_DEMO` | `false` | Start in demo mode. |
 | `DCAT_DATA_DIR` | `.dcat-data` | Reserved for local snapshot and export files. |
+| `DCAT_API_COMPATIBILITY_PATH` | `~/.dcat/api-compatibility.json` | Optional bridge-local path for the saved Salesforce API version setting. |
 | `SESSION_TTL_SECONDS` | `2592000` | Optional Worker session lifetime; set in `.dev.vars` for local Worker development. |
 
 ## Scripts

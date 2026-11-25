@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
+import { RELAY_OPERATION_TIMEOUT_MS, createApiVersionStatus } from '@dcat/core';
 import app from './index.ts';
 import { getBridgeUpdateStatus, resetNpmVersionCache } from './relay.ts';
 import { createSession } from './session.ts';
@@ -140,10 +140,12 @@ describe('hosted bridge relay', () => {
     expect(pairing.installCommand).toContain(pairing.code);
     expect(pairing.installCommand).toContain('--relay');
 
+    const compatibility = createApiVersionStatus();
     const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
       code: pairing.code,
       version: '0.1.0',
       cli,
+      compatibility,
     }, {}, env);
     expect(paired.agentToken).toMatch(/\S/);
 
@@ -155,11 +157,12 @@ describe('hosted bridge relay', () => {
     expect(replay.status).toBe(400);
 
     const waiting = await app.request('/api/relay/status', { headers: session.headers }, env);
-    expect(await waiting.json()).toMatchObject({ paired: true, relay: 'waiting', cli });
+    expect(await waiting.json()).toMatchObject({ paired: true, relay: 'waiting', cli, compatibility });
 
     const firstPoll = await postJson<{ tasks: unknown[] }>('/api/relay/poll', {
       agentToken: paired.agentToken,
       cli,
+      compatibility,
     }, {}, env);
     expect(firstPoll.tasks).toEqual([]);
 
@@ -632,24 +635,48 @@ describe('hosted bridge relay', () => {
     }
   });
 
-  it('keeps a valid pairing when the relay status check fails transiently', async () => {
+  it('can replace a pairing when the relay status check is unavailable', async () => {
     const env = makeEnv();
     const session = await startSession(env);
     const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
     await postJson('/api/relay/pair', { code: pairing.code, cli }, {}, env);
 
+    const workingRelay = env.RELAY_DO;
     env.RELAY_DO = stubRelayDo(async () => relayError('RELAY_UNAVAILABLE', 'Relay restarting.', 503));
 
     const status = await app.request('/api/relay/status', { headers: session.headers }, env);
-    expect(await status.json()).toMatchObject({ paired: true, relay: 'unavailable', working: false });
+    expect(await status.json()).toMatchObject({
+      paired: true,
+      relay: 'unavailable',
+      working: false,
+      canRepairPairing: true,
+    });
 
-    const fresh = await app.request('/api/relay/pairing', {
-      method: 'POST',
-      headers: { ...session.headers, 'content-type': 'application/json' },
-      body: '{}',
-    }, env);
-    expect(fresh.status).toBe(502);
-    expect((await fresh.json() as { error: { code: string } }).error.code).toBe('BRIDGE_STATUS_UNAVAILABLE');
+    const fresh = await postJson<{ code: string; installCommand: string }>(
+      '/api/relay/pairing', {}, session.headers, env,
+    );
+    expect(fresh.code).toMatch(/\S/);
+    expect(fresh.installCommand).toContain(fresh.code);
+
+    // A new pairing must work once the relay is reachable again.
+    env.RELAY_DO = workingRelay;
+    const repaired = await postJson<{ agentToken: string }>('/api/relay/pair', { code: fresh.code, cli }, {}, env);
+    expect(repaired.agentToken).toMatch(/\S/);
+  });
+
+  it('clears a pairing when the relay explicitly reports it as unpaired', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson('/api/relay/pair', { code: pairing.code, cli }, {}, env);
+
+    env.RELAY_DO = stubRelayDo(async () => new Response(JSON.stringify({ paired: false }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    const status = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect(await status.json()).toMatchObject({ paired: false, relay: 'waiting' });
   });
 
   it('reports a reset pairing distinctly instead of telling the user to set up a bridge', async () => {

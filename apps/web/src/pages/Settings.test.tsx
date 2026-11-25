@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createApiVersionStatus } from '@dcat/core';
 import type { BridgeStatus, ConnectorHealth } from '@dcat/core';
 import { api } from '../lib/api.ts';
 import type { ThemeController } from '../lib/useTheme.ts';
@@ -14,6 +15,13 @@ const health: ConnectorHealth = {
   version: '0.1.0',
   time: '2026-01-01T00:00:00.000Z',
   cli: { installed: true, version: '2.0.0' },
+  compatibility: {
+    ...createApiVersionStatus(),
+    used: '67.0',
+    latest: '68.0',
+    verifiedAt: '2026-01-01T00:00:00.000Z',
+    probeStatus: 'available',
+  },
 };
 
 const bridge: BridgeStatus = {
@@ -21,6 +29,7 @@ const bridge: BridgeStatus = {
   mode: 'live',
   version: '0.1.0',
   cli: health.cli,
+  compatibility: health.compatibility,
   lastSeenAt: '2026-01-01T00:00:00.000Z',
   relay: 'connected',
   working: false,
@@ -52,6 +61,7 @@ interface RenderOptions {
   onClearCachedMetadata?: () => Promise<void>;
   onResetSavedLayouts?: () => void;
   onEraseLocalData?: () => Promise<void>;
+  onRefreshInventory?: () => void;
 }
 
 function renderSettings(options: RenderOptions = {}) {
@@ -65,6 +75,7 @@ function renderSettings(options: RenderOptions = {}) {
       onClearCachedMetadata={options.onClearCachedMetadata ?? vi.fn().mockResolvedValue(undefined)}
       onResetSavedLayouts={options.onResetSavedLayouts ?? vi.fn()}
       onEraseLocalData={options.onEraseLocalData ?? vi.fn().mockResolvedValue(undefined)}
+      onRefreshInventory={options.onRefreshInventory ?? vi.fn()}
     />
   );
   const view = render(<QueryClientProvider client={queryClient}>{settings}</QueryClientProvider>);
@@ -85,7 +96,8 @@ function renderSettings(options: RenderOptions = {}) {
 }
 
 function diagnosticValue(label: string): HTMLElement | null {
-  return screen.getByText(label).parentElement?.querySelector('dd') ?? null;
+  const term = screen.getAllByText(label).find((element) => element.tagName === 'DT');
+  return term?.parentElement?.querySelector('dd') ?? null;
 }
 
 describe('Settings bridge diagnostics', () => {
@@ -109,6 +121,55 @@ describe('Settings bridge diagnostics', () => {
     expect(screen.getByText('Connected')).toBeInTheDocument();
     expect(diagnosticValue('Bridge version')).toHaveTextContent('0.1.0');
     expect(screen.queryByText(/OAuth/i)).not.toBeInTheDocument();
+  });
+
+  it('shows both Salesforce CLI and API versions with the recommended label', async () => {
+    renderSettings();
+
+    expect(await screen.findByRole('heading', { name: 'Compatibility' })).toBeInTheDocument();
+    expect(diagnosticValue('Salesforce CLI version')).toHaveTextContent('v2.0.0');
+    expect(diagnosticValue('Salesforce API version')).toHaveTextContent('v67.0');
+    expect(diagnosticValue('Setting')).toHaveTextContent('DCAT-recommended');
+    expect(diagnosticValue('Latest available')).toHaveTextContent('v68.0');
+    expect(diagnosticValue('DCAT-recommended')).toHaveTextContent('v67.0');
+  });
+
+  it('keeps demo mode on the fixed fixture version', async () => {
+    renderSettings({ mode: 'demo' });
+
+    expect(await screen.findByRole('heading', { name: 'Compatibility' })).toBeInTheDocument();
+    expect(diagnosticValue('Salesforce API version')).toHaveTextContent('v65.0');
+    expect(diagnosticValue('Setting')).toHaveTextContent('Demo fixture');
+    await userEvent.click(screen.getByText('Change API version'));
+    expect(screen.getByText(/Demo mode always uses the sample API version/)).toBeInTheDocument();
+  });
+
+  it('saves a constrained selection and reuses the inventory refresh', async () => {
+    const setCompatibility = vi.spyOn(api, 'setCompatibility').mockResolvedValue({
+      ...health.compatibility!,
+      selection: { mode: 'latest' },
+      used: '68.0',
+    });
+    const onRefreshInventory = vi.fn();
+    renderSettings({ onRefreshInventory });
+
+    await userEvent.click(await screen.findByText('Change API version'));
+    await userEvent.click(screen.getByRole('radio', { name: /Latest available/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save & refresh' }));
+
+    await waitFor(() => expect(setCompatibility).toHaveBeenCalledWith({ mode: 'latest' }));
+    expect(onRefreshInventory).toHaveBeenCalledOnce();
+  });
+
+  it('translates a failed compatibility save into guided copy', async () => {
+    vi.spyOn(api, 'setCompatibility').mockRejectedValue(new Error('TypeError: TypeError: raw stack trace'));
+    renderSettings();
+
+    await userEvent.click(await screen.findByText('Change API version'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save & refresh' }));
+
+    expect(await screen.findByText("We couldn't save the API version.")).toBeInTheDocument();
+    expect(screen.queryByText(/raw stack trace/)).not.toBeInTheDocument();
   });
 
   it('shows the paired bridge version instead of the relay version in hosted mode', async () => {

@@ -1,5 +1,6 @@
 import { isValidTransformId, type ResourceFamily } from '@dcat/core';
 import { CliError } from '@dcat/salesforce-cli';
+import { API_VERSION_PATTERN, VERSIONS_PATH } from './versions.ts';
 
 /** Version-independent path catalog. Candidate families must still be probed per org. */
 export const DATA360_ENDPOINT_REGISTRY: Record<ResourceFamily, string> = {
@@ -10,8 +11,6 @@ export const DATA360_ENDPOINT_REGISTRY: Record<ResourceFamily, string> = {
   'data-streams': '/ssot/data-streams',
   'data-transforms': '/ssot/data-transforms',
 };
-
-const API_VERSION_PATTERN = /^\d{2,3}\.\d{1,2}$/;
 
 /** Verified DMO page size: larger pages time out and the endpoint has no next-page URL. */
 export const DMO_PAGE_SIZE = 100;
@@ -114,7 +113,7 @@ export function buildDmoRelationshipsPath(
 }
 
 export function buildVersionsPath(): string {
-  return 'services/data/';
+  return VERSIONS_PATH;
 }
 
 function buildConnectorBasePath(apiVersion: string): string {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { apiVersionSelectionSchema, apiVersionStatusSchema } from './compatibility.ts';
 import { RESOURCE_FAMILIES, cliStatusSchema, inventorySnapshotSchema, orgSummarySchema, transformBundleSchema } from './domain.ts';
 import { isValidTransformId } from './transform-id.ts';
 
@@ -11,6 +12,7 @@ export const RELAY_OPERATIONS = [
   'inventory.status',
   'transform.get',
   'mode.set',
+  'compatibility.set',
   'bridge.update',
 ] as const;
 
@@ -71,6 +73,10 @@ export const relayOperationSchema = z.discriminatedUnion('operation', [
     operation: z.literal('mode.set'),
     mode: z.enum(['live', 'demo']),
   }),
+  z.object({
+    operation: z.literal('compatibility.set'),
+    selection: apiVersionSelectionSchema,
+  }),
   z.object({ operation: z.literal('bridge.update') }),
 ]);
 
@@ -92,6 +98,7 @@ export const RELAY_OPERATION_TIMEOUT_MS: Record<RelayOperationName, number> = {
   'inventory.status': 120_000,
   'transform.get': 60_000,
   'mode.set': 30_000,
+  'compatibility.set': 30_000,
   'bridge.update': 5 * 60_000,
 };
 
@@ -119,6 +126,7 @@ export const bridgeStatusSchema = z.object({
   latestVersion: z.string().nullish(),
   updateAvailable: z.boolean(),
   selfUpdateSupported: z.boolean(),
+  compatibility: apiVersionStatusSchema.nullish(),
 });
 
 export type BridgeStatus = z.infer<typeof bridgeStatusSchema>;
@@ -155,12 +163,14 @@ export const relayPairRequestSchema = z.object({
   code: z.string().min(8).max(64),
   version: z.string().max(64).optional(),
   cli: cliStatusSchema.optional(),
+  compatibility: apiVersionStatusSchema.nullish(),
 });
 
 export const relayPollRequestSchema = z.object({
   agentToken: z.string().min(16),
   version: z.string().max(64).optional(),
   cli: cliStatusSchema.optional(),
+  compatibility: apiVersionStatusSchema.nullish(),
   /** Long-poll until work arrives instead of returning an empty response immediately. */
   wait: z.boolean().optional(),
 });
@@ -180,6 +190,7 @@ export const relayAgentCancelRequestSchema = z.object({
 });
 
 export const relayHealthResultSchema = cliStatusSchema;
+export const relayCompatibilityResultSchema = apiVersionStatusSchema;
 export const relayOrgsResultSchema = z.array(orgSummarySchema);
 export const relayInventoryResultSchema = inventorySnapshotSchema;
 export const relayTransformResultSchema = transformBundleSchema;

@@ -35,6 +35,7 @@ interface HostedState {
   cli: CliStatus;
   agentVersion: string | null;
   latestVersion: string;
+  statusUnavailable: boolean;
   lastSeenAt: number | null;
   request: RequestRecord | null;
   orgs: OrgSummary[];
@@ -80,6 +81,7 @@ function createState(mode: Mode): HostedState {
     cli: { installed: false, version: null, error: null },
     agentVersion: null,
     latestVersion: '0.1.3',
+    statusUnavailable: false,
     lastSeenAt: null,
     request: null,
     orgs: [],
@@ -159,7 +161,10 @@ function bridgeStatus(state: HostedState, origin: string) {
     version: '0.1.0',
     cli: state.cli,
     lastSeenAt: state.lastSeenAt === null ? null : new Date(state.lastSeenAt).toISOString(),
-    relay: !state.paired || state.lastSeenAt === null ? 'waiting' : stale ? 'stale' : 'connected',
+    relay: state.paired && state.statusUnavailable
+      ? 'unavailable'
+      : !state.paired || state.lastSeenAt === null ? 'waiting' : stale ? 'stale' : 'connected',
+    canRepairPairing: state.paired && state.statusUnavailable,
     agentVersion: state.agentVersion,
     latestVersion: state.latestVersion,
     updateAvailable: isNewerVersion(state.latestVersion, state.agentVersion),
@@ -276,8 +281,15 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
       if (route.request().headers()['x-dcat-token'] !== token) {
         return json(route, { error: { code: 'INVALID_SESSION_TOKEN', message: 'Refresh the page.' } }, 401);
       }
-      if (state.paired) {
+      if (state.paired && !state.statusUnavailable) {
         return json(route, { error: { code: 'BRIDGE_ALREADY_PAIRED', message: 'Already paired.' } }, 409);
+      }
+      if (state.paired) {
+        state.paired = false;
+        state.agentToken = null;
+        state.pairingCode = null;
+        state.lastSeenAt = null;
+        state.statusUnavailable = false;
       }
       state.pairingCode ??= 'PAIR12345678';
       return json(route, bridgeStatus(state, new URL(url).origin).pairing);
@@ -293,6 +305,7 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
       state.paired = true;
       state.agentToken = agentToken;
       state.pairingCode = null;
+      state.statusUnavailable = false;
       state.lastSeenAt = null;
       if (body.cli && typeof body.cli === 'object') state.cli = body.cli as CliStatus;
       if (typeof body.version === 'string') state.agentVersion = body.version;
@@ -388,6 +401,8 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
       state.paired = false;
       state.agentToken = null;
       state.pairingCode = null;
+      state.pairingUsed = false;
+      state.statusUnavailable = false;
       state.lastSeenAt = null;
       state.cli = { installed: false, version: null, error: null };
       state.agentVersion = null;
@@ -545,6 +560,33 @@ test('hosted connect detects a sandbox from its Salesforce instance URL', async 
     alias: 'uat-org',
     instanceUrl: 'https://acme--uat.sandbox.my.salesforce.com',
   });
+
+  await page.evaluate(() => {
+    (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;
+  });
+});
+
+test('hosted connect recovers from an unavailable relay with a fresh pairing command', async ({ page }) => {
+  const state = createState('live');
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  await page.goto('/');
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
+  await page.getByRole('button', { name: 'Create pairing code' }).click();
+  await startFakeBridge(page, 'PAIR12345678');
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.getByText('Bridge connected')).toBeVisible();
+
+  state.statusUnavailable = true;
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.getByText('Bridge status is temporarily unavailable.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Create new pairing code' }).click();
+  await expect(page.getByText('PAIR12345678', { exact: true })).toBeVisible();
+  await expect(page.getByText(
+    `npx -y @dcat-toolkit/bridge@latest setup --relay ${new URL(page.url()).origin} --code PAIR12345678`,
+  )).toBeVisible();
 
   await page.evaluate(() => {
     (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;

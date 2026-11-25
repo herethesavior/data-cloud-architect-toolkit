@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
-import type { InventorySnapshot, OrgSummary } from '@dcat/core';
+import { createApiVersionStatus } from '@dcat/core';
+import type { ApiVersionStatus, InventorySnapshot, OrgSummary } from '@dcat/core';
 import { demoInventory, demoOrgs, demoTransformBundles } from '@dcat/test-fixtures';
 
 declare global {
@@ -23,6 +24,7 @@ interface ConnectorState {
   /** Orgs returned when the connector is in live mode. */
   orgs: OrgSummary[];
   inventories: Record<string, InventorySnapshot>;
+  compatibility: ApiVersionStatus;
 }
 
 function createConnectorState(): ConnectorState {
@@ -51,6 +53,13 @@ function createConnectorState(): ConnectorState {
   return {
     mode: 'demo',
     orgs: [prodOrg, sandboxOrg],
+    compatibility: {
+      ...createApiVersionStatus(),
+      used: '67.0',
+      latest: '68.0',
+      verifiedAt: '2026-11-18T00:00:00.000Z',
+      probeStatus: 'available',
+    },
     inventories: {
       'demo-uat': liveInventory(demoOrgs[0]!, 'Live Account DLO'),
       'prod-org': liveInventory(prodOrg, 'Production Account'),
@@ -80,8 +89,19 @@ async function mockConnector(page: Page, state: ConnectorState, options: MockCon
     await route.fulfill({ json: { mode: state.mode } });
   });
   await page.route('**/api/health', (route: Route) =>
-    route.fulfill({ json: { ...health, mode: state.mode } }),
+    route.fulfill({ json: { ...health, mode: state.mode, compatibility: state.compatibility } }),
   );
+  await page.route('**/api/compatibility', async (route: Route) => {
+    if (route.request().method() === 'POST') {
+      const selection = route.request().postDataJSON() as ApiVersionStatus['selection'];
+      state.compatibility = {
+        ...createApiVersionStatus(selection),
+        used: selection.mode === 'specific' ? selection.version : '68.0',
+        latest: '68.0',
+      };
+    }
+    await route.fulfill({ json: state.compatibility });
+  });
   await page.route('**/api/cli/refresh', (route: Route) =>
     route.fulfill({ json: health.cli }),
   );
@@ -457,6 +477,28 @@ test('mode changes refresh diagnostics in the currently open view', async ({ pag
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
   await expect(page.locator('header').getByText('LIVE · PRODUCTION', { exact: true })).toBeVisible();
   await expect(modeFact).toContainText('live');
+});
+
+test('compatibility settings save a curated version and reuse the inventory refresh', async ({ page }) => {
+  const calls = { orgs: 0, inventory: 0 };
+  await mockConnector(page, createConnectorState(), { calls });
+  await page.goto('/');
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+
+  const apiVersionFact = page.locator('dt').filter({ hasText: 'Salesforce API version' }).locator('..');
+  await expect(apiVersionFact).toContainText('v65.0');
+  await page.getByRole('button', { name: 'Switch to live mode' }).click();
+  await expect(apiVersionFact).toContainText('v67.0');
+
+  await page.getByText('Change API version').click();
+  await page.locator('input[name="api-version-choice"]').nth(2).check();
+  await page.getByLabel('Specific API version').selectOption('68.0');
+  const inventoryBefore = calls.inventory;
+  await page.getByRole('button', { name: 'Save & refresh' }).click();
+
+  await expect(page.getByText('API version saved. DCAT is refreshing metadata.')).toBeVisible();
+  await expect.poll(() => calls.inventory).toBeGreaterThan(inventoryBefore);
+  await expect(apiVersionFact).toContainText('v68.0');
 });
 
 test('switching live to demo clears live org setup state and disables live controls', async ({ page }) => {

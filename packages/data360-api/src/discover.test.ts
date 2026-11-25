@@ -45,21 +45,26 @@ const functionalityNotEnabled = JSON.stringify([{
   errorCode: 'FUNCTIONALITY_NOT_ENABLED',
 }]);
 
-function fakeCli(overrides: Record<string, string | Error | Array<string | Error>> = {}): RestClient {
+function fakeCliAtVersion(
+  version: string,
+  overrides: Record<string, string | Error | Array<string | Error>> = {},
+): RestClient {
+  const versionBase = `services/data/v${version}/ssot`;
+  const versionDmoPath = `${versionBase}/data-model-objects?limit=100&offset=0`;
   const paths: Record<string, string | Error | Array<string | Error>> = {
     'services/data/': versionsJson,
-    [`${base}/data-spaces`]: dataSpacesJson,
-    [`${base}/data-lake-objects`]: dlosJson,
-    [dmoPath]: dmosJson,
-    [`${base}/data-model-objects?limit=100&offset=100`]: dmosOffsetPage2Json,
-    [`${base}/data-model-object-mappings`]: mappingsJson,
+    [`${versionBase}/data-spaces`]: dataSpacesJson,
+    [`${versionBase}/data-lake-objects`]: dlosJson,
+    [versionDmoPath]: dmosJson,
+    [`${versionBase}/data-model-objects?limit=100&offset=100`]: dmosOffsetPage2Json,
+    [`${versionBase}/data-model-object-mappings`]: mappingsJson,
     ...Object.fromEntries(dmoApiNames.map((name) => [
-      buildMappingPath(name, '65.0', dmoSpaces[name]), mappingsJson,
+      buildMappingPath(name, version, dmoSpaces[name]), mappingsJson,
     ])),
-    [`${base}/data-streams`]: dataStreamsJson,
-    [buildConnectorCatalogPath('65.0')]: connectorCatalogJson,
-    [buildConnectorConnectionsPath('65.0', 'SalesforceDotCom')]: connectorConnectionsJson,
-    [`${base}/data-transforms`]: dataTransformsJson,
+    [`${versionBase}/data-streams`]: dataStreamsJson,
+    [buildConnectorCatalogPath(version)]: connectorCatalogJson,
+    [buildConnectorConnectionsPath(version, 'SalesforceDotCom')]: connectorConnectionsJson,
+    [`${versionBase}/data-transforms`]: dataTransformsJson,
     ...overrides,
   };
   const indexes = new Map<string, number>();
@@ -81,6 +86,12 @@ function fakeCli(overrides: Record<string, string | Error | Array<string | Error
   };
 }
 
+function fakeCli(
+  overrides: Record<string, string | Error | Array<string | Error>> = {},
+): RestClient {
+  return fakeCliAtVersion('65.0', overrides);
+}
+
 function pathCalls(cli: RestClient, path: string): number {
   return vi.mocked(cli.restGet).mock.calls.filter(([, requested]) => requested === path).length;
 }
@@ -99,7 +110,7 @@ describe('live Data 360 discovery', () => {
 
   it('builds a complete normalized snapshot with provenance and certainty labels', async () => {
     const cli = fakeCli();
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory).toMatchObject({
       mode: 'live',
@@ -143,7 +154,7 @@ describe('live Data 360 discovery', () => {
     const cli = fakeCli({
       [dmoPath]: JSON.stringify({ dataModelObject: [] }),
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.mode).toBe('live');
     expect(inventory.dmos).toEqual([]);
@@ -179,7 +190,7 @@ describe('live Data 360 discovery', () => {
         }],
       }),
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(path).toContain('dmoDeveloperName=Customer%20%26%20Partner__dlm');
     expect(pathCalls(cli, path)).toBe(1);
@@ -196,7 +207,7 @@ describe('live Data 360 discovery', () => {
   it('loads per-DMO relationships and preserves source status', async () => {
     const relationshipPath = buildDmoRelationshipsPath('Account_DMO__dlm', '65.0', 'default');
     const cli = fakeCli({ [relationshipPath]: dmoRelationshipsJson });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(pathCalls(cli, relationshipPath)).toBe(1);
     expect(inventory.relationships).toEqual(expect.arrayContaining([
@@ -230,7 +241,7 @@ describe('live Data 360 discovery', () => {
       [nextPath]: dmosOffsetPage2Json,
       [buildMappingPath('Page2_DMO__dlm', '65.0', 'default')]: mappingsJson,
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.dmos).toHaveLength(101);
     expect(pathCalls(cli, nextPath)).toBe(1);
@@ -249,7 +260,7 @@ describe('live Data 360 discovery', () => {
         nextPageUrl: `/${crossFamilyPath}`,
       }),
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(pathCalls(cli, crossFamilyPath)).toBe(0);
     expect(inventory.dlos).toHaveLength(1);
@@ -267,7 +278,7 @@ describe('live Data 360 discovery', () => {
       }),
       [enabledPath]: mappingsJson,
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(pathCalls(cli, enabledPath)).toBe(1);
     for (const path of mappingPaths) expect(pathCalls(cli, path)).toBe(0);
@@ -279,7 +290,7 @@ describe('live Data 360 discovery', () => {
     const cli = fakeCli({
       [mappingPaths[0]!]: new CliError('COMMAND_FAILED', mappingNotFoundOutput),
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.warnings.every((warning) => warning.severity !== 'error')).toBe(true);
     expect(inventory.capabilities.find((entry) => entry.family === 'mappings')).toMatchObject({
@@ -293,7 +304,7 @@ describe('live Data 360 discovery', () => {
     const cli = fakeCli(Object.fromEntries(
       mappingPaths.map((path) => [path, new CliError('COMMAND_FAILED', message)]),
     ));
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.capabilities.find((entry) => entry.family === 'mappings')).toMatchObject({
       status: 'error',
@@ -309,7 +320,7 @@ describe('live Data 360 discovery', () => {
     const cli = fakeCli({
       [dmoPath]: new CliError('COMMAND_FAILED', forbiddenRestOutput),
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
     const dmosCapability = inventory.capabilities.find((capability) => capability.family === 'dmos');
 
     expect(dmosCapability?.status).toBe('forbidden');
@@ -326,7 +337,7 @@ describe('live Data 360 discovery', () => {
     const cli = fakeCli({
       [dmoPath]: new CliError('COMMAND_FAILED', forbiddenRestOutput),
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
     const capability = inventory.capabilities.find((entry) => entry.family === 'mappings');
 
     expect(capability).toMatchObject({ status: 'forbidden', itemCount: 0 });
@@ -341,7 +352,7 @@ describe('live Data 360 discovery', () => {
       [buildConnectorCatalogPath('65.0')]: new CliError('COMMAND_FAILED', 'Status: 500 Server Error'),
       [buildConnectorConnectionsPath('65.0', 'SalesforceDotCom')]: new CliError('COMMAND_FAILED', 'Status: 500 Server Error'),
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.dataStreams[0]).toMatchObject({
       sourceConnector: 'SalesforceDotCom',
@@ -356,7 +367,7 @@ describe('live Data 360 discovery', () => {
     const cli = fakeCli(Object.fromEntries(
       mappingPaths.map((path) => [path, new CliError('COMMAND_FAILED', unsupportedRestOutput)]),
     ));
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
     const capability = inventory.capabilities.find((entry) => entry.family === 'mappings');
 
     expect(capability?.status).toBe('unsupported');
@@ -380,7 +391,7 @@ describe('live Data 360 discovery', () => {
       [`${base}/data-streams`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
       [`${base}/data-transforms`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.capabilities.slice(1).every((capability) => capability.status === 'unsupported')).toBe(true);
     expect(inventory.capabilities[1]?.message).toMatch(/Data 360 is not enabled for this user or org/);
@@ -391,7 +402,7 @@ describe('live Data 360 discovery', () => {
 
   it('reports malformed responses as errors instead of inventing empty results', async () => {
     const cli = fakeCli({ [`${base}/data-spaces`]: malformedApiJson });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
     const capability = inventory.capabilities.find((entry) => entry.family === 'data-spaces');
 
     expect(capability?.status).toBe('error');
@@ -404,7 +415,7 @@ describe('live Data 360 discovery', () => {
       [`${base}/data-lake-objects`]: paginatedDlosPage1Json,
       [`${base}/data-lake-objects?nextToken=page-2-token`]: paginatedDlosPage2Json,
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.dlos.map((object) => object.apiName)).toEqual(['Page1_DLO__dll', 'Page2_DLO__dll']);
     expect(inventory.capabilities.find((entry) => entry.family === 'dlos')?.status).toBe('available');
@@ -416,7 +427,7 @@ describe('live Data 360 discovery', () => {
       [`${base}/data-lake-objects`]: paginatedDlosPage1Json,
       [`${base}/data-lake-objects?nextToken=page-2-token`]: paginatedDlosPage2Json,
     });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org, maxPages: 1 });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, maxPages: 1, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.dlos).toHaveLength(1);
     expect(inventory.capabilities.find((entry) => entry.family === 'dlos')?.status).toBe('partial');
@@ -425,9 +436,34 @@ describe('live Data 360 discovery', () => {
     ]));
   });
 
+  it('loads pinned metadata when only the version-list check fails', async () => {
+    const cli = fakeCliAtVersion('67.0', {
+      'services/data/': new CliError('COMMAND_FAILED', forbiddenRestOutput),
+    });
+    const onApiVersionResolved = vi.fn();
+    const inventory = await discoverInventory({
+      cli,
+      alias: org.alias,
+      org,
+      apiVersionSelection: { mode: 'recommended' },
+      onApiVersionResolved,
+    });
+
+    expect(inventory.apiVersion).toBe('67.0');
+    expect(inventory.dlos).toHaveLength(2);
+    expect(inventory.capabilities.every((capability) => capability.status === 'available')).toBe(true);
+    expect(inventory.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'API_VERSION_PROBE_UNAVAILABLE', severity: 'warning' }),
+    ]));
+    expect(onApiVersionResolved).toHaveBeenCalledWith(expect.objectContaining({
+      apiVersion: '67.0',
+      probe: expect.objectContaining({ failed: true, status: 'forbidden' }),
+    }));
+  });
+
   it('fails cleanly when API version discovery is unavailable', async () => {
     const cli = fakeCli({ 'services/data/': new CliError('COMMAND_FAILED', forbiddenRestOutput) });
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 
     expect(inventory.apiVersion).toBeNull();
     expect(inventory.capabilities[0]?.status).toBe('forbidden');
@@ -435,6 +471,7 @@ describe('live Data 360 discovery', () => {
     expect(inventory.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'API_VERSION_UNAVAILABLE', severity: 'error' }),
     ]));
+    expect(JSON.stringify(inventory.warnings)).not.toContain('ERROR running api request');
     expect(inventory.dlos).toHaveLength(0);
     expect(cli.restGet).toHaveBeenCalledTimes(1);
   });
@@ -452,7 +489,7 @@ describe('live Data 360 discovery', () => {
       [path]: [new CliError('COMMAND_FAILED', 'ERROR: 500 Server Error'), dataSpacesJson],
     });
 
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
     expect(inventory.dataSpaces).toHaveLength(2);
     expect(pathCalls(cli, path)).toBe(2);
     expect(inventory.capabilities.find((entry) => entry.family === 'data-spaces')?.status).toBe('available');
@@ -467,7 +504,7 @@ describe('live Data 360 discovery', () => {
       [`${base}/data-streams`, new CliError('COMMAND_FAILED', unsupportedRestOutput)],
     ] as const) {
       const cli = fakeCli({ [path]: error });
-      const inventory = await discoverInventory({ cli, alias: org.alias, org });
+      const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
       expect(pathCalls(cli, path)).toBe(1);
       expect(inventory.warnings.some((warning) => warning.code === 'RETRY_LIMIT' || warning.code === 'RETRY_SUCCEEDED')).toBe(false);
     }
@@ -477,7 +514,7 @@ describe('live Data 360 discovery', () => {
     const path = `${base}/data-spaces`;
     const cli = fakeCli({ [path]: new CliError('COMMAND_FAILED', 'ERROR: 503 Service Unavailable') });
 
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
     expect(pathCalls(cli, path)).toBe(2);
     expect(inventory.capabilities.find((entry) => entry.family === 'data-spaces')?.status).toBe('error');
     expect(inventory.warnings).toEqual(expect.arrayContaining([
@@ -489,7 +526,7 @@ describe('live Data 360 discovery', () => {
     const path = `${base}/data-spaces`;
     const cli = fakeCli({ [path]: malformedApiJson });
 
-    const inventory = await discoverInventory({ cli, alias: org.alias, org });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
     expect(pathCalls(cli, path)).toBe(1);
     expect(inventory.capabilities.find((entry) => entry.family === 'data-spaces')?.status).toBe('error');
   });

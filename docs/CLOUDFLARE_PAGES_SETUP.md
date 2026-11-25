@@ -64,10 +64,10 @@ For a future release, bump the version on `main`, push the commit, then push a m
 ```bash
 npm version patch --workspace @dcat-toolkit/bridge --no-git-tag-version
 git add packages/bridge/package.json package-lock.json
-git commit -m "chore: release bridge 0.1.7"
+git commit -m "chore: release bridge 0.1.8"
 git push origin main
-git tag bridge-v0.1.7
-git push origin bridge-v0.1.7
+git tag bridge-v0.1.8
+git push origin bridge-v0.1.8
 npm view @dcat-toolkit/bridge version
 ```
 

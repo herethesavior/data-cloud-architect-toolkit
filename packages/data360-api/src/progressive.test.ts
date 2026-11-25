@@ -140,7 +140,7 @@ async function drain(state: Awaited<ReturnType<typeof createProgressiveDiscovery
 describe('progressive discovery', () => {
   it('returns a fast first batch, then progressively loads 200 DLOs across pages', async () => {
     const cli = fakeCli();
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     const first = progressiveSnapshot(state);
 
     expect(first.dlos).toHaveLength(10);
@@ -169,7 +169,7 @@ describe('progressive discovery', () => {
 
   it('reads final expected counts from first-page response envelopes without delaying rows', async () => {
     const cli = fakeCli();
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     const progress = progressiveSnapshot(state).progress!;
     const familyProgress = (family: string) => progress.families.find((entry) => entry.family === family)!;
 
@@ -190,7 +190,7 @@ describe('progressive discovery', () => {
     const cli = fakeCli({
       [dloPath]: JSON.stringify({ records, totalSize: 200 }),
     });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await drain(state);
     const snapshot = progressiveSnapshot(state);
     const dlos = snapshot.progress!.families.find((family) => family.family === 'dlos')!;
@@ -214,7 +214,7 @@ describe('progressive discovery', () => {
       [dloPath]: JSON.stringify({ records, pagination: { pageToken: '2' } }),
       [`${dloPath}?pageToken=2`]: JSON.stringify({ records: [] }),
     }, {}, { [countPath]: 'ERROR running api request rest: 403 Forbidden' });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await drain(state);
     const snapshot = progressiveSnapshot(state);
     const dlos = snapshot.progress!.families.find((family) => family.family === 'dlos')!;
@@ -235,7 +235,7 @@ describe('progressive discovery', () => {
     const cli = fakeCli({
       [dloPath]: JSON.stringify({ records, pagination: { pageToken: '2', total: records.length } }),
     });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
 
     expect(progressiveSnapshot(state).progress?.families.find((family) => family.family === 'dlos'))
       .toMatchObject({ status: 'partial', loaded: 8, total: null, hasMore: true });
@@ -249,7 +249,7 @@ describe('progressive discovery', () => {
     const page2 = `${dloPath}?pageToken=2`;
     const failures: Record<string, number> = { [page2]: retry.maxAttempts };
     const cli = fakeCli({}, failures);
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await advanceProgressiveDiscovery(state);
 
     expect(progressiveSnapshot(state).dlos).toHaveLength(10);
@@ -276,7 +276,7 @@ describe('progressive discovery', () => {
       [dloPath]: page1,
       [`${dloPath}?nextToken=loop-token`]: page1,
     });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await drain(state);
 
     expect(progressiveSnapshot(state).dlos).toHaveLength(1);
@@ -294,7 +294,7 @@ describe('progressive discovery', () => {
         throw new CliError('COMMAND_FAILED', 'ERROR running api request rest: (404) Not Found');
       },
     };
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     const snapshot = progressiveSnapshot(state);
 
     expect(snapshot.apiVersion).toBeNull();
@@ -308,7 +308,7 @@ describe('progressive discovery', () => {
 
   it('does not let resume clear a forbidden family', async () => {
     const cli = fakeCli({}, {}, { [dloPath]: 'ERROR running api request rest: 403 Forbidden' });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     const before = progressiveSnapshot(state);
 
     expect(before.capabilities.find((capability) => capability.family === 'dlos')?.status).toBe('forbidden');
@@ -327,7 +327,7 @@ describe('progressive discovery', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-11-18T00:00:00.000Z'));
     try {
-      const state = await createProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+      const state = await createProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
       const firstPageTime = progressiveSnapshot(state).dlos[0]?.provenance.retrievedAt;
 
       vi.setSystemTime(new Date('2026-11-18T00:05:00.000Z'));
@@ -346,7 +346,7 @@ describe('progressive discovery', () => {
     const cli = fakeCli({
       [dmoPath]: JSON.stringify({ records: [] }),
     });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await drain(state);
     const snapshot = progressiveSnapshot(state);
 
@@ -374,7 +374,7 @@ describe('progressive discovery', () => {
       [nextPath]: dmosOffsetPage2Json,
       [buildMappingPath('Page2_DMO__dlm', '65.0', 'default')]: mappingsJson,
     });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await drain(state);
     const snapshot = progressiveSnapshot(state);
 
@@ -410,7 +410,7 @@ describe('progressive discovery', () => {
       [`${base}/data-streams`]: streamPage1,
       [`${base}/data-streams?limit=10&offset=11`]: streamPage2,
     });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await drain(state);
     const snapshot = progressiveSnapshot(state);
 
@@ -427,7 +427,7 @@ describe('progressive discovery', () => {
     const cli = fakeCli({}, {}, {
       [buildMappingPath('Account_DMO__dlm', '65.0', 'default')]: mappingNotFoundOutput,
     });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await drain(state);
     const snapshot = progressiveSnapshot(state);
 
@@ -441,7 +441,7 @@ describe('progressive discovery', () => {
   it('loads the same per-DMO relationships as one-shot discovery', async () => {
     const relationshipPath = buildDmoRelationshipsPath('Account_DMO__dlm', '65.0', 'default');
     const cli = fakeCli({ [relationshipPath]: dmoRelationshipsJson });
-    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await drain(state);
     const snapshot = progressiveSnapshot(state);
 
@@ -482,6 +482,7 @@ describe('progressive discovery', () => {
       alias: org.alias,
       org,
       retry,
+      apiVersionSelection: { mode: 'latest' },
       onProgress: (current) => {
         const progress = progressiveSnapshot(current).progress;
         if (progress) loadedCounts.push(progress.loaded);
@@ -498,6 +499,7 @@ describe('progressive discovery', () => {
       alias: org.alias,
       org,
       retry,
+      apiVersionSelection: { mode: 'latest' },
       maxDurationMs: 0,
     });
     const snapshot = progressiveSnapshot(state);
@@ -510,7 +512,7 @@ describe('progressive discovery', () => {
   });
 
   it('resumes a deadline-stopped session with a fresh window and its loaded rows', async () => {
-    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     state.deadlineAt = Date.now() - 1;
     await advanceProgressiveDiscovery(state);
     expect(progressiveSnapshot(state).progress?.state).toBe('complete');
@@ -527,7 +529,7 @@ describe('progressive discovery', () => {
   });
 
   it('resumes a background interruption without discarding earlier pages', async () => {
-    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     await advanceProgressiveDiscovery(state);
     const loadedBefore = progressiveSnapshot(state).dlos.length;
     interruptProgressiveDiscovery(state, 'test failure');
@@ -545,7 +547,7 @@ describe('progressive discovery', () => {
   });
 
   it('does not keep polling a deadline-stopped family with an unmet expected count', async () => {
-    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     const dlos = state.families.dlos;
     dlos.expectedTotal = 999;
     dlos.expectedTotalSource = 'response';
@@ -560,7 +562,7 @@ describe('progressive discovery', () => {
   });
 
   it('terminalizes active cursors after a background interruption', async () => {
-    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry });
+    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
     interruptProgressiveDiscovery(state, 'test failure');
     const snapshot = progressiveSnapshot(state);
 

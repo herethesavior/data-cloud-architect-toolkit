@@ -1,4 +1,4 @@
-import type { CliStatus, RelayOperation } from '@dcat/core';
+import type { ApiVersionStatus, CliStatus, RelayOperation } from '@dcat/core';
 
 export type ConnectorMode = 'live' | 'demo';
 
@@ -44,6 +44,7 @@ export interface RelaySessionRecord {
   working?: boolean;
   agentVersion: string | null;
   cli: CliStatus;
+  compatibility?: ApiVersionStatus | null;
   pairingCode: string | null;
   pairingExpiresAt: number | null;
   request: RelayRequestRecord | null;

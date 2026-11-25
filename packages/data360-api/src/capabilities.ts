@@ -1,5 +1,22 @@
 import type { RetrievalStatus } from '@dcat/core';
 
+/** Pull a numeric HTTP status out of a redacted CLI error message when present. */
+export function extractHttpStatus(message: string): number | null {
+  const patterns = [
+    /\b(?:http\s+)?status(?:\s+code)?\s*[:=]?\s*([45]\d{2})\b/i,
+    /\b(?:exit(?:ed)?(?:\s+with)?\s+code|error\s+code)\s*[:=]?\s*([45]\d{2})\b/i,
+    /\((\d{3})\)/,
+    /\b([45]\d{2})\s+(?:Forbidden|Unauthorized|Not Found|Bad Request|Server Error|error)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(message);
+    if (!match) continue;
+    const status = Number(match[1]);
+    if (status >= 400 && status <= 599) return status;
+  }
+  return null;
+}
+
 /** A 403 is access denied, not proof that Data 360 is disabled. */
 export function classifyRestFailure(status: number | null, message: string): {
   status: Extract<RetrievalStatus, 'forbidden' | 'unsupported' | 'error'>;
