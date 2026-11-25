@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api.ts';
+import { describeError, sanitizeDetail } from '../lib/userError.ts';
 import { isHosted } from '../lib/hosted.ts';
 import type { WorkspaceMode } from '../lib/workspace.ts';
 import { invalidateDiagnosticsState } from '../lib/workspace.ts';
@@ -56,10 +57,6 @@ interface SettingsProps {
   onEraseLocalData: () => Promise<void>;
 }
 
-function actionError(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
 export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayouts, onEraseLocalData }: SettingsProps) {
   const queryClient = useQueryClient();
   const hosted = isHosted();
@@ -99,7 +96,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
       setRefreshError('');
       invalidateDiagnosticsState(queryClient);
     },
-    onError: (error: Error) => setRefreshError(error.message),
+    onError: (error: Error) => setRefreshError(describeError(error, 'diagnostics').message),
   });
 
   if (!hosted && healthQuery.isPending && !healthQuery.data) {
@@ -108,7 +105,8 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
   // A failed background poll must not replace the rest of Settings: React Query
   // keeps the last good health payload, so the panels can stay usable.
   if (!hosted && healthQuery.isError && !healthQuery.data) {
-    return <ErrorState message={healthQuery.error.message} onRetry={() => void healthQuery.refetch()} />;
+    const described = describeError(healthQuery.error, 'diagnostics');
+    return <ErrorState message={described.message} hint={described.hint} onRetry={() => void healthQuery.refetch()} />;
   }
 
   const bridge = bridgeQuery.data;
@@ -116,7 +114,8 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
     return <LoadingState label="Reading bridge diagnostics..." />;
   }
   if (hosted && bridgeQuery.isError && !bridge) {
-    return <ErrorState message={bridgeQuery.error.message} onRetry={() => void bridgeQuery.refetch()} />;
+    const described = describeError(bridgeQuery.error, 'bridge');
+    return <ErrorState message={described.message} hint={described.hint} onRetry={() => void bridgeQuery.refetch()} />;
   }
 
   const localHealth = healthQuery.data;
@@ -139,8 +138,8 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
     try {
       await onClearCachedMetadata();
       setDataNotice('Cached metadata cleared. DCAT is loading fresh metadata.');
-    } catch (error) {
-      setDataError(actionError(error, 'Could not clear cached metadata.'));
+    } catch {
+      setDataError("Couldn't clear cached metadata. Try again in a moment.");
     }
   };
 
@@ -158,8 +157,8 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
       await onEraseLocalData();
       setEraseOpen(false);
       setDataNotice('All local data erased. Preferences are back to defaults.');
-    } catch (error) {
-      setDataError(actionError(error, 'Could not erase local data.'));
+    } catch {
+      setDataError("Couldn't erase local data. Try again in a moment.");
     } finally {
       setErasing(false);
     }
@@ -264,7 +263,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
           {healthQuery.isError ? (
             <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2 text-sm text-warning" role="alert">
               <Icon name="warning" size={16} />
-              <span>Diagnostics refresh failed: {healthQuery.error.message} Showing the last successful check.</span>
+              <span>Diagnostics refresh failed: {describeError(healthQuery.error, 'diagnostics').message} Showing the last successful check.</span>
               <button
                 type="button"
                 onClick={() => void healthQuery.refetch()}
@@ -284,7 +283,7 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
           </dl>
           {health.cli.error ? (
             <p className="mt-4 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2 text-sm text-warning">
-              {health.cli.error}
+              {sanitizeDetail(health.cli.error, "Salesforce CLI is installed, but its version check failed. Use Re-check CLI, or reinstall it if the problem continues.")}
             </p>
           ) : null}
           {statusNotice ? (

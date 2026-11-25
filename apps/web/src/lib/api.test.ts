@@ -31,7 +31,7 @@ describe('web API session handling', () => {
       .mockResolvedValueOnce(jsonResponse(session));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(getSession()).rejects.toThrow('connector offline');
+    await expect(getSession()).rejects.toThrow("We couldn't reach the service.");
     await expect(getSession()).resolves.toMatchObject({ token: 'old-token' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

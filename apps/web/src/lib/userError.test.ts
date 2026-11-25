@@ -1,0 +1,50 @@
+import { describe, expect, it } from 'vitest';
+import { ApiError } from './api.ts';
+import { describeError, sanitizeDetail } from './userError.ts';
+
+describe('describeError', () => {
+  it('never renders raw exception text', () => {
+    const described = describeError(
+      new TypeError("Cannot read properties of undefined (reading 'idFromString')"),
+      'orgs',
+    );
+
+    expect(described).toEqual({
+      message: "We couldn't check your Salesforce orgs.",
+      hint: "Try again. If it keeps happening, check that you're on the production site and the bridge is running.",
+    });
+  });
+
+  it('prefers a specific recovery path when the code is known', () => {
+    expect(describeError(new ApiError('BRIDGE_PAIRING_RESET', 'raw reset detail'), 'refresh')).toEqual({
+      message: 'The bridge pairing was reset.',
+      hint: 'Create a new pairing code in Connect an Org and run setup again.',
+    });
+  });
+
+  it('uses the context fallback for unmapped codes', () => {
+    expect(describeError(new ApiError('COMMAND_FAILED', 'Production CLI is unavailable.'), 'refresh')).toEqual({
+      message: "We couldn't refresh the org list.",
+      hint: 'Try again. If it keeps happening, check the bridge connection.',
+    });
+  });
+});
+
+describe('sanitizeDetail', () => {
+  it('keeps an authored explanation', () => {
+    expect(sanitizeDetail('Skipped: no DMOs were found.', 'Fallback.')).toBe('Skipped: no DMOs were found.');
+  });
+
+  it('replaces technical payloads with the caller fallback', () => {
+    expect(sanitizeDetail('Salesforce CLI command failed: sf org list --json', 'Fallback.')).toBe('Fallback.');
+    expect(sanitizeDetail('Cannot read properties of undefined (reading idFromString)', 'Fallback.')).toBe('Fallback.');
+    expect(sanitizeDetail('{"code":"ERROR"}', 'Fallback.')).toBe('Fallback.');
+    expect(sanitizeDetail(null, 'Fallback.')).toBe('Fallback.');
+    expect(sanitizeDetail('   ', 'Fallback.')).toBe('Fallback.');
+  });
+
+  it('caps long detail so the UI cannot be flooded', () => {
+    const detail = 'A'.repeat(500);
+    expect(sanitizeDetail(detail, 'Fallback.')).toHaveLength(300);
+  });
+});

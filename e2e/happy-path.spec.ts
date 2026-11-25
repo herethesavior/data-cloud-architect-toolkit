@@ -2242,7 +2242,7 @@ test('a failed refresh does not follow the user into another org', async ({ page
   await expect(page.getByRole('button', { name: 'Refresh inventory' })).toBeVisible();
   failRefresh = true;
   await page.getByRole('button', { name: 'Refresh inventory' }).click();
-  await expect(page.getByRole('alert')).toContainText(/Refresh failed: Production CLI is unavailable\./);
+  await expect(page.getByRole('alert')).toContainText(/Refresh failed: We couldn't load this org's metadata\./);
 
   await picker.selectOption('sandbox-org');
   await expect(page.getByRole('alert')).toHaveCount(0);

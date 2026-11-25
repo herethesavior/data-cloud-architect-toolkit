@@ -3,6 +3,7 @@ import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
+import { describeError } from './lib/userError.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
 import { resetNoticeDismissals } from './lib/noticeDismissal.ts';
@@ -44,7 +45,7 @@ import { ChangeImpactAnalyzer } from './pages/ChangeImpactAnalyzer.tsx';
 import { isLegacyPageHash, pageFromLocation, pagePath, writePagePath } from './navigation.ts';
 import type { Page } from './navigation.ts';
 
-function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: string; onRetry?: () => void }) {
+function BootScreen({ hosted, error, hint, onRetry }: { hosted: boolean; error?: string; hint?: string; onRetry?: () => void }) {
   return (
     <div className="grid min-h-screen place-items-center px-4 py-10">
       <div className="w-full max-w-md">
@@ -61,7 +62,7 @@ function BootScreen({ hosted, error, onRetry }: { hosted: boolean; error?: strin
           </div>
         </div>
         {error ? (
-          <ErrorState message={error} onRetry={onRetry} />
+          <ErrorState message={error} hint={hint} onRetry={onRetry} />
         ) : (
           <LoadingState label={hosted ? 'Loading the hosted workbench...' : 'Connecting to the local connector...'} />
         )}
@@ -136,7 +137,8 @@ export function App() {
   const orgList = useMemo<OrgListState>(() => {
     if (orgsQuery.isFetching) return { status: 'checking' };
     if (orgsQuery.isError) {
-      return { status: 'error', message: orgsQuery.error.message, retry: retryOrgs };
+      const described = describeError(orgsQuery.error, 'orgs');
+      return { status: 'error', ...described, retry: retryOrgs };
     }
     return { status: 'idle' };
   }, [orgsQuery.isFetching, orgsQuery.isError, orgsQuery.error, retryOrgs]);
@@ -275,7 +277,8 @@ export function App() {
       modePendingRef.current = false;
       modeAppliedRef.current = null;
       failedModeRef.current = requestedMode;
-      setModeError(`Couldn't switch to ${requestedMode} mode. ${error.message}`);
+      const described = describeError(error, 'mode');
+      setModeError(`${described.message}${described.hint ? ` ${described.hint}` : ''}`);
     },
   });
 
@@ -410,7 +413,12 @@ export function App() {
   refreshInventoryRef.current = () => refreshInventory.mutate(actionsContextRef.current);
   resumeInventoryRef.current = (family) => {
     const sessionId = actionsInventoryRef.current?.progress?.sessionId;
-    if (!sessionId) return;
+    // A failed resume can leave no resumable session. Retrying must still do
+    // something visible, so start a fresh inventory load in that case.
+    if (!sessionId) {
+      refreshInventory.mutate(actionsContextRef.current);
+      return;
+    }
     resumeInventory.mutate({ target: actionsContextRef.current, sessionId, family });
   };
 
@@ -424,15 +432,15 @@ export function App() {
     refreshInventory: onRefreshInventory,
     cancelRefresh: onCancelRefresh,
     isRefreshingInventory: refreshInventory.isPending,
-    refreshError: refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
+    refreshError: !refreshInventory.error || refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
       ? ''
-      : refreshInventory.error?.message ?? '',
+      : describeError(refreshInventory.error, 'inventory').message,
     refreshAttempt: refreshInventory.submittedAt,
     resumeDiscovery: onResumeDiscovery,
     isResumingDiscovery: resumeInventory.isPending,
-    resumeError: resumeInventory.error instanceof ApiError && resumeInventory.error.code === 'ABORTED'
+    resumeError: !resumeInventory.error || resumeInventory.error instanceof ApiError && resumeInventory.error.code === 'ABORTED'
       ? ''
-      : resumeInventory.error?.message ?? '',
+      : describeError(resumeInventory.error, 'inventory').message,
     resumeAttempt: resumeInventory.submittedAt,
   }), [
     context,
@@ -533,12 +541,12 @@ export function App() {
 
   if (sessionQuery.isPending) return <BootScreen hosted={hosted} />;
   if (sessionQuery.isError) {
+    const described = describeError(sessionQuery.error, 'session');
     return (
       <BootScreen
         hosted={hosted}
-        error={hosted
-          ? `${sessionQuery.error.message} Reload the page to try again.`
-          : `${sessionQuery.error.message} Start the connector with npm run dev before opening the UI.`}
+        error={described.message}
+        hint={hosted ? described.hint : 'Start the local connector, then reload the page.'}
         onRetry={() => void sessionQuery.refetch()}
       />
     );

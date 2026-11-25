@@ -307,7 +307,7 @@ const privacyItems: { title: string; body: string; icon: IconName }[] = [
   },
   {
     title: 'Output is redacted',
-    body: 'CLI output and error payloads are sanitized before they are returned or stored. The connector never reads the Salesforce CLI credential store.',
+    body: 'Credential-shaped values are redacted before output is returned or stored, and the UI replaces technical error detail with plain-language next steps. The connector never reads the Salesforce CLI credential store.',
     icon: 'check',
   },
   {

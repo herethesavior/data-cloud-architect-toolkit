@@ -98,15 +98,21 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       const payload = (await response.json().catch(() => null)) as ErrorPayload | null;
       throw new ApiError(
         payload?.error?.code ?? 'REQUEST_FAILED',
-        payload?.error?.message ?? `Request failed with status ${response.status}.`,
+        payload?.error?.message ?? 'The request could not be completed.',
       );
     }
 
-    return (await response.json()) as T;
+    try {
+      return (await response.json()) as T;
+    } catch {
+      // An HTML error page or a truncated body produces a native SyntaxError.
+      throw new ApiError('BAD_RESPONSE', 'The service returned an unexpected response. Try again.');
+    }
   } catch (error) {
     if (timed.didTimeout()) throw new ApiError('TIMEOUT', 'The request took too long. Try again.');
     if (options.signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
-    throw error;
+    if (error instanceof ApiError) throw error;
+    throw new ApiError('NETWORK_ERROR', "We couldn't reach the service. Check your connection and try again.");
   } finally {
     timed.cleanup();
   }
@@ -301,7 +307,7 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
       if (state.status === 'completed') return state.result as T;
       if (state.status === 'failed' || state.status === 'expired') {
-        throw new ApiError(state.error?.code ?? 'RELAY_FAILED', state.error?.message ?? 'The local bridge request failed.');
+        throw new ApiError(state.error?.code ?? 'RELAY_FAILED', 'The local bridge request failed.');
       }
       await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
     }
@@ -388,12 +394,15 @@ async function legacyInventory(
       });
 }
 
-/** Only explicit capability gaps may fall back; transport and relay failures must surface. */
+/**
+ * Only a missing progressive endpoint may fall back; transport and relay
+ * failures must surface. Match on codes so a copy change cannot silently
+ * disable the legacy path.
+ */
 function isUnsupportedProgressiveError(error: unknown, hostedLive: boolean): boolean {
   if (!(error instanceof ApiError)) return false;
-  const message = error.message.toLowerCase();
-  if (error.code === 'INVALID_ARGUMENT') return message.includes('unsupported bridge operation');
-  if (!hostedLive && error.code === 'NOT_FOUND') return message.includes('unknown api route');
+  if (error.code === 'INVALID_ARGUMENT') return true;
+  if (!hostedLive && error.code === 'NOT_FOUND') return true;
   return false;
 }
 

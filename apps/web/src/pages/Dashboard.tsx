@@ -15,6 +15,7 @@ import type { BadgeTone } from '../components/ui/index.ts';
 import { snapshotCountLabel } from '../lib/inventoryDisplay.ts';
 import { discoverySummary, safeDateText } from '../lib/inventory.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
+import { sanitizeDetail } from '../lib/userError.ts';
 import {
   attentionItems,
   data360NotEnabled,
@@ -51,7 +52,7 @@ function stageTone(state: ResourceStageState): BadgeTone {
 function humanize(value: string): string {
   const acronyms: Record<string, string> = { dlos: 'DLOs', dmos: 'DMOs' };
   if (acronyms[value]) return acronyms[value];
-  return value.replace(/-/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+  return value.replace(/[-_]/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
@@ -294,7 +295,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                     >
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-ink">{humanize(capability.family)}</p>
-                        <p className="truncate text-xs text-ink-soft" title={capability.message ?? capability.endpoint}>
+                        <p className="truncate text-xs text-ink-soft" title={sanitizeDetail(capability.message, resourceStatusMessage(capability))}>
                           {resourceStatusMessage(capability)}
                         </p>
                       </div>
@@ -335,7 +336,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                           <Badge tone={warning.severity === 'error' ? 'danger' : warning.severity === 'warning' ? 'warning' : 'neutral'}>
                             {humanize(warning.family)}
                           </Badge>
-                          <span className="text-xs text-ink-faint">{warning.code}</span>
+                          <span className="text-xs text-ink-faint">{humanize(warning.code)}</span>
                         </div>
                         <p className="mt-1.5 break-words text-sm text-ink-soft">{warning.message}</p>
                       </li>

@@ -5,7 +5,7 @@ import type { WorkspaceContext } from './workspace.ts';
 
 export type OrgListState =
   | { status: 'checking' }
-  | { status: 'error'; message: string; retry: () => void }
+  | { status: 'error'; message: string; hint?: string; retry: () => void }
   | { status: 'idle' };
 
 export interface InventoryActions {

@@ -14,6 +14,7 @@ import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.
 import { filterByQuery, safeDateText } from '../lib/inventory.ts';
 import type { FocusObject } from '../lib/objectDetail.ts';
 import { findCapability, resourceStatusMessage } from '../lib/resourceStatus.ts';
+import { describeError, sanitizeDetail } from '../lib/userError.ts';
 import { useInventory } from '../lib/useInventory.ts';
 import { useTransformBundle } from '../lib/useTransforms.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
@@ -37,14 +38,15 @@ function typeTone(type: string | null | undefined): 'brand' | 'neutral' {
 }
 
 function SectionMessage({ status, message, empty }: { status: RetrievalStatus; message?: string | null; empty: string }) {
+  const detail = sanitizeDetail(message, '');
   if (status === 'forbidden') {
-    return <p className="text-sm text-danger">Access denied. {shown(message, '')}</p>;
+    return <p className="text-sm text-danger">Access denied. {detail}</p>;
   }
   if (status === 'unsupported') {
-    return <p className="text-sm text-ink-soft">This metadata endpoint is unavailable for this org or API version. {shown(message, '')}</p>;
+    return <p className="text-sm text-ink-soft">This metadata endpoint is unavailable for this org or API version. {detail}</p>;
   }
   if (status === 'error') {
-    return <p className="text-sm text-danger">This section could not be loaded. {shown(message, '')}</p>;
+    return <p className="text-sm text-danger">This section could not be loaded. {detail}</p>;
   }
   if (status === 'not-started') {
     return <p className="text-sm text-ink-soft">This section has not been requested yet.</p>;
@@ -96,7 +98,7 @@ function runColumns(): DataTableColumn<TransformRun>[] {
       render: (run) => (
         <div className="min-w-0">
           <p className="mono text-ink">{run.id}</p>
-          {run.message ? <p className="mt-0.5 text-xs text-ink-soft">{run.message}</p> : null}
+          {run.message ? <p className="mt-0.5 text-xs text-ink-soft">{sanitizeDetail(run.message, 'Run finished.')}</p> : null}
         </div>
       ),
     },
@@ -134,6 +136,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
   const id = transformId(transform);
   const bundleQuery = useTransformBundle(context, id);
   const bundle = bundleQuery.data;
+  const bundleError = bundleQuery.isError ? describeError(bundleQuery.error, 'transform') : null;
   const detail = bundle?.transform ?? transform;
   const runs = bundle?.runs ?? [];
   const schedule = bundle?.schedule ?? null;
@@ -157,7 +160,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
         <div className="space-y-5">
           {sections.detail === 'forbidden' || sections.detail === 'unsupported' || sections.detail === 'error' ? (
             <p className="rounded-lg border border-warning/25 bg-warning-soft px-3 py-2 text-xs text-ink-soft">
-              <strong>Detail endpoint:</strong> {shown(messages.detail, resourceStatusMessage({
+              <strong>Detail endpoint:</strong> {sanitizeDetail(messages.detail, resourceStatusMessage({
                 family: 'data-transforms',
                 status: sections.detail,
                 endpoint: detail.provenance.sourceEndpoint,
@@ -196,7 +199,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
             </dl>
             {sections.schedule === 'unsupported' || sections.schedule === 'forbidden' || sections.schedule === 'error' ? (
               <p className="mt-3 text-xs text-ink-soft">
-                <strong>Schedule endpoint:</strong> {shown(messages.schedule, 'No schedule detail was returned.')}
+                <strong>Schedule endpoint:</strong> {sanitizeDetail(messages.schedule, 'No schedule detail was returned.')}
               </p>
             ) : null}
           </div>
@@ -306,10 +309,11 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
       onClose={onClose}
     >
       {bundleQuery.isPending ? <LoadingState label="Loading transform detail..." /> : null}
-      {bundleQuery.isError ? (
+      {bundleError ? (
         <ErrorState
           title="Couldn't load transform detail"
-          message={bundleQuery.error.message}
+          message={bundleError.message}
+          hint={bundleError.hint}
           onRetry={() => void bundleQuery.refetch()}
         />
       ) : null}

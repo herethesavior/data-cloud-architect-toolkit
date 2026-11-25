@@ -5,6 +5,7 @@ import type { BridgeStatus, OrgSummary, SessionInfo } from '@dcat/core';
 import { api, ApiError } from '../lib/api.ts';
 import { isHosted } from '../lib/hosted.ts';
 import { orgsQueryOptions } from '../lib/queryPersistence.ts';
+import { describeError, sanitizeDetail } from '../lib/userError.ts';
 import { invalidateBridgeState, invalidateDiagnosticsState, orgsQueryKey } from '../lib/workspace.ts';
 import type { WorkspaceMode } from '../lib/workspace.ts';
 import { EmptyState, ErrorState, LoadingState } from '../components/DataStates.tsx';
@@ -153,7 +154,10 @@ export function OrgConnections({
       setSetupError('');
       invalidateDiagnosticsState(queryClient);
     },
-    onError: (error: Error) => setSetupError(error.message),
+    onError: (error: Error) => {
+      const described = describeError(error, 'setup');
+      setSetupError(`${described.message}${described.hint ? ` ${described.hint}` : ''}`);
+    },
   });
 
   const createPairing = useMutation({
@@ -162,7 +166,10 @@ export function OrgConnections({
       return api.relayPairing();
     },
     onSuccess: () => setSetupError(''),
-    onError: (error: Error) => setSetupError(error.message),
+    onError: (error: Error) => {
+      const described = describeError(error, 'setup');
+      setSetupError(`${described.message}${described.hint ? ` ${described.hint}` : ''}`);
+    },
     // If unpairing succeeded but pairing failed, the cached status still says
     // "paired". Refetch it on every outcome so recovery does not wait for a poll.
     onSettled: () => invalidateSetup(),
@@ -211,7 +218,8 @@ export function OrgConnections({
     },
     onError: (error: Error, mutationMode) => {
       if (mutationMode !== currentMode() || error instanceof ApiError && error.code === 'ABORTED') return;
-      setConnectError(error.message);
+      const described = describeError(error, 'connect');
+      setConnectError(`${described.message}${described.hint ? ` ${described.hint}` : ''}`);
     },
     onSettled: () => {
       connectStarted.current = false;
@@ -241,7 +249,8 @@ export function OrgConnections({
     },
     onError: (error: Error, mutationMode) => {
       if (mutationMode !== currentMode() || error instanceof ApiError && error.code === 'ABORTED') return;
-      setRefreshError(error.message);
+      const refreshDescription = describeError(error, 'refresh');
+      setRefreshError(`${refreshDescription.message}${refreshDescription.hint ? ` ${refreshDescription.hint}` : ''}`);
     },
   });
 
@@ -446,7 +455,12 @@ export function OrgConnections({
           ) : null}
           {!demo && bridgeStatusQuery.isPending ? <LoadingState label="Checking the local bridge..." /> : null}
           {!demo && bridgeStatusQuery.isError ? (
-            <ErrorState message={bridgeStatusQuery.error.message} onRetry={() => void bridgeStatusQuery.refetch()} />
+            <ErrorState
+              message={describeError(bridgeStatusQuery.error, 'bridge').message}
+              hint={describeError(bridgeStatusQuery.error, 'bridge').hint}
+              onRetry={() => void bridgeStatusQuery.refetch()}
+              retryLabel="Refresh status"
+            />
           ) : null}
 
           {!demo && status && hosted && status.paired && status.updateAvailable ? (
@@ -546,7 +560,11 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {!demo && status?.cli.error ? <p className="mt-3 text-sm text-warning">{status.cli.error}</p> : null}
+          {!demo && status?.cli.error ? (
+            <p className="mt-3 text-sm text-warning">
+              {sanitizeDetail(status.cli.error, "Salesforce CLI is installed, but its version check failed. Re-check, or reinstall it if the problem continues.")}
+            </p>
+          ) : null}
           {!demo && setupError ? <p className="mt-3 text-sm text-danger" role="alert">{setupError}</p> : null}
         </Step>
 
@@ -686,7 +704,7 @@ export function OrgConnections({
           ) : null}
           {refreshError ? (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">
-              <span>Couldn't refresh the org list: {refreshError}</span>
+              <span>{refreshError}</span>
               <button
                 type="button"
                 onClick={() => {
@@ -703,7 +721,8 @@ export function OrgConnections({
           {!orgListChecking && orgsQuery.isError ? (
             <ErrorState
               title="Couldn't check for Salesforce orgs"
-              message={orgsQuery.error.message}
+              message={describeError(orgsQuery.error, 'orgs').message}
+              hint={describeError(orgsQuery.error, 'orgs').hint}
               onRetry={() => void orgsQuery.refetch()}
               retryLabel="Retry org check"
             />

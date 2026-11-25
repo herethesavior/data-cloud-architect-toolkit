@@ -239,7 +239,7 @@ describe('InventoryBoundary progressive state', () => {
       </InventoryActionsProvider>,
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Loading stopped: The local bridge did not answer in time.');
+    expect(screen.getByRole('alert')).toHaveTextContent("Loading stopped: We couldn't load this org's metadata.");
     expect(screen.queryByRole('img', { name: 'Inventory loading' })).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'Inventory still loading' })).not.toBeInTheDocument();
     expect(screen.getByText('Loaded rows')).toBeInTheDocument();

@@ -343,7 +343,7 @@ describe('OrgConnections connect wizard', () => {
     vi.mocked(api.orgs).mockRejectedValue(new Error('Org check failed.'));
     renderOrgConnections(vi.fn(), { seedOrgs: [], invalidateSeededOrgs: true });
 
-    expect(await screen.findByText('Org check failed.')).toBeInTheDocument();
+    expect(await screen.findByText("We couldn't check your Salesforce orgs.")).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry org check' })).toBeInTheDocument();
     expect(screen.queryByText('Connect an org to view live inventory')).not.toBeInTheDocument();
   });
@@ -479,7 +479,7 @@ describe('OrgConnections connect wizard', () => {
     expect(await screen.findByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Refresh org list' }));
 
-    expect(await screen.findByText(/Couldn't refresh the org list: Refresh failed./)).toBeInTheDocument();
+    expect(await screen.findByText(/We couldn't refresh the org list\./)).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Authenticated Salesforce orgs' })).toBeInTheDocument();
   });
 
@@ -494,7 +494,7 @@ describe('OrgConnections connect wizard', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     await userEvent.click(screen.getByRole('button', { name: 'Create new pairing code' }));
 
-    expect(await screen.findByText('Pairing unavailable.')).toBeInTheDocument();
+    expect(await screen.findByText(/We couldn't complete bridge setup\./)).toBeInTheDocument();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
   });
 });

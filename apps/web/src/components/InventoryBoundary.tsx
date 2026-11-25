@@ -16,6 +16,7 @@ import {
   resumableProgressFamilies,
 } from '../lib/resourceStatus.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
+import { describeError } from '../lib/userError.ts';
 import { useDismissibleNotice } from '../lib/noticeDismissal.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 import { Button } from './ui/index.ts';
@@ -192,10 +193,12 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
     return <InventoryRefreshSkeleton onCancel={manualRefresh ? actions?.cancelRefresh : undefined} />;
   }
   if (query.isError && !query.data) {
+    const described = describeError(query.error, 'inventory');
     return (
       <ErrorState
         title="Couldn't load the inventory"
-        message={query.error.message}
+        message={described.message}
+        hint={described.hint}
         onRetry={() => void query.refetch()}
         secondary={actions && actions.mode === 'live' ? (
           <Button variant="quiet" onClick={actions.onToggleMode} disabled={actions.isTogglingMode}>Use demo mode</Button>
@@ -213,7 +216,7 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   }
 
   const inventory = query.data;
-  const loadError = query.isError ? query.error.message : '';
+  const loadError = query.isError ? describeError(query.error, 'inventory').message : '';
   const timestamp = Date.parse(inventory.generatedAt);
   const absolute = Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : 'time unavailable';
   const live = context.mode === 'live';

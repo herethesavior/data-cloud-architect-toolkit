@@ -6,6 +6,7 @@ import {
   type RetrievalStatus,
   type RetrievalWarning,
 } from '@dcat/core';
+import { sanitizeDetail } from './userError.ts';
 
 export type ResourceStageState = 'complete' | 'loading' | 'partial' | 'blocked' | 'pending';
 
@@ -72,7 +73,7 @@ export function attentionItems(inventory: InventorySnapshot): AttentionItem[] {
     .map((warning) => ({
       family: warning.family,
       code: warning.code,
-      message: warning.message,
+      message: sanitizeDetail(warning.message, 'Discovery reported an issue. Retry the inventory.'),
       severity: warning.severity === 'error' ? 'error' : 'warning',
     }));
   for (const capability of inventory.capabilities) {
@@ -106,17 +107,18 @@ export function resourceStatusMessage(capability: ApiCapability): string {
     if (disabledText.test(capability.message ?? '')) {
       return 'Data 360 is not enabled for this user or org.';
     }
-    return capability.message ?? 'This endpoint is unavailable for this org or API version.';
+    return sanitizeDetail(capability.message, 'This endpoint is unavailable for this org or API version.');
   }
   if (capability.status === 'error') {
-    return capability.message ?? 'Discovery failed for this family. Retry the inventory.';
+    return sanitizeDetail(capability.message, 'Discovery failed for this family. Retry the inventory.');
   }
   if (capability.status === 'partial') {
     const count = capability.itemCount ?? 0;
-    return `${count} ${count === 1 ? 'item' : 'items'} loaded; some results may be missing. ${capability.message ?? ''}`.trim();
+    const detail = sanitizeDetail(capability.message, 'Check the retryable families on the Dashboard.');
+    return `${count} ${count === 1 ? 'item' : 'items'} loaded; some results may be missing. ${detail}`.trim();
   }
-  if (capability.status === 'not-started') return capability.message ?? 'Not started.';
-  return capability.message ?? 'Loaded successfully.';
+  if (capability.status === 'not-started') return sanitizeDetail(capability.message, 'Not started.');
+  return sanitizeDetail(capability.message, 'Loaded successfully.');
 }
 
 export function findCapability(

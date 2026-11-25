@@ -179,11 +179,11 @@ describe('Settings bridge diagnostics', () => {
 
     expect(await screen.findByRole('heading', { name: 'Local bridge' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Re-check CLI' }));
-    expect(await screen.findByText('CLI probe failed.')).toBeInTheDocument();
+    expect(await screen.findByText("We couldn't read diagnostics.")).toBeInTheDocument();
 
     rerenderWithMode('demo');
 
-    expect(screen.queryByText('CLI probe failed.')).not.toBeInTheDocument();
+    expect(screen.queryByText("We couldn't read diagnostics.")).not.toBeInTheDocument();
   });
 
   it('keeps the page usable when a background diagnostics poll fails', async () => {
@@ -195,7 +195,7 @@ describe('Settings bridge diagnostics', () => {
       await queryClient.refetchQueries({ queryKey: ['health'] });
     });
 
-    expect(await screen.findByText(/Diagnostics refresh failed: Poll failed./)).toBeInTheDocument();
+    expect(await screen.findByText(/Diagnostics refresh failed: We couldn't read diagnostics\./)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Appearance' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Stored data' })).toBeInTheDocument();
   });
@@ -204,7 +204,7 @@ describe('Settings bridge diagnostics', () => {
     vi.mocked(api.health).mockRejectedValue(new Error('Connector offline.'));
     renderSettings();
 
-    expect(await screen.findByText('Connector offline.')).toBeInTheDocument();
+    expect(await screen.findByText("We couldn't read diagnostics.")).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Local bridge' })).not.toBeInTheDocument();
   });
 });
@@ -296,7 +296,7 @@ describe('Settings stored data controls', () => {
 
     const dialog = screen.getByRole('dialog');
     expect(dialog).toBeInTheDocument();
-    expect(within(dialog).getByRole('alert')).toHaveTextContent('Connector offline.');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent("Couldn't erase local data.");
     expect(screen.queryByText(/All local data erased/)).not.toBeInTheDocument();
   });
 });
