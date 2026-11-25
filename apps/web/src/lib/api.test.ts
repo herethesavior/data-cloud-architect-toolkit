@@ -570,4 +570,54 @@ describe('web API session handling', () => {
       { resume: false, family: 'dlos' },
     ]);
   });
+
+  it('emits every hosted relay chunk before the completed snapshot', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const running = {
+      ...demoInventory,
+      warnings: [{ family: 'inventory', code: 'MORE_ITEMS_AVAILABLE', message: 'More metadata is ready to load.', severity: 'info' }],
+      progress: {
+        sessionId: 'session-1',
+        generation: 'gen-1',
+        state: 'running' as const,
+        loaded: 1,
+        total: null,
+        families: [],
+        message: 'Loading metadata in smaller batches.',
+      },
+    };
+    const complete = { ...running, warnings: [], progress: { ...running.progress, state: 'complete' as const } };
+    let polls = 0;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests') return jsonResponse({ id: 'req-1' });
+      if (path.startsWith('/api/relay/requests/req-1')) {
+        polls += 1;
+        return jsonResponse(polls === 1
+          ? {
+              id: 'req-1',
+              status: 'running',
+              chunked: true,
+              hasMore: true,
+              result: { sessionId: 'session-1', snapshot: running },
+            }
+          : {
+              id: 'req-1',
+              status: 'completed',
+              chunked: true,
+              hasMore: false,
+              result: { sessionId: 'session-1', snapshot: complete },
+            });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onSnapshot = vi.fn();
+
+    await api.inventory('prod-org', { onSnapshot });
+
+    expect(onSnapshot).toHaveBeenCalledTimes(2);
+    expect(onSnapshot.mock.calls[0]![0]).toMatchObject({ progress: { state: 'running' } });
+    expect(onSnapshot.mock.calls[1]![0]).toMatchObject({ progress: { state: 'complete' } });
+  });
 });

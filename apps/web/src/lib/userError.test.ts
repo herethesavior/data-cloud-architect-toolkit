@@ -32,6 +32,14 @@ describe('describeError', () => {
     });
   });
 
+  it('routes oversized metadata to a real continue action', () => {
+    expect(describeError(new ApiError('RESPONSE_TOO_LARGE', 'raw detail'), 'inventory')).toEqual({
+      message: 'That metadata is too large to display in one view.',
+      hint: 'Continue loading to receive this org in smaller batches.',
+      recovery: 'continue',
+    });
+  });
+
   it('uses the context fallback for unmapped codes', () => {
     expect(describeError(new ApiError('COMMAND_FAILED', 'Production CLI is unavailable.'), 'refresh')).toEqual({
       message: "We couldn't refresh the org list.",

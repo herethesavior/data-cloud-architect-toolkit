@@ -239,6 +239,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                 content: (
                   <div className="overflow-x-auto rounded-lg border border-line">
                     <DataTable
+                      pageSize={50}
                       columns={[
                         ...fieldColumns,
                         {
@@ -477,6 +478,7 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                     rows={filtered}
                     getRowKey={(object) => object.apiName}
                     ariaLabel={`${title} results`}
+                    pageSize={100}
                   />
                 </div>
               </>

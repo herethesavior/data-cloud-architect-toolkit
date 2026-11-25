@@ -7,7 +7,7 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { RESOURCE_FAMILIES } from '@dcat/core';
 import type { DiscoveryProgress, InventorySnapshot } from '@dcat/core';
 import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
-import { api } from '../lib/api.ts';
+import { api, ApiError } from '../lib/api.ts';
 import { InventoryBoundary } from './InventoryBoundary.tsx';
 import { InventoryActionsProvider } from '../lib/inventoryActions.tsx';
 import type { InventoryActions } from '../lib/inventoryActions.tsx';
@@ -245,5 +245,46 @@ describe('InventoryBoundary progressive state', () => {
     expect(screen.getByText('Loaded rows')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers a working continue action for an oversized partial load', async () => {
+    const refetch = vi.fn();
+    const continueInventory = vi.fn();
+    const query = {
+      data: snapshotFor('running'),
+      isPending: false,
+      isFetching: false,
+      isError: true,
+      error: new ApiError('RESPONSE_TOO_LARGE', 'The bridge result is too large to relay.'),
+      refetch,
+    } as unknown as UseQueryResult<InventorySnapshot, Error>;
+
+    render(
+      <InventoryActionsProvider value={{
+        context,
+        mode: 'live',
+        orgList: { status: 'idle' },
+        onGoToOrgs: vi.fn(),
+        onToggleMode: vi.fn(),
+        isTogglingMode: false,
+        refreshInventory: vi.fn(),
+        continueInventory,
+        cancelRefresh: vi.fn(),
+        isRefreshingInventory: false,
+        refreshError: '',
+      }}>
+        <InventoryBoundary query={query} context={context}>
+          {() => <div>Loaded rows</div>}
+        </InventoryBoundary>
+      </InventoryActionsProvider>,
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Loading stopped: That metadata is too large to display in one view.');
+    const button = within(alert).getByRole('button', { name: 'Continue loading' });
+    expect(button).not.toBeDisabled();
+    await userEvent.click(button);
+    expect(continueInventory).toHaveBeenCalledTimes(1);
+    expect(refetch).not.toHaveBeenCalled();
   });
 });

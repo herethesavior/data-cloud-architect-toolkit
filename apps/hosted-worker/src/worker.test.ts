@@ -452,6 +452,102 @@ describe('hosted bridge relay', () => {
     });
   });
 
+  it('delivers an oversized inventory in consecutive chunks instead of failing', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const provenance = {
+      orgId: '00D',
+      orgAlias: 'test',
+      sourceEndpoint: '/ssot/dlos',
+      apiVersion: '67.0',
+      retrievedAt: '2026-01-01T00:00:00.000Z',
+      confidence: 'source',
+    };
+    const result = {
+      sessionId: 'session-1',
+      snapshot: {
+        org: {
+          alias: 'test',
+          username: null,
+          orgId: '00D',
+          instanceUrl: null,
+          loginUrl: null,
+          environment: 'unknown',
+          connectedStatus: null,
+          isDefault: true,
+          isDevHub: false,
+          source: 'salesforce-cli',
+        },
+        apiVersion: '67.0',
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        mode: 'live',
+        capabilities: [],
+        dataSpaces: [],
+        dlos: Array.from({ length: 60 }, (_, index) => ({
+          apiName: `DLO_${index}__dll`,
+          label: 'x'.repeat(120_000),
+          fields: [],
+          provenance,
+        })),
+        dmos: [],
+        mappings: [],
+        dataStreams: [],
+        dataTransforms: [],
+        relationships: [],
+        warnings: [],
+        progress: {
+          sessionId: 'session-1',
+          generation: 'generation-1',
+          state: 'complete',
+          loaded: 60,
+          total: 60,
+          families: [],
+          message: 'All discovered metadata is loaded.',
+        },
+      },
+    };
+    const responded = await app.request('/api/relay/respond', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentToken: paired.agentToken, response: { id: created.id, ok: true, result } }),
+    }, env);
+    expect(responded.status).toBe(200);
+
+    // A bridge status read must not consume the browser's queued chunks.
+    await app.request('/api/relay/status', { headers: session.headers }, env);
+
+    const firstResponse = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
+    const first = await firstResponse.json() as {
+      status: string;
+      chunked?: boolean;
+      hasMore?: boolean;
+      result?: { snapshot?: { dlos: unknown[] } };
+    };
+    expect(first).toMatchObject({ status: 'running', chunked: true, hasMore: true });
+    expect(first.result?.snapshot?.dlos.length).toBeGreaterThan(0);
+
+    const secondResponse = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
+    const second = await secondResponse.json() as {
+      status: string;
+      chunked?: boolean;
+      hasMore?: boolean;
+      result?: { snapshot?: { dlos: unknown[] } };
+    };
+    expect(second).toMatchObject({ status: 'completed', chunked: true, hasMore: false });
+    expect((first.result?.snapshot?.dlos.length ?? 0) + (second.result?.snapshot?.dlos.length ?? 0)).toBe(60);
+  });
+
   it('invalidates an unused pairing code when the browser unpairs', async () => {
     const env = makeEnv();
     const session = await startSession(env);

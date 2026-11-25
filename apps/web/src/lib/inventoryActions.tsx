@@ -17,6 +17,8 @@ export interface InventoryActions {
   onToggleMode: () => void;
   isTogglingMode: boolean;
   refreshInventory: () => void;
+  /** Starts a fresh session after a terminal delivery failure. */
+  continueInventory?: () => void;
   cancelRefresh: () => void;
   isRefreshingInventory: boolean;
   refreshError: string;

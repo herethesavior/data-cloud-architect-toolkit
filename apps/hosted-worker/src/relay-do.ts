@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 import {
   apiVersionStatusSchema,
+  chunkRelayResult,
   cliStatusSchema,
   relayOperationSchema,
   relayResponseSchema,
@@ -133,6 +134,15 @@ export class RelayDurableObjectCore {
     this.sql.exec('DELETE FROM relay_meta');
   }
 
+  private clearChunks(): void {
+    const count = this.getMetaNumber('chunk_count') ?? 0;
+    for (let index = 0; index < count; index += 1) {
+      this.sql.exec('DELETE FROM relay_meta WHERE key = ?', `chunk_${index}`);
+    }
+    this.sql.exec('DELETE FROM relay_meta WHERE key = ?', 'chunk_count');
+    this.sql.exec('DELETE FROM relay_meta WHERE key = ?', 'chunk_index');
+  }
+
   private async authorized(body: Record<string, unknown>): Promise<string | null> {
     const token = body.agentToken;
     if (typeof token !== 'string' || token.length < 16) return null;
@@ -169,6 +179,7 @@ export class RelayDurableObjectCore {
   }
 
   private saveRequest(request: StoredRequest): void {
+    this.clearChunks();
     this.setMeta('canceled_request_id', '');
     this.sql.exec('DELETE FROM current_request');
     this.sql.exec(`INSERT INTO current_request
@@ -183,12 +194,13 @@ export class RelayDurableObjectCore {
     request.respondedAt);
   }
 
+  private pendingChunkCount(): number {
+    const count = this.getMetaNumber('chunk_count');
+    const index = this.getMetaNumber('chunk_index');
+    return count === null || index === null ? 0 : Math.max(0, count - index);
+  }
+
   private requestState(request: StoredRequest, now: number): RelayRequestState {
-    if (request.response) {
-      return request.response.ok
-        ? { id: request.id, status: 'completed', result: request.response.result, error: null }
-        : { id: request.id, status: 'failed', result: null, error: request.response.error };
-    }
     if (this.getMeta('canceled_request_id') === request.id) {
       return {
         id: request.id,
@@ -196,6 +208,14 @@ export class RelayDurableObjectCore {
         result: null,
         error: { code: 'CANCELLED', message: 'The request was cancelled.' },
       };
+    }
+    if (!request.response && this.pendingChunkCount() > 0) {
+      return { id: request.id, status: 'running', result: null, error: null, chunked: true, hasMore: true };
+    }
+    if (request.response) {
+      return request.response.ok
+        ? { id: request.id, status: 'completed', result: request.response.result, error: null }
+        : { id: request.id, status: 'failed', result: null, error: request.response.error };
     }
     if (request.expiresAt <= now) {
       return {
@@ -211,6 +231,38 @@ export class RelayDurableObjectCore {
       result: null,
       error: null,
     };
+  }
+
+  /** Only the browser's request poll advances the chunk cursor. */
+  private nextChunkState(request: StoredRequest, now: number): RelayRequestState | null {
+    if (request.response) return null;
+    const count = this.getMetaNumber('chunk_count');
+    const index = this.getMetaNumber('chunk_index');
+    if (count === null || index === null || index >= count) return null;
+    const raw = this.getMeta(`chunk_${index}`);
+    if (raw === null) return null;
+    let result: unknown;
+    try {
+      result = JSON.parse(raw);
+    } catch {
+      this.clearChunks();
+      return {
+        id: request.id,
+        status: 'failed',
+        result: null,
+        error: { code: 'BAD_RESPONSE', message: 'The relay result could not be read.' },
+      };
+    }
+    const hasMore = index + 1 < count;
+    if (!hasMore) {
+      this.clearChunks();
+      this.sql.exec('UPDATE current_request SET response = ?, responded_at = ? WHERE slot = 1',
+        JSON.stringify({ id: request.id, ok: true, result }), now);
+      this.wakeRequestWaiters(request.id);
+      return { id: request.id, status: 'completed', result, error: null, chunked: true, hasMore: false };
+    }
+    this.setMeta('chunk_index', String(index + 1));
+    return { id: request.id, status: 'running', result, error: null, chunked: true, hasMore: true };
   }
 
   private wakeWaiters(): void {
@@ -369,6 +421,22 @@ export class RelayDurableObjectCore {
     }
     if (request.response) return json({ ok: true });
     const bytes = new TextEncoder().encode(JSON.stringify(response.data)).byteLength;
+    if (bytes > MAX_RELAY_RESPONSE_BYTES && response.data.ok) {
+      // Inventories are safe to split by row. Keeping every chunk under the cap
+      // preserves the rows instead of turning a big org into a terminal error.
+      const chunkMax = MAX_RELAY_RESPONSE_BYTES - 64 * 1024;
+      const chunks = chunkRelayResult(response.data.result, chunkMax);
+      if (chunks && chunks.length > 1 && chunks.every((result) =>
+        new TextEncoder().encode(JSON.stringify({ id: response.data.id, ok: true, result })).byteLength
+          <= MAX_RELAY_RESPONSE_BYTES)) {
+        this.clearChunks();
+        this.setMeta('chunk_count', String(chunks.length));
+        this.setMeta('chunk_index', '0');
+        chunks.forEach((result, index) => this.setMeta(`chunk_${index}`, JSON.stringify(result)));
+        this.wakeRequestWaiters(response.data.id);
+        return json({ ok: true });
+      }
+    }
     if (bytes > MAX_RELAY_RESPONSE_BYTES) {
       // A rejected result is terminal for this request. Store it so the browser
       // gets the real reason instead of waiting for its deadline.
@@ -448,14 +516,22 @@ export class RelayDurableObjectCore {
     const stateOf = (): RelayRequestState | null => {
       const request = read();
       if (!request || request.id !== id) return null;
-      const state = this.requestState(request, typeof body.now === 'number' ? body.now : Date.now());
+      const now = typeof body.now === 'number' ? body.now : Date.now();
+      const chunk = this.nextChunkState(request, now);
+      if (chunk) return chunk;
+      const state = this.requestState(request, now);
       return state.status === 'completed' || state.status === 'failed' || state.status === 'expired'
         ? state
         : null;
     };
     const immediate = stateOf();
     if (immediate) return json(immediate);
-    if (body.wait !== true) return json(this.requestState(current, Date.now()));
+    if (body.wait !== true) {
+      const request = read();
+      return json(request
+        ? this.nextChunkState(request, Date.now()) ?? this.requestState(request, Date.now())
+        : this.requestState(current, Date.now()));
+    }
 
     await new Promise<void>((resolve) => {
       let waiters = this.requestWaiters.get(String(id));
@@ -480,6 +556,8 @@ export class RelayDurableObjectCore {
     }
     // The caller's timestamp predates the long poll; use the current time so a
     // request that expired while the browser was waiting is reported as expired.
+    const chunk = this.nextChunkState(after, Date.now());
+    if (chunk) return json(chunk);
     return json(this.requestState(after, Date.now()));
   }
 

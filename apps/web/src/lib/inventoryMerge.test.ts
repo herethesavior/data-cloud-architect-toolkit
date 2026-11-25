@@ -252,4 +252,24 @@ describe('mergeInventorySnapshot', () => {
     );
     expect(mergeInventorySnapshot(previous, terminal).relationships).toEqual([]);
   });
+
+  it('unions relay chunks even when the final chunk reports a complete pass', () => {
+    const complete = progress('complete', {
+      dlos: { status: 'complete', loaded: 4, pagesFetched: 1 },
+    });
+    const all = manyDlos(4);
+    const chunkWarning: RetrievalWarning = {
+      family: 'inventory',
+      code: 'RESPONSE_CHUNKED',
+      message: 'Loaded in smaller batches.',
+      severity: 'info',
+    };
+    const first = snapshot({ dlos: all.slice(0, 2) }, complete, [
+      chunkWarning,
+      { family: 'inventory', code: 'MORE_ITEMS_AVAILABLE', message: 'More rows.', severity: 'info' },
+    ]);
+    const second = snapshot({ dlos: all.slice(2) }, complete, [chunkWarning]);
+
+    expect(mergeInventorySnapshot(mergeInventorySnapshot(first, second), second).dlos).toHaveLength(4);
+  });
 });

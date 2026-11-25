@@ -441,6 +441,7 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
                     rows={streams}
                     getRowKey={streamRowKey}
                     ariaLabel="Data Stream Explorer results"
+                    pageSize={100}
                   />
                 </div>
               </>

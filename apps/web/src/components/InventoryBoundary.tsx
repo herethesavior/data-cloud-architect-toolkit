@@ -194,12 +194,17 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   }
   if (query.isError && !query.data) {
     const described = describeError(query.error, 'inventory');
+    const canContinue = described.recovery === 'continue' && Boolean(actions?.continueInventory);
     return (
       <ErrorState
         title="Couldn't load the inventory"
         message={described.message}
         hint={described.hint}
-        onRetry={() => void query.refetch()}
+        retryLabel={canContinue ? 'Continue loading' : 'Try again'}
+        onRetry={() => {
+          if (canContinue) actions?.continueInventory?.();
+          else void query.refetch();
+        }}
         secondary={actions && actions.mode === 'live' ? (
           <Button variant="quiet" onClick={actions.onToggleMode} disabled={actions.isTogglingMode}>Use demo mode</Button>
         ) : undefined}
@@ -216,7 +221,9 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   }
 
   const inventory = query.data;
-  const loadError = query.isError ? describeError(query.error, 'inventory').message : '';
+  const describedLoadError = query.isError ? describeError(query.error, 'inventory') : null;
+  const loadError = describedLoadError?.message ?? '';
+  const canContinue = describedLoadError?.recovery === 'continue' && Boolean(actions?.continueInventory);
   const timestamp = Date.parse(inventory.generatedAt);
   const absolute = Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : 'time unavailable';
   const live = context.mode === 'live';
@@ -276,8 +283,15 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
       {loadError ? (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
           <span className="min-w-0 flex-1">Loading stopped: {loadError}</span>
-          <button type="button" onClick={() => void query.refetch()} className="font-semibold underline underline-offset-2">
-            Retry
+          <button
+            type="button"
+            onClick={() => {
+              if (canContinue) actions?.continueInventory?.();
+              else void query.refetch();
+            }}
+            className="min-h-8 rounded-lg border border-danger/30 bg-surface px-3 font-semibold text-danger transition-colors hover:bg-surface-alt"
+          >
+            {canContinue ? 'Continue loading' : 'Retry'}
           </button>
         </div>
       ) : null}

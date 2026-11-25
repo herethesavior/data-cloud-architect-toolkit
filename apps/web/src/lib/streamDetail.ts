@@ -33,9 +33,9 @@ export function streamTargetKnown(inventory: InventorySnapshot, stream: DataStre
 
 export function streamStatusTone(status: string | null | undefined): StreamStatusTone {
   const value = status?.trim().toLowerCase() ?? '';
-  if (/(active|running|healthy|success|complete)/.test(value)) return 'success';
-  if (/(paused|stopped|suspended|inactive|disabled)/.test(value)) return 'warning';
-  if (/(failed|error|invalid)/.test(value)) return 'danger';
+  if (/\b(?:failed|failure|failures|error|errors|invalid)\b/.test(value)) return 'danger';
+  if (/\b(?:paused|stopped|suspended|inactive|disabled)\b/.test(value)) return 'warning';
+  if (/\b(?:active|running|healthy|success|successful|complete|completed)\b/.test(value)) return 'success';
   return 'neutral';
 }
 

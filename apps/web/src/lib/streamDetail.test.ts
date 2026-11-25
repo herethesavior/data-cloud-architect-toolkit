@@ -45,6 +45,16 @@ describe('stream detail helpers', () => {
     expect(streamStatusTone(null)).toBe('neutral');
   });
 
+  it('treats inactive as stopped even though it contains "active"', () => {
+    expect(streamStatusTone('INACTIVE')).toBe('warning');
+    expect(streamStatusTone('Inactive')).toBe('warning');
+    expect(streamStatusTone('inactive')).toBe('warning');
+  });
+
+  it('prioritizes an error over a completion word in mixed statuses', () => {
+    expect(streamStatusTone('Completed with errors')).toBe('danger');
+  });
+
   it('keeps blank values out of search and distinguishes colliding API names', () => {
     expect(streamSearchValues(demoInventory, accounts)).toContain('Accounts Stream');
     expect(streamSearchValues(demoInventory, accounts)).toContain('Salesforce CRM');

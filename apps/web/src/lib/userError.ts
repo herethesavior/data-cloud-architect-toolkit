@@ -22,7 +22,7 @@ export type UserErrorContext =
   | 'mode'
   | 'compatibility';
 
-export type ErrorRecovery = 'connect' | 'retry';
+export type ErrorRecovery = 'connect' | 'retry' | 'continue';
 
 export interface UserError {
   message: string;
@@ -156,7 +156,8 @@ const codeCopy: Record<string, UserError> = {
   },
   RESPONSE_TOO_LARGE: {
     message: 'That metadata is too large to display in one view.',
-    hint: 'Try a smaller org, or use demo mode to explore the sample data.',
+    hint: 'Continue loading to receive this org in smaller batches.',
+    recovery: 'continue',
   },
   INVALID_PAIRING_CODE: {
     message: "That pairing code isn't valid.",

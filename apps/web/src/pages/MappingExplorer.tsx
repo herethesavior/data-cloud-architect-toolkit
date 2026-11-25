@@ -157,6 +157,7 @@ export function MappingExplorer({ context }: { context: WorkspaceContext | null 
                             rows={mapping.fieldMappings}
                             getRowKey={(field) => `${field.sourceField}-${field.targetField}`}
                             ariaLabel="Field mappings"
+                            pageSize={50}
                           />
                         </div>
                       </details>

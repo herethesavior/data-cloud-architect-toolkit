@@ -270,6 +270,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
             rows={runs}
             getRowKey={(run) => run.id}
             ariaLabel="Transform run history"
+            pageSize={50}
             emptyMessage="No runs were returned for this transform."
           />
         </div>
@@ -525,6 +526,7 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
                     rows={transforms}
                     getRowKey={transformId}
                     ariaLabel="Data Transform Explorer results"
+                    pageSize={100}
                   />
                 </div>
               </>
