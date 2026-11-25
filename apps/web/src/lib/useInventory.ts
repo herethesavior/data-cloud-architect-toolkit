@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InventorySnapshot } from '@dcat/core';
 import { api } from './api.ts';
+import { mergeInventorySnapshot } from './inventoryMerge.ts';
 import { persistedQueryOptions } from './queryPersistence.ts';
 import type { WorkspaceContext } from './workspace.ts';
 
@@ -26,9 +27,13 @@ export function useInventory(context: WorkspaceContext | null) {
         signal,
         onSnapshot: (snapshot) => {
           if (contextRef.current?.contextId !== context.contextId) return;
-          queryClient.setQueryData(queryKey, snapshot);
+          const merged = mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(queryKey), snapshot);
+          queryClient.setQueryData(queryKey, merged);
         },
-      });
+      }).then((snapshot) => mergeInventorySnapshot(
+        queryClient.getQueryData<InventorySnapshot>(queryKey),
+        snapshot,
+      ));
     },
     enabled: Boolean(context?.alias),
     // The connector already retries individual pages. A second whole-session

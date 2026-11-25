@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
-import { keepRowsUntilRefreshReports } from './lib/inventoryRefresh.ts';
+import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
 import { resetNoticeDismissals } from './lib/noticeDismissal.ts';
@@ -325,11 +325,14 @@ export function App() {
           signal: controller.signal,
           onSnapshot: (incoming) => {
             if (refreshControllerRef.current !== controller || target.contextId !== activeContextIdRef.current) return;
-            queryClient.setQueryData<InventorySnapshot>(key, keepRowsUntilRefreshReports(previous, incoming));
+            queryClient.setQueryData<InventorySnapshot>(
+              key,
+              mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), incoming),
+            );
           },
         });
         if (refreshControllerRef.current === controller && target.contextId === activeContextIdRef.current) {
-          queryClient.setQueryData<InventorySnapshot>(key, snapshot);
+          queryClient.setQueryData<InventorySnapshot>(key, mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), snapshot));
         }
         return snapshot;
       } catch (error) {
@@ -371,11 +374,14 @@ export function App() {
           signal: controller.signal,
           onSnapshot: (incoming) => {
             if (resumeControllerRef.current !== controller || target.contextId !== activeContextIdRef.current) return;
-            queryClient.setQueryData<InventorySnapshot>(key, keepRowsUntilRefreshReports(previous, incoming));
+            queryClient.setQueryData<InventorySnapshot>(
+              key,
+              mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), incoming),
+            );
           },
         });
         if (resumeControllerRef.current === controller && target.contextId === activeContextIdRef.current) {
-          queryClient.setQueryData<InventorySnapshot>(key, snapshot);
+          queryClient.setQueryData<InventorySnapshot>(key, mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), snapshot));
         }
         return snapshot;
       } catch (error) {
