@@ -29,20 +29,25 @@ function InventoryProgressBanner({
   progress,
   onResume,
   isResuming,
+  interrupted = false,
 }: {
   progress: DiscoveryProgressData;
   onResume?: () => void;
   isResuming: boolean;
+  interrupted?: boolean;
 }) {
   const stalled = progress.state === 'failed';
   const degraded = progress.families.some((family) =>
     family.status === 'partial' || family.status === 'failed');
-  const spinning = progress.state === 'running' || progress.families.some((family) => family.hasMore);
-  const title = stalled
-    ? 'Some collections stopped loading'
-    : progress.state === 'complete'
-      ? degraded ? 'Discovery finished with gaps' : 'Inventory complete'
-      : 'Loading inventory in batches';
+  const spinning = !interrupted
+    && (progress.state === 'running' || progress.families.some((family) => family.hasMore));
+  const title = interrupted
+    ? 'Inventory loading stopped'
+    : stalled
+      ? 'Some collections stopped loading'
+      : progress.state === 'complete'
+        ? degraded ? 'Discovery finished with gaps' : 'Inventory complete'
+        : 'Loading inventory in batches';
   const detail = loadedDetailLabel(progress.loaded, progressTotal(progress), spinning);
 
   if (progress.state === 'complete') {
@@ -57,7 +62,7 @@ function InventoryProgressBanner({
     <section
       data-testid="inventory-progress"
       role={stalled ? 'alert' : 'status'}
-      aria-busy={progress.state === 'running'}
+      aria-busy={progress.state === 'running' && !interrupted}
       className={`mb-4 rounded-lg border px-4 py-3 ${stalled ? 'border-danger/25 bg-danger-soft' : 'border-brand/20 bg-brand-soft'}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -192,12 +197,17 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   }
 
   const inventory = query.data;
+  const loadError = query.isError ? query.error.message : '';
   const timestamp = Date.parse(inventory.generatedAt);
   const absolute = Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : 'time unavailable';
   const live = context.mode === 'live';
   const stale = live && isInventoryStale(inventory.generatedAt);
-  const working = isInventoryLoading(inventory)
-    || Boolean(actions?.isRefreshingInventory || actions?.isResumingDiscovery);
+  // A failed poll leaves the last partial snapshot in React Query. Spinning on
+  // that stale `running` state would promise work nobody is doing anymore.
+  const working = !loadError && (
+    isInventoryLoading(inventory)
+    || Boolean(actions?.isRefreshingInventory || actions?.isResumingDiscovery)
+  );
 
   const freshness = (
     <span data-testid="inventory-freshness" className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-surface-alt px-2 text-xs text-ink-soft">
@@ -244,11 +254,20 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
 
   return (
     <>
+      {loadError ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
+          <span className="min-w-0 flex-1">Loading stopped: {loadError}</span>
+          <button type="button" onClick={() => void query.refetch()} className="font-semibold underline underline-offset-2">
+            Retry
+          </button>
+        </div>
+      ) : null}
       {inventory.progress ? (
         <InventoryProgressBanner
           progress={inventory.progress}
           onResume={stalledFamilies(inventory) ? () => actions?.resumeDiscovery?.() : undefined}
           isResuming={Boolean(actions?.isResumingDiscovery)}
+          interrupted={Boolean(loadError)}
         />
       ) : null}
       <ResourceStatusNotice inventory={inventory} />

@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { UseQueryResult } from '@tanstack/react-query';
 import { RESOURCE_FAMILIES } from '@dcat/core';
 import type { DiscoveryProgress, InventorySnapshot } from '@dcat/core';
 import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
 import { api } from '../lib/api.ts';
+import { InventoryBoundary } from './InventoryBoundary.tsx';
 import { InventoryActionsProvider } from '../lib/inventoryActions.tsx';
 import type { InventoryActions } from '../lib/inventoryActions.tsx';
 import { createWorkspaceContext } from '../lib/workspace.ts';
@@ -177,5 +179,43 @@ describe('InventoryBoundary progressive state', () => {
     expect(screen.getByLabelText('Cached snapshot')).toBeInTheDocument();
     expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
     expect(api.inventory).not.toHaveBeenCalled();
+  });
+
+  it('shows a retryable error instead of spinning on a failed partial load', async () => {
+    const refetch = vi.fn();
+    const query = {
+      data: snapshotFor('running'),
+      isPending: false,
+      isFetching: false,
+      isError: true,
+      error: new Error('The local bridge did not answer in time.'),
+      refetch,
+    } as unknown as UseQueryResult<InventorySnapshot, Error>;
+
+    render(
+      <InventoryActionsProvider value={{
+        context,
+        mode: 'live',
+        orgList: { status: 'idle' },
+        onGoToOrgs: vi.fn(),
+        onToggleMode: vi.fn(),
+        isTogglingMode: false,
+        refreshInventory: vi.fn(),
+        cancelRefresh: vi.fn(),
+        isRefreshingInventory: false,
+        refreshError: '',
+      }}>
+        <InventoryBoundary query={query} context={context}>
+          {() => <div>Loaded rows</div>}
+        </InventoryBoundary>
+      </InventoryActionsProvider>,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Loading stopped: The local bridge did not answer in time.');
+    expect(screen.queryByRole('img', { name: 'Inventory loading' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Inventory still loading' })).not.toBeInTheDocument();
+    expect(screen.getByText('Loaded rows')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });
