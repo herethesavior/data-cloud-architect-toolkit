@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { InventorySnapshot } from '@dcat/core';
 import { api } from './api.ts';
 import { persistedQueryOptions } from './queryPersistence.ts';
 import type { WorkspaceContext } from './workspace.ts';
@@ -35,5 +36,11 @@ export function useInventory(context: WorkspaceContext | null) {
     // refresh that owns the same relay slot.
     retry: false,
     ...persistedQueryOptions,
+    // A complete snapshot is enough on reload. An incomplete one revalidates in
+    // the background while its rows stay visible instead of freezing a gap.
+    refetchOnMount: (query) => {
+      const snapshot = query.state.data as InventorySnapshot | undefined;
+      return !snapshot?.progress || snapshot.progress.state !== 'complete' ? 'always' : false;
+    },
   });
 }
