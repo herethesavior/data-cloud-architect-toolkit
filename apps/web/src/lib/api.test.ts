@@ -81,6 +81,8 @@ describe('web API session handling', () => {
       cli: { installed: false, version: null, error: null },
       lastSeenAt: null,
       relay: 'waiting',
+      working: false,
+      canRepairPairing: false,
       pairing: null,
     };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(status));
@@ -106,6 +108,8 @@ describe('web API session handling', () => {
           cli: { installed: true, version: '2.116.6', error: null },
           lastSeenAt,
           relay: 'stale',
+          working: false,
+          canRepairPairing: true,
           pairing: null,
           agentVersion: '0.1.6',
           latestVersion: '0.1.6',
@@ -135,7 +139,8 @@ describe('web API session handling', () => {
         return jsonResponse({ id: `req-${count}` });
       }
       if (path.startsWith('/api/relay/requests/')) {
-        return jsonResponse({ id: path.split('/').pop(), status: 'completed', result: [] });
+        const id = path.split('/').pop()?.split('?')[0];
+        return jsonResponse({ id, status: 'completed', result: [] });
       }
       return jsonResponse({});
     });
@@ -148,31 +153,26 @@ describe('web API session handling', () => {
       .filter((url) => url.startsWith('/api/relay'));
     expect(relayPaths).toEqual([
       '/api/relay/requests',
-      '/api/relay/requests/req-1',
+      '/api/relay/requests/req-1?wait=1',
       '/api/relay/requests',
-      '/api/relay/requests/req-2',
+      '/api/relay/requests/req-2?wait=1',
     ]);
   });
 
-  it('keeps hosted relay serialization after a cancelled refresh', async () => {
+  it('cancels the queued relay request on abort without breaking serialization', async () => {
     vi.useFakeTimers();
     vi.stubEnv('VITE_HOSTED', 'true');
     let relayPosts = 0;
-    let firstDone = false;
     const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
       if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/cancel') return jsonResponse({ cancelled: true });
       if (path === '/api/relay/requests' && options?.method === 'POST') {
         relayPosts += 1;
         return jsonResponse({ id: `req-${relayPosts}` });
       }
       if (path.startsWith('/api/relay/requests/')) {
-        const id = path.split('/').pop();
-        return jsonResponse({
-          id,
-          status: id === 'req-1' && !firstDone ? 'running' : 'completed',
-          result: [],
-          error: null,
-        });
+        const id = path.split('/').pop()?.split('?')[0];
+        return jsonResponse({ id, status: id === 'req-1' ? 'running' : 'completed', result: [], error: null });
       }
       return jsonResponse({});
     });
@@ -183,13 +183,15 @@ describe('web API session handling', () => {
     await vi.advanceTimersByTimeAsync(0);
     controller.abort();
     await expect(cancelled).rejects.toMatchObject({ code: 'ABORTED' });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const cancelCall = fetchMock.mock.calls.find(([path]) => path === '/api/relay/cancel');
+    expect(cancelCall).toBeDefined();
+    expect(JSON.parse(String(cancelCall![1]?.body))).toEqual({ requestId: 'req-1' });
+    expect(relayPosts).toBe(1);
 
     const next = api.orgs();
     await vi.advanceTimersByTimeAsync(0);
-    expect(relayPosts, 'the abandoned bridge request still owns the relay').toBe(1);
-
-    firstDone = true;
-    await vi.advanceTimersByTimeAsync(1_300);
     await expect(next).resolves.toEqual([]);
     expect(relayPosts).toBe(2);
   });
@@ -211,7 +213,7 @@ describe('web API session handling', () => {
     const fetchMock = vi.fn(async (path: string) => {
       if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
       if (path === '/api/relay/requests') return jsonResponse({ id: 'req-env' });
-      if (path === '/api/relay/requests/req-env') return jsonResponse({ status: 'completed', result: [org] });
+      if (path.startsWith('/api/relay/requests/req-env')) return jsonResponse({ status: 'completed', result: [org] });
       return jsonResponse({});
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -334,7 +336,7 @@ describe('web API session handling', () => {
     const fetchMock = vi.fn(async (path: string) => {
       if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
       if (path === '/api/relay/requests') return jsonResponse({ id: 'req-1' });
-      if (path === '/api/relay/requests/req-1') {
+      if (path.startsWith('/api/relay/requests/req-1')) {
         return jsonResponse({
           id: 'req-1',
           status: 'failed',

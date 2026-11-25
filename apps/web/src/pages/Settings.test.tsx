@@ -23,6 +23,8 @@ const bridge: BridgeStatus = {
   cli: health.cli,
   lastSeenAt: '2026-01-01T00:00:00.000Z',
   relay: 'connected',
+  working: false,
+  canRepairPairing: false,
   pairing: null,
   agentVersion: '0.1.6',
   latestVersion: '0.1.6',
@@ -120,6 +122,41 @@ describe('Settings bridge diagnostics', () => {
     expect(diagnosticValue('Bridge version')).toHaveTextContent('0.1.6');
     expect(diagnosticValue('Bridge version')).not.toHaveTextContent('0.1.0');
     expect(screen.queryByRole('heading', { name: 'Salesforce OAuth' })).not.toBeInTheDocument();
+  });
+
+  it('derives hosted health from the single bridge status query', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.health).mockClear();
+    renderSettings();
+
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(api.bridgeStatus).toHaveBeenCalled();
+    expect(api.health).not.toHaveBeenCalled();
+  });
+
+  it('shows a working bridge without an offline warning', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue({
+      ...bridge,
+      relay: 'working',
+      working: true,
+      lastSeenAt: new Date(Date.now() - 90_000).toISOString(),
+    });
+    renderSettings();
+
+    expect(await screen.findByText('Working')).toBeInTheDocument();
+    expect(screen.getByText(/running a long operation/)).toBeInTheDocument();
+    expect(screen.queryByText(/has not checked in/)).not.toBeInTheDocument();
+  });
+
+  it('shows a degraded status when the relay state is temporarily unavailable', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue({ ...bridge, relay: 'unavailable', canRepairPairing: false });
+    renderSettings();
+
+    expect(await screen.findByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/temporarily unavailable/)).toBeInTheDocument();
+    expect(diagnosticValue('Status')).toHaveTextContent('degraded');
   });
 
   it('does not show the relay version before a hosted bridge has paired', async () => {

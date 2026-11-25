@@ -31,7 +31,7 @@ export function apiRoutes() {
   app.get('/api/cli/status', async (context) => {
     try {
       const session = await resolveSession(context, context.env);
-      const status = await bridgeStatusForSession(context.env, session, new URL(context.req.url).origin);
+      const status = await bridgeStatusForSession(context.env, session, new URL(context.req.url).origin, context);
       return context.json(status.cli);
     } catch (error) {
       return sendRouteError(context, error);
@@ -44,7 +44,7 @@ export function apiRoutes() {
       if (!hasValidCsrf(context, session)) {
         return sendError(context, 401, 'INVALID_SESSION_TOKEN', 'Refresh the page and try again.');
       }
-      const status = await bridgeStatusForSession(context.env, session, new URL(context.req.url).origin);
+      const status = await bridgeStatusForSession(context.env, session, new URL(context.req.url).origin, context);
       return context.json(status.cli);
     } catch (error) {
       return sendRouteError(context, error);
@@ -73,7 +73,7 @@ export function apiRoutes() {
       session.mode = body.mode;
       session.relay.request = null;
       await clearRelayRequest(context.env, session);
-      await saveSession(context.env, session);
+      await saveSession(context, context.env, session);
       return context.json({ mode: session.mode });
     } catch (error) {
       return sendRouteError(context, error);

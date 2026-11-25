@@ -91,7 +91,11 @@ export const bridgeStatusSchema = z.object({
   version: z.string(),
   cli: cliStatusSchema,
   lastSeenAt: z.string().nullish(),
-  relay: z.enum(['waiting', 'connected', 'stale']),
+  /** `working` is authoritative while a long operation keeps the bridge from polling. */
+  relay: z.enum(['waiting', 'connected', 'working', 'stale', 'unavailable']),
+  working: z.boolean(),
+  /** Re-pairing is only offered after a confirmed failure or a repeated stale status. */
+  canRepairPairing: z.boolean(),
   pairing: relayPairingSchema.nullable(),
   agentVersion: z.string().nullish(),
   latestVersion: z.string().nullish(),
@@ -146,6 +150,15 @@ export const relayPollRequestSchema = z.object({
 export const relayRespondRequestSchema = z.object({
   agentToken: z.string().min(16),
   response: relayResponseSchema,
+});
+
+export const relayCancelRequestSchema = z.object({
+  requestId: z.string().min(8).max(64),
+});
+
+export const relayAgentCancelRequestSchema = z.object({
+  agentToken: z.string().min(16),
+  requestId: z.string().min(8).max(64),
 });
 
 export const relayHealthResultSchema = cliStatusSchema;

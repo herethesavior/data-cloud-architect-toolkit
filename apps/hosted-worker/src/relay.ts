@@ -1,6 +1,8 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import {
   cliStatusSchema,
+  relayAgentCancelRequestSchema,
+  relayCancelRequestSchema,
   relayOperationSchema,
   relayPairRequestSchema,
   relayPollRequestSchema,
@@ -14,7 +16,7 @@ import {
 import { randomToken, tokenFingerprint } from './crypto.ts';
 import { sendError, sendRouteError } from './errors.ts';
 import type { RelayAgentSnapshot } from './relay-do.ts';
-import { hasValidCsrf, loadSession, resolveSession, saveSession } from './session.ts';
+import { hasValidCsrf, loadSession, persistSession, resolveSession, saveSession, sessionTtl } from './session.ts';
 import type { Env, SessionRecord } from './types.ts';
 
 export const RELAY_VERSION = '0.1.0';
@@ -89,6 +91,8 @@ function supportsSelfUpdate(current: string | null): boolean {
 
 const PAIRING_TTL_SECONDS = 10 * 60;
 const STALE_AFTER_MS = 60_000;
+/** A bridge that has just paired needs a moment to check in before we suggest re-pairing. */
+const REPAIR_GRACE_MS = 2 * 60_000;
 
 const OPERATION_TIMEOUT_MS: Record<RelayOperation['operation'], number> = {
   'cli.status': 30_000,
@@ -115,6 +119,7 @@ function resetSessionRelay(session: SessionRecord): void {
     agentToken: null,
     pairedAt: null,
     lastSeenAt: null,
+    working: false,
     agentVersion: null,
     cli: emptyCli(),
     pairingCode: null,
@@ -174,10 +179,25 @@ function pairingFor(session: SessionRecord, origin: string): RelayPairing | null
   };
 }
 
-export function getBridgeStatus(session: SessionRecord, origin: string): BridgeStatus {
-  const { agentToken, lastSeenAt, agentVersion } = session.relay;
-  const stale = lastSeenAt !== null && Date.now() - lastSeenAt > STALE_AFTER_MS;
-  const relay = !agentToken || lastSeenAt === null ? 'waiting' : stale ? 'stale' : 'connected';
+interface StatusOverride {
+  relay?: BridgeStatus['relay'];
+  working?: boolean;
+}
+
+export function getBridgeStatus(session: SessionRecord, origin: string, override: StatusOverride = {}): BridgeStatus {
+  const { agentToken, lastSeenAt, agentVersion, pairedAt } = session.relay;
+  const now = Date.now();
+  const stale = lastSeenAt !== null && now - lastSeenAt > STALE_AFTER_MS;
+  // A bridge that paired but never checked in is only "waiting" during the
+  // grace window. Past that, it needs the same repair affordance as a stale one.
+  const neverCheckedIn = lastSeenAt === null && pairedAt !== null && now - pairedAt > REPAIR_GRACE_MS;
+  const offline = stale || neverCheckedIn;
+  const working = override.working === false ? false : Boolean(agentToken && session.relay.working);
+  const relay = override.relay ?? (
+    working ? 'working'
+      : !agentToken || lastSeenAt === null && !neverCheckedIn ? 'waiting'
+        : offline ? 'stale' : 'connected'
+  );
   return {
     paired: Boolean(agentToken),
     mode: session.mode,
@@ -185,6 +205,8 @@ export function getBridgeStatus(session: SessionRecord, origin: string): BridgeS
     cli: session.relay.cli ?? emptyCli(),
     lastSeenAt: lastSeenAt === null ? null : new Date(lastSeenAt).toISOString(),
     relay,
+    working,
+    canRepairPairing: Boolean(agentToken && pairedAt !== null && offline && now - pairedAt > REPAIR_GRACE_MS),
     pairing: pairingFor(session, origin),
     agentVersion: agentVersion ?? null,
     latestVersion: null,
@@ -194,8 +216,12 @@ export function getBridgeStatus(session: SessionRecord, origin: string): BridgeS
 }
 
 /** Status for the setup card: compare the paired agent version with npm's latest. */
-export async function getBridgeUpdateStatus(session: SessionRecord, origin: string): Promise<BridgeStatus> {
-  const status = getBridgeStatus(session, origin);
+export async function getBridgeUpdateStatus(
+  session: SessionRecord,
+  origin: string,
+  override: StatusOverride = {},
+): Promise<BridgeStatus> {
+  const status = getBridgeStatus(session, origin, override);
   if (!status.paired || !status.agentVersion) return status;
   const latestVersion = await latestBridgeVersion();
   return {
@@ -206,38 +232,99 @@ export async function getBridgeUpdateStatus(session: SessionRecord, origin: stri
   };
 }
 
+type AgentStateBody = RelayAgentSnapshot & {
+  paired?: boolean;
+  error?: { code?: string; message?: string };
+};
+
+type PairingState = 'active' | 'unpaired' | 'unavailable';
+
+function isInvalidAgentToken(body: AgentStateBody | null, status: number): boolean {
+  return status === 401 && body?.error?.code === 'INVALID_AGENT_TOKEN';
+}
+
+/** Best-effort revocation: a dead DO must not prevent local session recovery. */
+async function revokeAgentToken(env: Env, session: SessionRecord): Promise<void> {
+  const token = session.relay.agentToken;
+  if (!token) return;
+  try {
+    await relayFetch(env, token, '/unpair', { agentToken: token, sessionId: session.id });
+  } catch {
+    // The browser session is reset regardless; an obsolete bridge is harmless
+    // once its token is no longer present in KV.
+  }
+}
+
+async function agentState(env: Env, session: SessionRecord): Promise<{ status: number; body: AgentStateBody | null }> {
+  const token = session.relay.agentToken;
+  if (!token) return { status: 401, body: null };
+  try {
+    const { response, body } = await relayJson<AgentStateBody>(env, token, '/state', {
+      agentToken: token,
+      sessionId: session.id,
+    });
+    return { status: response.status, body };
+  } catch {
+    return { status: 502, body: null };
+  }
+}
+
 export async function bridgeStatusForSession(
   env: Env,
   session: SessionRecord,
   origin: string,
+  context?: Context,
 ): Promise<BridgeStatus> {
   const agentToken = session.relay.agentToken;
   if (!agentToken) return getBridgeUpdateStatus(session, origin);
 
-  const { response, body } = await relayJson<RelayAgentSnapshot & { paired: boolean }>(
-    env,
-    agentToken,
-    '/state',
-    { agentToken, sessionId: session.id },
-  );
-  if (!response.ok || !body?.paired) {
-    // The DO is authoritative about a pairing. If it no longer knows this
-    // token, show an unpaired state instead of trusting stale session metadata.
-    const staleSession = { ...session };
-    resetSessionRelay(staleSession);
-    return getBridgeUpdateStatus(staleSession, origin);
+  const { status, body } = await agentState(env, session);
+  if (isInvalidAgentToken(body, status)) {
+    await revokeAgentToken(env, session);
+    resetSessionRelay(session);
+    // Persist the reset so status and pairing routes agree immediately.
+    if (context) await saveSession(context, env, session);
+    else await persistSession(env, session);
+    return getBridgeUpdateStatus(session, origin);
+  }
+  if (status !== 200 || !body?.paired) {
+    // A network blip or 5xx is not evidence of an unpaired bridge. Keep the
+    // last known pairing and show a retryable degraded state instead.
+    return getBridgeUpdateStatus(session, origin, { relay: 'unavailable', working: false });
   }
   return getBridgeUpdateStatus({
     ...session,
-    relay: { ...session.relay, lastSeenAt: body.lastSeenAt, agentVersion: body.agentVersion, cli: body.cli },
+    relay: {
+      ...session.relay,
+      lastSeenAt: body.lastSeenAt,
+      agentVersion: body.agentVersion,
+      cli: body.cli,
+      working: body.working === true,
+    },
   }, origin);
+}
+
+async function pairingState(env: Env, session: SessionRecord): Promise<PairingState> {
+  if (!session.relay.agentToken) return 'unpaired';
+  const { status, body } = await agentState(env, session);
+  if (status === 200 && body?.paired) return 'active';
+  return isInvalidAgentToken(body, status) ? 'unpaired' : 'unavailable';
+}
+
+async function recoverUnpairedSession(env: Env, session: SessionRecord): Promise<void> {
+  await revokeAgentToken(env, session);
+  resetSessionRelay(session);
 }
 
 /** Browser-owned cancellation used by both unpair and workspace mode changes. */
 export async function clearRelayRequest(env: Env, session: SessionRecord): Promise<void> {
   const agentToken = session.relay.agentToken;
   if (!agentToken) return;
-  await relayFetch(env, agentToken, '/cancel', { agentToken, sessionId: session.id });
+  try {
+    await relayFetch(env, agentToken, '/cancel', { agentToken, sessionId: session.id });
+  } catch {
+    // Cancellation is best-effort; the request still expires at its deadline.
+  }
 }
 
 export function relayRoutes() {
@@ -246,7 +333,7 @@ export function relayRoutes() {
   app.get('/api/relay/status', async (context) => {
     try {
       const session = await resolveSession(context, context.env);
-      return context.json(await bridgeStatusForSession(context.env, session, originOf(context.req.url)));
+      return context.json(await bridgeStatusForSession(context.env, session, originOf(context.req.url), context));
     } catch (error) {
       return sendRouteError(context, error);
     }
@@ -259,17 +346,19 @@ export function relayRoutes() {
         return sendError(context, 401, 'INVALID_SESSION_TOKEN', 'Refresh the page and try again.');
       }
       if (session.relay.agentToken) {
-        const token = session.relay.agentToken;
-        const active = await relayFetch(context.env, token, '/state', {
-          agentToken: token,
-          sessionId: session.id,
-        }).then((response) => response.ok).catch(() => false);
-        if (active) {
+        const state = await pairingState(context.env, session);
+        if (state === 'active') {
           return sendError(context, 409, 'BRIDGE_ALREADY_PAIRED', 'This browser is already paired with a bridge.');
         }
-        // A session paired before the Durable Object migration has no relay
-        // state. Recover here so the user can create a fresh code immediately.
-        resetSessionRelay(session);
+        if (state === 'unavailable') {
+          return sendRouteError(context, {
+            code: 'BRIDGE_STATUS_UNAVAILABLE',
+            message: 'Bridge status is unavailable. Check the deployment and try again.',
+          });
+        }
+        // An explicit 401 (or a pre-DO session) means the token is gone. Revoke
+        // it best-effort before issuing a fresh code so no bridge is left behind.
+        await recoverUnpairedSession(context.env, session);
       }
       const existing = pairingFor(session, originOf(context.req.url));
       if (existing) return context.json(existing);
@@ -282,7 +371,7 @@ export function relayRoutes() {
         expirationTtl: PAIRING_TTL_SECONDS,
       });
       if (previousCode) await context.env.DCAT_SESSIONS.delete(`pairing:${previousCode}`);
-      await saveSession(context.env, session);
+      await saveSession(context, context.env, session);
       return context.json(pairingFor(session, originOf(context.req.url)));
     } catch (error) {
       return sendRouteError(context, error);
@@ -305,7 +394,17 @@ export function relayRoutes() {
         return sendError(context, 400, 'INVALID_PAIRING_CODE', 'The pairing code is invalid or has expired.');
       }
       if (session.relay.agentToken) {
-        return sendError(context, 409, 'BRIDGE_ALREADY_PAIRED', 'This browser is already paired with a bridge.');
+        const state = await pairingState(context.env, session);
+        if (state === 'active') {
+          return sendError(context, 409, 'BRIDGE_ALREADY_PAIRED', 'This browser is already paired with a bridge.');
+        }
+        if (state === 'unavailable') {
+          return sendRouteError(context, {
+            code: 'BRIDGE_STATUS_UNAVAILABLE',
+            message: 'Bridge status is unavailable. Check the deployment and try again.',
+          });
+        }
+        await recoverUnpairedSession(context.env, session);
       }
       const { pairingCode, pairingExpiresAt } = session.relay;
       if (!pairingCode || pairingCode !== parsed.data.code || !pairingExpiresAt || pairingExpiresAt <= Date.now()) {
@@ -321,15 +420,27 @@ export function relayRoutes() {
         agentToken,
         sessionId: session.id,
         pairedAt,
+        expiresAt: session.expiresAt ?? Date.now() + sessionTtl(context.env) * 1000,
         agentVersion,
         cli,
       });
-      if (!initialized.ok) return sendRouteError(context, new Error('Could not initialize the bridge relay.'));
+      if (!initialized.ok) {
+        // Never leave a usable-looking command behind when the relay cannot
+        // initialize; the user must be able to retry without stale state.
+        await context.env.DCAT_SESSIONS.delete(`pairing:${parsed.data.code}`);
+        resetSessionRelay(session);
+        await saveSession(context, context.env, session);
+        return sendRouteError(context, {
+          code: 'BRIDGE_RELAY_UNAVAILABLE',
+          message: 'Bridge relay unavailable. Check the deployment, then create a new pairing code.',
+        });
+      }
 
       session.relay = {
         agentToken,
         pairedAt,
         lastSeenAt: null,
+        working: false,
         agentVersion,
         cli,
         pairingCode: null,
@@ -337,7 +448,7 @@ export function relayRoutes() {
         request: null,
       };
       await context.env.DCAT_SESSIONS.delete(`pairing:${parsed.data.code}`);
-      await saveSession(context.env, session);
+      await saveSession(context, context.env, session);
       return context.json({ agentToken });
     } catch (error) {
       return sendRouteError(context, error);
@@ -415,7 +526,12 @@ export function relayRoutes() {
         },
       );
       if (response.status === 401) {
-        return sendError(context, 409, 'BRIDGE_NOT_CONNECTED', 'Set up the SF CLI bridge before connecting an org.');
+        return sendError(
+          context,
+          409,
+          'BRIDGE_PAIRING_RESET',
+          'This bridge pairing was reset. Create a new pairing code in Connect org, then rerun setup.',
+        );
       }
       if (!response.ok) {
         const code = body?.error?.code ?? 'BRIDGE_NOT_CONNECTED';
@@ -438,16 +554,80 @@ export function relayRoutes() {
       if (!agentToken) {
         return sendError(context, 404, 'NOT_FOUND', 'The bridge request was not found.');
       }
-      const { response, body } = await relayJson<RelayRequestState>(
+      const { response, body } = await relayJson<RelayRequestState & {
+        error?: { code?: string; message?: string };
+      }>(
         context.env,
         agentToken,
         '/request',
-        { agentToken, sessionId: session.id, id: context.req.param('id'), now: Date.now() },
+        {
+          agentToken,
+          sessionId: session.id,
+          id: context.req.param('id'),
+          now: Date.now(),
+          wait: context.req.query('wait') === '1',
+        },
       );
+      if (response.status === 401) {
+        return sendError(
+          context,
+          409,
+          'BRIDGE_PAIRING_RESET',
+          'This bridge pairing was reset. Create a new pairing code in Connect org, then rerun setup.',
+        );
+      }
       if (!response.ok) {
-        return sendError(context, 404, 'NOT_FOUND', 'The bridge request was not found.');
+        const code = body?.error?.code ?? 'NOT_FOUND';
+        const message = body?.error?.message ?? 'The bridge request was not found.';
+        return sendError(context, response.status as 400 | 404 | 409, code, message);
       }
       return context.json(body);
+    } catch (error) {
+      return sendRouteError(context, error);
+    }
+  });
+
+  app.post('/api/relay/cancel', async (context) => {
+    try {
+      const session = await resolveSession(context, context.env);
+      if (!hasValidCsrf(context, session)) {
+        return sendError(context, 401, 'INVALID_SESSION_TOKEN', 'Refresh the page and try again.');
+      }
+      const parsed = relayCancelRequestSchema.safeParse(await context.req.json().catch(() => ({})));
+      if (!parsed.success) {
+        return sendError(context, 400, 'INVALID_ARGUMENT', 'The request id is not valid.');
+      }
+      const agentToken = session.relay.agentToken;
+      if (!agentToken) return context.json({ cancelled: false });
+      const { response, body } = await relayJson<{ cancelled: boolean } & { error?: { code?: string } }>(
+        context.env,
+        agentToken,
+        '/cancel',
+        { agentToken, sessionId: session.id, requestId: parsed.data.requestId },
+      );
+      if (response.status === 401) {
+        return sendError(context, 409, 'BRIDGE_PAIRING_RESET', 'This bridge pairing was reset.');
+      }
+      return context.json(body ?? { cancelled: false });
+    } catch (error) {
+      return sendRouteError(context, error);
+    }
+  });
+
+  app.post('/api/relay/cancelled', async (context) => {
+    try {
+      const parsed = relayAgentCancelRequestSchema.safeParse(await context.req.json().catch(() => ({})));
+      if (!parsed.success) {
+        return sendError(context, 401, 'INVALID_AGENT_TOKEN', 'The bridge pairing token is not valid.');
+      }
+      const response = await relayFetch(context.env, parsed.data.agentToken, '/cancelled', {
+        agentToken: parsed.data.agentToken,
+        requestId: parsed.data.requestId,
+      });
+      if (response.status === 401) {
+        return sendError(context, 401, 'INVALID_AGENT_TOKEN', 'The site reset this bridge pairing. Run setup again.');
+      }
+      return response;
     } catch (error) {
       return sendRouteError(context, error);
     }
@@ -461,12 +641,10 @@ export function relayRoutes() {
       }
       const agentToken = session.relay.agentToken;
       const pairingCode = session.relay.pairingCode;
-      if (agentToken) {
-        await relayFetch(context.env, agentToken, '/unpair', { agentToken, sessionId: session.id });
-      }
+      if (agentToken) await revokeAgentToken(context.env, session);
       resetSessionRelay(session);
       if (pairingCode) await context.env.DCAT_SESSIONS.delete(`pairing:${pairingCode}`);
-      await saveSession(context.env, session);
+      await saveSession(context, context.env, session);
       return context.json({ paired: false });
     } catch (error) {
       return sendRouteError(context, error);

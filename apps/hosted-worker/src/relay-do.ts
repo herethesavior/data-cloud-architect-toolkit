@@ -13,6 +13,8 @@ import { constantTimeEquals, tokenFingerprint } from './crypto.ts';
 
 /** Long-poll window. Short enough for fast pickup, long enough to avoid idle request churn. */
 export const RELAY_LONG_POLL_MS = 20_000;
+/** Browser request-state polls are held until this request finishes or the window elapses. */
+export const RELAY_REQUEST_LONG_POLL_MS = 8_000;
 const SEEN_THROTTLE_MS = 20_000;
 const STALE_AFTER_MS = 60_000;
 /** One result is retained per session; this caps a hostile or accidental giant payload. */
@@ -40,6 +42,7 @@ export interface RelayAgentSnapshot {
   lastSeenAt: number | null;
   agentVersion: string | null;
   cli: CliStatus;
+  working: boolean;
 }
 
 function emptyCli(): CliStatus {
@@ -81,6 +84,7 @@ function parseCli(value: unknown): CliStatus | null {
  */
 export class RelayDurableObjectCore {
   private readonly waiters = new Set<() => void>();
+  private readonly requestWaiters = new Map<string, Set<() => void>>();
 
   constructor(private readonly sql: SqlStorageLike) {
     this.ensureSchema();
@@ -127,6 +131,8 @@ export class RelayDurableObjectCore {
     if (this.getMeta('revoked') === '1') return null;
     const sessionId = this.getMeta('session_id');
     if (!sessionId) return null;
+    const expiresAt = this.getMetaNumber('session_expires_at');
+    if (expiresAt !== null && Date.now() > expiresAt) return null;
     const fingerprint = await tokenFingerprint(token);
     return constantTimeEquals(fingerprint, this.getMeta('token_fingerprint') ?? '') ? sessionId : null;
   }
@@ -155,6 +161,7 @@ export class RelayDurableObjectCore {
   }
 
   private saveRequest(request: StoredRequest): void {
+    this.setMeta('canceled_request_id', '');
     this.sql.exec('DELETE FROM current_request');
     this.sql.exec(`INSERT INTO current_request
       (slot, id, operation, created_at, expires_at, claimed_at, response, responded_at)
@@ -173,6 +180,14 @@ export class RelayDurableObjectCore {
       return request.response.ok
         ? { id: request.id, status: 'completed', result: request.response.result, error: null }
         : { id: request.id, status: 'failed', result: null, error: request.response.error };
+    }
+    if (this.getMeta('canceled_request_id') === request.id) {
+      return {
+        id: request.id,
+        status: 'failed',
+        result: null,
+        error: { code: 'CANCELLED', message: 'The request was cancelled.' },
+      };
     }
     if (request.expiresAt <= now) {
       return {
@@ -196,7 +211,16 @@ export class RelayDurableObjectCore {
     for (const wake of waiters) wake();
   }
 
+  private wakeRequestWaiters(id: string): void {
+    const waiters = this.requestWaiters.get(id);
+    if (!waiters) return;
+    this.requestWaiters.delete(id);
+    for (const wake of waiters) wake();
+  }
+
   private agentSnapshot(): RelayAgentSnapshot {
+    const request = this.readRequest();
+    const working = request !== null && this.requestState(request, Date.now()).status === 'running';
     const rawCli = this.getMeta('cli');
     let cli: CliStatus | null = null;
     if (rawCli) {
@@ -210,6 +234,7 @@ export class RelayDurableObjectCore {
       lastSeenAt: this.getMetaNumber('last_seen_at'),
       agentVersion: this.getMeta('agent_version'),
       cli: cli ?? emptyCli(),
+      working,
     };
   }
 
@@ -250,6 +275,9 @@ export class RelayDurableObjectCore {
     this.setMeta('session_id', body.sessionId);
     this.setMeta('token_fingerprint', fingerprint);
     this.setMeta('paired_at', String(typeof body.pairedAt === 'number' ? body.pairedAt : Date.now()));
+    if (typeof body.expiresAt === 'number' && Number.isFinite(body.expiresAt)) {
+      this.setMeta('session_expires_at', String(body.expiresAt));
+    }
     this.setMeta('revoked', '0');
     const cli = parseCli(body.cli) ?? emptyCli();
     this.setMeta('cli', JSON.stringify(cli));
@@ -309,10 +337,21 @@ export class RelayDurableObjectCore {
     if (request.response) return json({ ok: true });
     const bytes = new TextEncoder().encode(JSON.stringify(response.data)).byteLength;
     if (bytes > MAX_RELAY_RESPONSE_BYTES) {
+      // A rejected result is terminal for this request. Store it so the browser
+      // gets the real reason instead of waiting for its deadline.
+      const rejected: RelayResponse = {
+        id: response.data.id,
+        ok: false,
+        error: { code: 'RESPONSE_TOO_LARGE', message: 'The bridge result is too large to relay.' },
+      };
+      this.sql.exec('UPDATE current_request SET response = ?, responded_at = ? WHERE slot = 1',
+        JSON.stringify(rejected), Date.now());
+      this.wakeRequestWaiters(response.data.id);
       return error('RESPONSE_TOO_LARGE', 'The bridge result is too large to relay.', 413);
     }
     this.sql.exec('UPDATE current_request SET response = ?, responded_at = ? WHERE slot = 1',
       JSON.stringify(response.data), Date.now());
+    this.wakeRequestWaiters(response.data.id);
     return json({ ok: true });
   }
 
@@ -327,10 +366,6 @@ export class RelayDurableObjectCore {
       || typeof body.createdAt !== 'number' || typeof body.expiresAt !== 'number') {
       return error('INVALID_ARGUMENT', 'Unsupported bridge operation.', 400);
     }
-    const seen = this.getMetaNumber('last_seen_at');
-    if (seen !== null && now - seen > STALE_AFTER_MS) {
-      return error('BRIDGE_NOT_CONNECTED', 'The local bridge is offline. Restart it and try again.', 409);
-    }
     const active = this.readRequest();
     if (active) {
       const state = this.requestState(active, now);
@@ -338,9 +373,21 @@ export class RelayDurableObjectCore {
         if (JSON.stringify(active.operation) === JSON.stringify(operation.data)) {
           return json({ id: active.id, status: state.status });
         }
-        return error('BRIDGE_BUSY', `A ${active.operation.operation} request is still running. Wait for it to finish.`, 409);
+        // A cancellation that arrived before the bridge claimed the request
+        // frees the slot; one already executing must finish before new work.
+        const canceledBeforeClaim = this.getMeta('canceled_request_id') === active.id && active.claimedAt === null;
+        if (!canceledBeforeClaim) {
+          return error('BRIDGE_BUSY', `A ${active.operation.operation} request is still running. Wait for it to finish.`, 409);
+        }
       }
     }
+    // A bridge executing a claimed task cannot poll, so `last_seen_at` may be
+    // old while work is still in flight. Busy state is handled above.
+    const seen = this.getMetaNumber('last_seen_at');
+    if (seen !== null && now - seen > STALE_AFTER_MS) {
+      return error('BRIDGE_NOT_CONNECTED', 'The local bridge is offline. Restart it and try again.', 409);
+    }
+    if (active) this.wakeRequestWaiters(active.id);
     this.saveRequest({
       id: body.requestId,
       operation: operation.data,
@@ -359,11 +406,48 @@ export class RelayDurableObjectCore {
     if (!sessionId || body.sessionId !== sessionId) {
       return error('NOT_FOUND', 'The bridge request was not found.', 404);
     }
-    const request = this.readRequest();
-    if (!request || request.id !== body.id) {
+    const id = body.id;
+    const read = () => this.readRequest();
+    const current = read();
+    if (!current || current.id !== id) {
       return error('NOT_FOUND', 'The bridge request was not found.', 404);
     }
-    return json(this.requestState(request, typeof body.now === 'number' ? body.now : Date.now()));
+    const stateOf = (): RelayRequestState | null => {
+      const request = read();
+      if (!request || request.id !== id) return null;
+      const state = this.requestState(request, typeof body.now === 'number' ? body.now : Date.now());
+      return state.status === 'completed' || state.status === 'failed' || state.status === 'expired'
+        ? state
+        : null;
+    };
+    const immediate = stateOf();
+    if (immediate) return json(immediate);
+    if (body.wait !== true) return json(this.requestState(current, Date.now()));
+
+    await new Promise<void>((resolve) => {
+      let waiters = this.requestWaiters.get(String(id));
+      if (!waiters) {
+        waiters = new Set();
+        this.requestWaiters.set(String(id), waiters);
+      }
+      const pending = waiters;
+      const wake = () => {
+        clearTimeout(timer);
+        pending.delete(wake);
+        if (pending.size === 0) this.requestWaiters.delete(String(id));
+        resolve();
+      };
+      const timer = setTimeout(wake, RELAY_REQUEST_LONG_POLL_MS);
+      pending.add(wake);
+    });
+
+    const after = read();
+    if (!after || after.id !== id) {
+      return error('NOT_FOUND', 'The bridge request was not found.', 404);
+    }
+    // The caller's timestamp predates the long poll; use the current time so a
+    // request that expired while the browser was waiting is reported as expired.
+    return json(this.requestState(after, Date.now()));
   }
 
   async cancel(body: Record<string, unknown>): Promise<Response> {
@@ -371,8 +455,25 @@ export class RelayDurableObjectCore {
     if (!sessionId || body.sessionId !== sessionId) {
       return error('INVALID_AGENT_TOKEN', 'The bridge pairing is no longer active.', 401);
     }
-    this.sql.exec('DELETE FROM current_request');
+    const active = this.readRequest();
+    if (!active || (typeof body.requestId === 'string' && body.requestId !== active.id)) {
+      return json({ cancelled: false });
+    }
+    this.setMeta('canceled_request_id', active.id);
+    this.wakeRequestWaiters(active.id);
     return json({ cancelled: true });
+  }
+
+  async cancelled(body: Record<string, unknown>): Promise<Response> {
+    const sessionId = await this.authorized(body);
+    if (!sessionId) {
+      return error('INVALID_AGENT_TOKEN', 'The site reset this bridge pairing. Run setup again.', 401);
+    }
+    const active = this.readRequest();
+    const cancelled = Boolean(
+      active && body.requestId === active.id && this.getMeta('canceled_request_id') === active.id,
+    );
+    return json({ cancelled });
   }
 
   async unpair(body: Record<string, unknown>): Promise<Response> {
@@ -380,6 +481,8 @@ export class RelayDurableObjectCore {
     if (!sessionId || body.sessionId !== sessionId) {
       return error('INVALID_AGENT_TOKEN', 'The bridge pairing is no longer active.', 401);
     }
+    const active = this.readRequest();
+    if (active) this.wakeRequestWaiters(active.id);
     this.sql.exec('DELETE FROM current_request');
     this.setMeta('revoked', '1');
     this.clearMeta();
@@ -400,6 +503,7 @@ export class RelayDurableObjectCore {
       case '/queue': return this.queue(body);
       case '/request': return this.request(body);
       case '/cancel': return this.cancel(body);
+      case '/cancelled': return this.cancelled(body);
       case '/unpair': return this.unpair(body);
       default: return error('NOT_FOUND', 'Unknown relay operation.', 404);
     }

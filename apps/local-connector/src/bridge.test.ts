@@ -18,7 +18,14 @@ import {
   transformScheduleJson,
   versionsJson,
 } from '@dcat/test-fixtures';
-import { executeRelayOperation, FetchRelayHttp, RelayAuthError, runBridge, type RelayHttp } from './bridge.ts';
+import {
+  executeRelayOperation,
+  FetchRelayHttp,
+  RelayAuthError,
+  RelayTerminalError,
+  runBridge,
+  type RelayHttp,
+} from './bridge.ts';
 import { loadConfig } from './config.ts';
 import { createAppState, type AppState, type DiscoverySessionRecord } from './state.ts';
 
@@ -90,6 +97,7 @@ class FakeRelayHttp implements RelayHttp {
   async post<T>(path: string, body: unknown): Promise<T> {
     this.calls.push({ path, body });
     if (path === '/api/relay/pair') return { agentToken: 'agent-token' } as T;
+    if (path === '/api/relay/cancelled') return { cancelled: false } as T;
     if (path === '/api/relay/poll') return { status: 'ok', tasks: this.tasks.splice(0) } as T;
     if (path === '/api/relay/respond') {
       this.controller.abort();
@@ -247,6 +255,7 @@ describe('runBridge', () => {
     expect(http.calls.map((call) => call.path)).toEqual([
       '/api/relay/pair',
       '/api/relay/poll',
+      '/api/relay/cancelled',
       '/api/relay/respond',
     ]);
     expect(respondBody(http)).toMatchObject({
@@ -321,6 +330,50 @@ describe('runBridge', () => {
 
     await expect(http.post('/api/relay/poll', { agentToken: 'revoked-token' }))
       .rejects.toBeInstanceOf(RelayAuthError);
+  });
+
+  it('treats an oversized relay result as terminal instead of retryable', async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({
+      error: { code: 'RESPONSE_TOO_LARGE', message: 'The bridge result is too large to relay.' },
+    }), { status: 413, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+    const http = new FetchRelayHttp('https://dcat.example', fetchFn);
+
+    const call = http.post('/api/relay/respond', {
+      agentToken: 'agent-token',
+      response: { id: 'task-1', ok: true, result: 'x'.repeat(16) },
+    });
+    await expect(call).rejects.toBeInstanceOf(RelayTerminalError);
+    await expect(call).rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' });
+  });
+
+  it('skips a task that the site cancelled before execution', async () => {
+    const controller = new AbortController();
+    const respond = vi.fn();
+    const http: RelayHttp = {
+      async post<T>(path: string): Promise<T> {
+        if (path === '/api/relay/poll') return { status: 'ok', tasks: [task({ operation: 'cli.status' })] } as T;
+        if (path === '/api/relay/cancelled') {
+          controller.abort();
+          return { cancelled: true } as T;
+        }
+        if (path === '/api/relay/respond') return respond() as T;
+        throw new Error(`Unexpected relay path: ${path}`);
+      },
+    };
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    expect(respond).not.toHaveBeenCalled();
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('cancelled request'));
   });
 
   it('stops polling when the relay reports an unpaired bridge', async () => {

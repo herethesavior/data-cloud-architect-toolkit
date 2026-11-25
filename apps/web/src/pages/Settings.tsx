@@ -73,8 +73,26 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
   // A diagnostic error from the previous mode must not survive with them.
   useEffect(() => setRefreshError(''), [mode]);
 
-  const healthQuery = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 60_000 });
-  const bridgeQuery = useQuery({ queryKey: ['bridge-status'], queryFn: api.bridgeStatus, refetchInterval: 30_000 });
+  // In hosted mode both the health badge and the bridge badge come from the
+  // same relay status read; polling /api/health separately doubles KV reads and
+  // lets the two indicators disagree for up to a minute.
+  const healthQuery = useQuery({
+    queryKey: ['health'],
+    queryFn: api.health,
+    enabled: !hosted,
+    refetchInterval: 60_000,
+  });
+  const bridgeQuery = useQuery({
+    queryKey: ['bridge-status'],
+    queryFn: api.bridgeStatus,
+    refetchInterval: (query) => {
+      const status = query.state.data;
+      if (!status || status.relay === 'unavailable' || status.relay === 'stale' || status.relay === 'waiting') {
+        return 10_000;
+      }
+      return 30_000;
+    },
+  });
   const refreshCli = useMutation({
     mutationFn: api.refreshCli,
     onSuccess: () => {
@@ -84,14 +102,36 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
     onError: (error: Error) => setRefreshError(error.message),
   });
 
-  if (healthQuery.isPending && !healthQuery.data) return <LoadingState label="Reading connector diagnostics..." />;
+  if (!hosted && healthQuery.isPending && !healthQuery.data) {
+    return <LoadingState label="Reading connector diagnostics..." />;
+  }
   // A failed background poll must not replace the rest of Settings: React Query
   // keeps the last good health payload, so the panels can stay usable.
-  if (healthQuery.isError && !healthQuery.data) {
+  if (!hosted && healthQuery.isError && !healthQuery.data) {
     return <ErrorState message={healthQuery.error.message} onRetry={() => void healthQuery.refetch()} />;
   }
-  const health = healthQuery.data;
-  if (!health) return <LoadingState label="Reading connector diagnostics..." />;
+
+  const bridge = bridgeQuery.data;
+  if (hosted && bridgeQuery.isPending && !bridge) {
+    return <LoadingState label="Reading bridge diagnostics..." />;
+  }
+  if (hosted && bridgeQuery.isError && !bridge) {
+    return <ErrorState message={bridgeQuery.error.message} onRetry={() => void bridgeQuery.refetch()} />;
+  }
+
+  const localHealth = healthQuery.data;
+  if (!hosted && !localHealth) return <LoadingState label="Reading connector diagnostics..." />;
+  const health = hosted
+    ? {
+        status: bridge?.relay === 'unavailable' || bridge?.relay === 'stale' || (!bridge?.paired && bridge?.mode === 'live')
+          ? 'degraded' as const
+          : 'ok' as const,
+        mode: bridge?.mode ?? 'live',
+        version: bridge?.version ?? '',
+        time: bridge?.lastSeenAt ?? new Date().toISOString(),
+        cli: bridge?.cli ?? { installed: false, version: null, error: null },
+      }
+    : localHealth!;
 
   const clearMetadata = async () => {
     setDataNotice('');
@@ -125,21 +165,39 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
     }
   };
 
-  const bridge = bridgeQuery.data;
   const bridgeTone: BadgeTone = bridge?.relay === 'connected'
     ? 'success'
-    : bridge?.relay === 'stale'
-      ? 'danger'
-      : bridge?.paired
-        ? 'warning'
-        : 'neutral';
+    : bridge?.relay === 'working'
+      ? 'brand'
+      : bridge?.relay === 'stale'
+        ? 'danger'
+        : bridge?.relay === 'unavailable'
+          ? 'warning'
+          : bridge?.paired
+            ? 'warning'
+            : 'neutral';
   const bridgeLabel = bridge?.relay === 'connected'
     ? 'Connected'
-    : bridge?.relay === 'stale'
-      ? 'Offline'
-      : bridge?.paired
-        ? 'Waiting'
-        : 'Not paired';
+    : bridge?.relay === 'working'
+      ? 'Working'
+      : bridge?.relay === 'stale'
+        ? 'Offline'
+        : bridge?.relay === 'unavailable'
+          ? 'Unavailable'
+          : bridge?.paired
+            ? 'Waiting'
+            : 'Not paired';
+  const statusNotice = bridgeQuery.isError
+    ? { tone: 'warning' as const, text: 'Bridge status is unavailable. Refresh to try again.' }
+    : bridge?.relay === 'unavailable'
+      ? { tone: 'warning' as const, text: 'Bridge status is temporarily unavailable. Refresh to try again.' }
+      : bridge?.relay === 'working'
+        ? { tone: 'brand' as const, text: 'The bridge is running a long operation. Status updates when it finishes.' }
+        : bridge?.relay === 'stale'
+          ? { tone: 'danger' as const, text: 'The bridge has not checked in for about a minute. Check its network connection, then restart it if it is still running.' }
+          : bridge?.paired && bridge.relay === 'waiting'
+            ? { tone: 'warning' as const, text: 'Waiting for the bridge to check in. Operations will run as soon as it reconnects.' }
+            : null;
   const facts = [
     { label: 'Status', value: <Badge tone={health.status === 'ok' ? 'success' : 'warning'} dot>{health.status}</Badge> },
     { label: 'Mode', value: <Badge tone={health.mode === 'demo' ? 'warning' : 'success'}>{health.mode}</Badge> },
@@ -229,17 +287,18 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
               {health.cli.error}
             </p>
           ) : null}
-          {bridgeQuery.isError ? (
-            <p className="mt-4 text-sm text-warning" role="alert">Bridge status is unavailable. Refresh to try again.</p>
-          ) : null}
-          {bridge?.relay === 'stale' ? (
-            <p className="mt-4 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger" role="status">
-              The bridge has not checked in for about a minute. Restart it on the bridge machine to reconnect.
-            </p>
-          ) : null}
-          {bridge?.paired && bridge.relay === 'waiting' ? (
-            <p className="mt-4 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2 text-sm text-warning" role="status">
-              Waiting for the bridge to check in. Operations will run as soon as it reconnects.
+          {statusNotice ? (
+            <p
+              className={`mt-4 rounded-lg px-3 py-2 text-sm ${
+                statusNotice.tone === 'danger'
+                  ? 'border border-danger/20 bg-danger-soft text-danger'
+                  : statusNotice.tone === 'brand'
+                    ? 'border border-brand/20 bg-brand-soft text-brand'
+                    : 'border border-warning/20 bg-warning-soft text-warning'
+              }`}
+              role={statusNotice.tone === 'danger' || statusNotice.tone === 'warning' ? 'alert' : 'status'}
+            >
+              {statusNotice.text}
             </p>
           ) : null}
         </Panel>

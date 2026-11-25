@@ -34,6 +34,20 @@ async function postJson<T>(path: string, body: unknown, headers: Record<string, 
 const cli = { installed: true, version: '2.116.6', error: null };
 const npmLatestUrl = 'https://registry.npmjs.org/@dcat-toolkit/bridge/latest';
 
+function stubRelayDo(responder: (request: Request) => Promise<Response>): Env['RELAY_DO'] {
+  return {
+    idFromString: (id) => ({ toString: () => id }),
+    get: () => ({ fetch: (request: Request) => Promise.resolve(responder(request)) }),
+  };
+}
+
+function relayError(code: string, message: string, status: number): Response {
+  return new Response(JSON.stringify({ error: { code, message } }), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 function stubNpmVersion(version: string, status = 200) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     expect(String(input)).toBe(npmLatestUrl);
@@ -78,8 +92,13 @@ describe('hosted session contract', () => {
     }, env);
     expect(denied.status).toBe(401);
 
-    const allowed = await postJson<{ mode: string }>('/api/mode', { mode: 'demo' }, session.headers, env);
-    expect(allowed).toEqual({ mode: 'demo' });
+    const allowedResponse = await app.request('/api/mode', {
+      method: 'POST',
+      headers: { ...session.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'demo' }),
+    }, env);
+    expect(await allowedResponse.json()).toEqual({ mode: 'demo' });
+    expect(allowedResponse.headers.get('set-cookie')).toMatch(/Max-Age=2592000/);
   });
 
   it('serves labelled demo fixtures without a bridge', async () => {
@@ -288,7 +307,11 @@ describe('hosted bridge relay', () => {
     const cancelled = await app.request(`/api/relay/requests/${created.id}`, {
       headers: session.headers,
     }, env);
-    expect(cancelled.status).toBe(404);
+    expect(await cancelled.json()).toMatchObject({
+      id: created.id,
+      status: 'failed',
+      error: { code: 'CANCELLED' },
+    });
   });
 
   it('keeps a concurrent mode change when a browser queues a request', async () => {
@@ -362,6 +385,13 @@ describe('hosted bridge relay', () => {
     }, env);
     expect(response.status).toBe(413);
     expect((await response.json() as { error: { code: string } }).error.code).toBe('RESPONSE_TOO_LARGE');
+
+    const failed = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
+    expect(await failed.json()).toMatchObject({
+      id: created.id,
+      status: 'failed',
+      error: { code: 'RESPONSE_TOO_LARGE', message: 'The bridge result is too large to relay.' },
+    });
   });
 
   it('invalidates an unused pairing code when the browser unpairs', async () => {
@@ -431,6 +461,245 @@ describe('hosted bridge relay', () => {
       id: 'Team~Transform',
     }, session.headers, env);
     expect(valid.id).toMatch(/\S/);
+  });
+
+  it('offers pairing repair when a bridge never checks in', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now + 121_000);
+    try {
+      const status = await app.request('/api/relay/status', { headers: session.headers }, env);
+      expect(await status.json()).toMatchObject({ paired: true, relay: 'stale', canRepairPairing: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows working instead of stale while a claimed task runs', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'org.connect',
+      alias: 'prod-org',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now + 61_000);
+    try {
+      const status = await app.request('/api/relay/status', { headers: session.headers }, env);
+      expect(await status.json()).toMatchObject({ paired: true, relay: 'working', working: true });
+
+      // The same operation can still be re-queued: busy state wins over stale.
+      const again = await postJson<{ id: string }>('/api/relay/requests', {
+        operation: 'org.connect',
+        alias: 'prod-org',
+      }, session.headers, env);
+      expect(again.id).toBe(created.id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops an orphaned bridge when the shared session deadline passes', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now + 31 * 24 * 60 * 60 * 1000);
+    try {
+      const poll = await app.request('/api/relay/poll', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentToken: paired.agentToken, cli }),
+      }, env);
+      expect(poll.status).toBe(401);
+      expect((await poll.json() as { error: { code: string } }).error.code).toBe('INVALID_AGENT_TOKEN');
+
+      const status = await app.request('/api/relay/status', { headers: session.headers }, env);
+      expect(await status.json()).toMatchObject({ paired: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a valid pairing when the relay status check fails transiently', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson('/api/relay/pair', { code: pairing.code, cli }, {}, env);
+
+    env.RELAY_DO = stubRelayDo(async () => relayError('RELAY_UNAVAILABLE', 'Relay restarting.', 503));
+
+    const status = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect(await status.json()).toMatchObject({ paired: true, relay: 'unavailable', working: false });
+
+    const fresh = await app.request('/api/relay/pairing', {
+      method: 'POST',
+      headers: { ...session.headers, 'content-type': 'application/json' },
+      body: '{}',
+    }, env);
+    expect(fresh.status).toBe(502);
+    expect((await fresh.json() as { error: { code: string } }).error.code).toBe('BRIDGE_STATUS_UNAVAILABLE');
+  });
+
+  it('reports a reset pairing distinctly instead of telling the user to set up a bridge', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson('/api/relay/pair', { code: pairing.code, cli }, {}, env);
+
+    env.RELAY_DO = stubRelayDo(async () => relayError(
+      'INVALID_AGENT_TOKEN',
+      'The bridge pairing is no longer active.',
+      401,
+    ));
+
+    const queued = await app.request('/api/relay/requests', {
+      method: 'POST',
+      headers: { ...session.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ operation: 'org.list' }),
+    }, env);
+    expect(queued.status).toBe(409);
+    expect((await queued.json() as { error: { code: string } }).error.code).toBe('BRIDGE_PAIRING_RESET');
+
+    const polled = await app.request('/api/relay/requests/request-1234', { headers: session.headers }, env);
+    expect(polled.status).toBe(409);
+    expect((await polled.json() as { error: { code: string } }).error.code).toBe('BRIDGE_PAIRING_RESET');
+  });
+
+  it('invalidates the pairing code when relay initialization fails', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const base = new FakeRelayDO();
+    env.RELAY_DO = {
+      idFromString: (id) => base.idFromString(id),
+      get: (id) => {
+        const stub = base.get(id);
+        return {
+          fetch: async (request: Request) => new URL(request.url).pathname === '/init'
+            ? relayError('RELAY_UNAVAILABLE', 'Relay unreachable.', 500)
+            : stub.fetch(request),
+        };
+      },
+    };
+
+    const failed = await app.request('/api/relay/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: pairing.code, cli }),
+    }, env);
+    expect(failed.status).toBe(502);
+    expect((await failed.json() as { error: { code: string } }).error.code).toBe('BRIDGE_RELAY_UNAVAILABLE');
+
+    const replay = await app.request('/api/relay/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: pairing.code, cli }),
+    }, env);
+    expect(replay.status).toBe(400);
+    const status = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect(await status.json()).toMatchObject({ paired: false });
+  });
+
+  it('cancels a queued request and exposes the flag to the bridge', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const cancelled = await postJson<{ cancelled: boolean }>('/api/relay/cancel', {
+      requestId: created.id,
+    }, session.headers, env);
+    expect(cancelled.cancelled).toBe(true);
+
+    const state = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
+    expect(await state.json()).toMatchObject({ status: 'failed', error: { code: 'CANCELLED' } });
+    const bridgeCheck = await postJson<{ cancelled: boolean }>('/api/relay/cancelled', {
+      agentToken: paired.agentToken,
+      requestId: created.id,
+    }, {}, env);
+    expect(bridgeCheck.cancelled).toBe(true);
+  });
+
+  it('frees a cancelled request that the bridge has not claimed yet', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+
+    const cancelled = await postJson<{ cancelled: boolean }>('/api/relay/cancel', {
+      requestId: created.id,
+    }, session.headers, env);
+    expect(cancelled.cancelled).toBe(true);
+
+    const next = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'org.list',
+    }, session.headers, env);
+    expect(next.id).not.toBe(created.id);
+
+    const poll = await postJson<{ tasks: Array<{ id: string }> }>('/api/relay/poll', {
+      agentToken: paired.agentToken,
+      cli,
+    }, {}, env);
+    expect(poll.tasks.map((task) => task.id)).toEqual([next.id]);
+  });
+
+  it('holds a browser status poll until the bridge responds', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const pending = app.request(`/api/relay/requests/${created.id}?wait=1`, { headers: session.headers }, env);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await postJson('/api/relay/respond', {
+      agentToken: paired.agentToken,
+      response: { id: created.id, ok: true, result: cli },
+    }, {}, env);
+
+    expect(await (await pending).json()).toMatchObject({ id: created.id, status: 'completed', result: cli });
   });
 
   it('answers the liveness probe without any KV or relay state', async () => {

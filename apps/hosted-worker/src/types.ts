@@ -40,6 +40,8 @@ export interface RelaySessionRecord {
   agentToken: string | null;
   pairedAt: number | null;
   lastSeenAt: number | null;
+  /** True while the bridge has claimed a long-running operation. */
+  working?: boolean;
   agentVersion: string | null;
   cli: CliStatus;
   pairingCode: string | null;
@@ -60,5 +62,7 @@ export interface SessionRecord {
   csrf: string;
   mode: ConnectorMode;
   createdAt: number;
+  /** Mirrors the KV TTL so the Durable Object can stop an orphaned bridge. */
+  expiresAt?: number;
   relay: RelaySessionRecord;
 }

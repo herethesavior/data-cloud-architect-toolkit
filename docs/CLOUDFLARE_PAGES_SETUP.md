@@ -155,7 +155,7 @@ This builds the SPA and serves the standalone Worker config with local `DCAT_SES
 | Relay requests fail with a missing `RELAY_DO` binding | The deployed config does not declare the Durable Object. | Add the `durable_objects` binding and `exports` block from the root `wrangler.jsonc`, then redeploy. |
 | CSRF errors after a redeploy | The browser cookie points at session state in another KV namespace. | Refresh the page; if needed, clear site data. |
 | Pairing command fails with npm 404 | npm is unreachable, or the command names a different package than the published one. | Run `npm view @dcat-toolkit/bridge version`; republish under the configured name if needed. |
-| Bridge shows “Offline” after about a minute | The agent stopped, is offline, or its pairing was revoked. | Restart with the printed command; if it still fails, unpair and create a fresh code. |
+| Bridge shows “Offline” after about a minute | The agent stopped, is offline or asleep, or its pairing was revoked. | Restart with the printed command and check network access. If it still fails after repeated stale status, use **Create new pairing code** on **Connect org**, which unpairs first. |
 | Live org shows capability warnings | The org lacks Data 360 provisioning or permissions. | Treat warnings as explicit unsupported/forbidden states, not empty data. |
 
 Optional: add a custom domain under **Settings** > **Custom domains** once the Pages deployment is healthy.
