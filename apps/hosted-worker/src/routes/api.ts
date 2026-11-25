@@ -18,21 +18,15 @@ function demoOrg(session: SessionRecord, alias: string) {
 export function apiRoutes() {
   const app = new Hono<{ Bindings: Env }>();
 
-  app.get('/api/health', async (context) => {
-    try {
-      const session = await resolveSession(context, context.env);
-      const status = await bridgeStatusForSession(context.env, session, new URL(context.req.url).origin);
-      return context.json({
-        status: 'ok',
-        mode: session.mode,
-        version: RELAY_VERSION,
-        time: new Date().toISOString(),
-        cli: status.cli,
-      });
-    } catch (error) {
-      return sendRouteError(context, error);
-    }
-  });
+  // A liveness probe must not consume KV reads. Bridge CLI details come from
+  // /api/relay/status; this route only proves the Worker is answering.
+  app.get('/api/health', (context) => context.json({
+    status: 'ok',
+    mode: 'live',
+    version: RELAY_VERSION,
+    time: new Date().toISOString(),
+    cli: { installed: false, version: null, error: null },
+  }));
 
   app.get('/api/cli/status', async (context) => {
     try {

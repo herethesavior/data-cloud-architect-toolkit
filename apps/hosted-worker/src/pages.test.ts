@@ -1,22 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import pages from './pages.ts';
-import type { KVNamespaceLike } from './types.ts';
-
-class FakeKV implements KVNamespaceLike {
-  readonly store = new Map<string, string>();
-
-  async get(key: string): Promise<string | null> {
-    return this.store.get(key) ?? null;
-  }
-
-  async put(key: string, value: string): Promise<void> {
-    this.store.set(key, value);
-  }
-
-  async delete(key: string): Promise<void> {
-    this.store.delete(key);
-  }
-}
+import { FakeKV, makeTestEnv } from './test-support.ts';
 
 const shell = `<!doctype html>
 <html lang="en">
@@ -44,7 +28,7 @@ const shell = `<!doctype html>
 </html>`;
 
 const assetFetch = vi.fn(async () => new Response(shell, { headers: { 'content-type': 'text/html' } }));
-const env = { DCAT_SESSIONS: new FakeKV(), ASSETS: { fetch: assetFetch } };
+const env = { ...makeTestEnv(new FakeKV()), ASSETS: { fetch: assetFetch } };
 
 describe('Cloudflare Pages advanced-mode entry', () => {
   beforeEach(() => {

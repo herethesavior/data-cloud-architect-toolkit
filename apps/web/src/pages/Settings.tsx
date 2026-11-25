@@ -232,6 +232,16 @@ export function Settings({ theme, mode, onClearCachedMetadata, onResetSavedLayou
           {bridgeQuery.isError ? (
             <p className="mt-4 text-sm text-warning" role="alert">Bridge status is unavailable. Refresh to try again.</p>
           ) : null}
+          {bridge?.relay === 'stale' ? (
+            <p className="mt-4 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger" role="status">
+              The bridge has not checked in for about a minute. Restart it on the bridge machine to reconnect.
+            </p>
+          ) : null}
+          {bridge?.paired && bridge.relay === 'waiting' ? (
+            <p className="mt-4 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2 text-sm text-warning" role="status">
+              Waiting for the bridge to check in. Operations will run as soon as it reconnects.
+            </p>
+          ) : null}
         </Panel>
 
         <Panel>

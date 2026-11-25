@@ -1,4 +1,4 @@
-import type { CliStatus, RelayOperation, RelayResponse } from '@dcat/core';
+import type { CliStatus, RelayOperation } from '@dcat/core';
 
 export type ConnectorMode = 'live' | 'demo';
 
@@ -11,6 +11,19 @@ export interface KVNamespaceLike {
 
 export interface AssetFetcher {
   fetch(request: Request | string): Promise<Response>;
+}
+
+export interface DurableObjectIdLike {
+  toString(): string;
+}
+
+export interface DurableObjectStubLike {
+  fetch(request: Request): Promise<Response>;
+}
+
+export interface DurableObjectNamespaceLike {
+  idFromString(id: string): DurableObjectIdLike;
+  get(id: DurableObjectIdLike): DurableObjectStubLike;
 }
 
 export interface RelayRequestRecord {
@@ -34,25 +47,10 @@ export interface RelaySessionRecord {
   request: RelayRequestRecord | null;
 }
 
-/** Agent-owned state. Kept out of the session record so polls cannot clobber browser writes. */
-export interface RelayAgentState {
-  lastSeenAt: number | null;
-  agentVersion: string | null;
-  cli: CliStatus;
-}
-
-export interface RelayClaimRecord {
-  sessionId: string;
-  claimedAt: number;
-}
-
-export interface RelayResponseRecord {
-  response: RelayResponse;
-  respondedAt: number;
-}
-
 export interface Env {
   DCAT_SESSIONS: KVNamespaceLike;
+  /** SQLite-backed relay state; one object per agent token. */
+  RELAY_DO: DurableObjectNamespaceLike;
   ASSETS?: AssetFetcher;
   SESSION_TTL_SECONDS?: string;
 }

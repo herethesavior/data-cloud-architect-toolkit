@@ -139,6 +139,8 @@ export const relayPollRequestSchema = z.object({
   agentToken: z.string().min(16),
   version: z.string().max(64).optional(),
   cli: cliStatusSchema.optional(),
+  /** Long-poll until work arrives instead of returning an empty response immediately. */
+  wait: z.boolean().optional(),
 });
 
 export const relayRespondRequestSchema = z.object({

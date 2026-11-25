@@ -1,10 +1,10 @@
 # Connect DCAT to Cloudflare Pages
 
-This project can be deployed either as **Cloudflare Pages advanced mode** or as a **Workers Builds** project. Both use the same build: `npm run build:pages` emits `apps/web/dist/_worker.js`, which serves the same-origin `/api/*` routes and delegates other requests to the asset binding.
+The supported production deployment is **Workers Builds** with static assets. The root `wrangler.jsonc` deploys `apps/hosted-worker/src/worker-entry.ts`, which exports both the asset-aware Worker and the SQLite-backed `RelaySessionDO`. `npm run build:pages` still emits `apps/web/dist/_worker.js` for static previews, but Pages advanced mode cannot host the Durable Object class needed by the live bridge.
 
-Do **not** deploy only `npm run build:hosted`; that output has no `_worker.js` and `/api/*` will 404.
+Do **not** deploy only `npm run build:hosted`; that output has no `_worker.js`, and a direct static deploy has no `/api/*` routes.
 
-The root `wrangler.jsonc` has two jobs: it stops Cloudflare from running Wrangler autoconfiguration at the npm workspace root, and for Workers Builds it is the deploy config used by `npx wrangler deploy`. If **Create application** only leads to Workers, open the direct Pages URL: `https://dash.cloudflare.com/<account-id>/workers-and-pages/create/pages`. Otherwise use the **Workers Builds** section below; it keeps the same local-first behavior and security headers.
+The root `wrangler.jsonc` stops Wrangler autoconfiguration at the npm workspace root and is the Workers Builds deploy config used by `npx wrangler deploy`.
 
 ## Before you start
 
@@ -12,6 +12,7 @@ The root `wrangler.jsonc` has two jobs: it stops Cloudflare from running Wrangle
 - Production branch: `main`
 - Node.js 22.12+ (set `NODE_VERSION=22.12.0`)
 - A Cloudflare KV namespace bound as `DCAT_SESSIONS` (for Workers Builds, its id goes in the root `wrangler.jsonc`)
+- A `RELAY_DO` binding to the `RelaySessionDO` SQLite class, declared in the root `wrangler.jsonc`
 - For hosted live-org connections: `@dcat-toolkit/bridge` is published publicly at `@latest` (Demo mode works without it)
 
 There are **no OAuth settings, client secrets, callback URLs, or token encryption keys** to configure.
@@ -50,7 +51,9 @@ Use this path if the setup screen says **Configure your Worker project** and sho
 
 3. Preview builds may stay enabled: the root config includes a separate `preview_id` for preview sessions.
 
-The deploy command bundles `apps/hosted-worker/src/pages.ts` from the root config and serves `apps/web/dist` as assets. It does not depend on the generated `_worker.js`, so a plain `npm run build` is enough to produce the assets. The root config runs the Worker before assets for every route so security headers apply to both API and SPA responses.
+The deploy command bundles `apps/hosted-worker/src/worker-entry.ts` from the root config and serves `apps/web/dist` as assets. It does not depend on the generated `_worker.js`, so `npm run build:hosted` is enough to produce the assets. The root config runs the Worker before assets for every route so security headers apply to both API and SPA responses.
+
+> Pages advanced mode remains usable for Demo-only previews with a `DCAT_SESSIONS` binding, but it has no Durable Object binding. Use Workers Builds whenever the hosted live bridge is required.
 
 ## 1. Bridge package
 
@@ -132,26 +135,27 @@ Open the Cloudflare-provided URL (for example, `https://sfdcat.pages.dev`).
 - API responses include `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
 - **Connect an org** shows the three-step **Set up SF CLI** → **Connect org** → **View inventory** wizard and a pairing command using the deployed origin.
 
-For a local rehearsal of the Pages runtime before deploying:
+For a local rehearsal of the hosted Worker before deploying:
 
 ```bash
 npm run pages:dev
 ```
 
-This builds the SPA plus `_worker.js` and serves them with `wrangler pages dev` on `http://127.0.0.1:8788` with a local `DCAT_SESSIONS` KV binding.
+This builds the SPA and serves the standalone Worker config with local `DCAT_SESSIONS` KV and `RELAY_DO` Durable Object bindings on `http://127.0.0.1:8788`.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `npx wrangler deploy` says `DCAT_SESSIONS` needs an `id` | The Workers Builds config has the binding but no real namespace id. | Create the KV namespace and set its `id` in the root `wrangler.jsonc`, then retry. |
-| `npx wrangler deploy` says the entry-point file is missing | The build command did not run `npm run build:pages`. | Set Build command to `npm install && npm run build:pages`. |
+| `npx wrangler deploy` says the entry-point file is missing | The committed root `wrangler.jsonc` was removed or changed. | Restore the root config; the entry point is source code and does not depend on the build command. |
 | Wrangler says application detection ran in the root of a workspace | The committed root `wrangler.jsonc` is missing, so Cloudflare tries to autoconfig the monorepo root. | Restore the root `wrangler.jsonc` and redeploy; keep Root directory blank. |
-| `/api/*` returns 404 or the SPA appears but has no data | Build output came from `npm run build:hosted` and has no `_worker.js`. | Use build command `npm install && npm run build:pages`. |
-| API returns a 500 about `DCAT_SESSIONS` | Pages KV binding is missing or named differently. | Add a KV binding named exactly `DCAT_SESSIONS`, then redeploy. |
+| `/api/*` returns 404 on a static-only host | No Worker is serving the SPA origin. | Deploy with Workers Builds using the root `wrangler.jsonc`. |
+| API returns a 500 about `DCAT_SESSIONS` | KV binding is missing or named differently. | Add a KV binding named exactly `DCAT_SESSIONS`, then redeploy. |
+| Relay requests fail with a missing `RELAY_DO` binding | The deployed config does not declare the Durable Object. | Add the `durable_objects` binding and `exports` block from the root `wrangler.jsonc`, then redeploy. |
 | CSRF errors after a redeploy | The browser cookie points at session state in another KV namespace. | Refresh the page; if needed, clear site data. |
 | Pairing command fails with npm 404 | npm is unreachable, or the command names a different package than the published one. | Run `npm view @dcat-toolkit/bridge version`; republish under the configured name if needed. |
-| Bridge stays “waiting” | The agent is stopped, offline, or paired with a different browser session. | Restart with the printed command or create a fresh pairing code. |
+| Bridge shows “Offline” after about a minute | The agent stopped, is offline, or its pairing was revoked. | Restart with the printed command; if it still fails, unpair and create a fresh code. |
 | Live org shows capability warnings | The org lacks Data 360 provisioning or permissions. | Treat warnings as explicit unsupported/forbidden states, not empty data. |
 
 Optional: add a custom domain under **Settings** > **Custom domains** once the Pages deployment is healthy.

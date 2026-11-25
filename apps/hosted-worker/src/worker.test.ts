@@ -2,30 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import app from './index.ts';
 import { getBridgeUpdateStatus, resetNpmVersionCache } from './relay.ts';
 import { createSession } from './session.ts';
-import type { Env, KVNamespaceLike } from './types.ts';
-
-class FakeKV implements KVNamespaceLike {
-  readonly store = new Map<string, string>();
-  readonly puts: string[] = [];
-  readonly deletes: string[] = [];
-
-  async get(key: string): Promise<string | null> {
-    return this.store.get(key) ?? null;
-  }
-
-  async put(key: string, value: string): Promise<void> {
-    this.puts.push(key);
-    this.store.set(key, value);
-  }
-
-  async delete(key: string): Promise<void> {
-    this.deletes.push(key);
-    this.store.delete(key);
-  }
-}
+import { FakeKV, FakeRelayDO, makeTestEnv } from './test-support.ts';
+import type { Env } from './types.ts';
 
 function makeEnv(kv: FakeKV = new FakeKV()): Env {
-  return { DCAT_SESSIONS: kv };
+  return makeTestEnv(kv);
 }
 
 interface StartedSession {
@@ -232,9 +213,58 @@ describe('hosted bridge relay', () => {
     expect((await status.json() as { mode: string }).mode).toBe('live');
 
     expect(kv.puts.filter((key) => key.startsWith('session:'))).toHaveLength(sessionWritesAfterPair);
-    expect(kv.puts).toContain(`relay:request:${session.cookie.slice('dcat_session='.length).split(';')[0]}`);
-    expect(kv.puts).toContain(`relay:claim:${created.id}`);
-    expect(kv.puts).toContain(`relay:response:${created.id}`);
+    expect(kv.puts.some((key) => key.startsWith('relay:'))).toBe(false);
+    expect(kv.puts.some((key) => key.startsWith('agent:'))).toBe(false);
+    expect(kv.deletes.some((key) => key.startsWith('relay:'))).toBe(false);
+  });
+
+  it('performs zero KV operations while an agent polls', async () => {
+    const kv = new FakeKV();
+    const env = makeEnv(kv);
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    for (let index = 0; index < 50; index += 1) {
+      await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    }
+    await postJson<{ id: string }>('/api/relay/requests', { operation: 'cli.status' }, session.headers, env);
+
+    // Browser routes still read the session once; only agent polls are KV-free.
+    const reads = kv.reads;
+    const writes = kv.writes;
+    const removals = kv.removals;
+    for (let index = 0; index < 10; index += 1) {
+      await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    }
+
+    expect(kv.reads).toBe(reads);
+    expect(kv.writes).toBe(writes);
+    expect(kv.removals).toBe(removals);
+  });
+
+  it('wakes an idle long poll as soon as the browser queues work', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    const poll = postJson<{ tasks: Array<{ id: string }> }>('/api/relay/poll', {
+      agentToken: paired.agentToken,
+      cli,
+      wait: true,
+    }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'org.list',
+    }, session.headers, env);
+
+    expect((await poll).tasks).toMatchObject([{ id: created.id, operation: { operation: 'org.list' } }]);
   });
 
   it('serves current agent CLI state and cancels relayed requests when the mode changes', async () => {
@@ -250,8 +280,6 @@ describe('hosted bridge relay', () => {
 
     const cliStatus = await app.request('/api/cli/status', { headers: session.headers }, env);
     expect(await cliStatus.json()).toEqual(updatedCli);
-    const health = await app.request('/api/health', { headers: session.headers }, env);
-    expect((await health.json() as { cli: { version: string } }).cli.version).toBe('2.159.7');
 
     const created = await postJson<{ id: string }>('/api/relay/requests', {
       operation: 'cli.status',
@@ -310,6 +338,32 @@ describe('hosted bridge relay', () => {
     expect((await status.json() as { paired: boolean }).paired).toBe(true);
   });
 
+  it('rejects an oversized bridge result before it is retained', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const response = await app.request('/api/relay/respond', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agentToken: paired.agentToken,
+        response: { id: created.id, ok: true, result: 'x'.repeat(5 * 1024 * 1024) },
+      }),
+    }, env);
+    expect(response.status).toBe(413);
+    expect((await response.json() as { error: { code: string } }).error.code).toBe('RESPONSE_TOO_LARGE');
+  });
+
   it('invalidates an unused pairing code when the browser unpairs', async () => {
     const env = makeEnv();
     const session = await startSession(env);
@@ -328,6 +382,27 @@ describe('hosted bridge relay', () => {
     const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
       code: secondPairing.code,
       version: '0.1.6',
+      cli,
+    }, {}, env);
+    expect(paired.agentToken).toMatch(/\S/);
+  });
+
+  it('recovers a session whose bridge pairing predates the Durable Object', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const firstPairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: firstPairing.code,
+      cli,
+    }, {}, env);
+
+    // Simulate deploying the DO-backed relay over an older paired session.
+    env.RELAY_DO = new FakeRelayDO();
+
+    const freshPairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    expect(freshPairing.code).toMatch(/\S/);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: freshPairing.code,
       cli,
     }, {}, env);
     expect(paired.agentToken).toMatch(/\S/);
@@ -358,34 +433,20 @@ describe('hosted bridge relay', () => {
     expect(valid.id).toMatch(/\S/);
   });
 
-  it('reports the health check time instead of the bridge heartbeat', async () => {
+  it('answers the liveness probe without any KV or relay state', async () => {
     const kv = new FakeKV();
     const env = makeEnv(kv);
-    const session = await startSession(env);
-    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
-    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
-      code: pairing.code,
-      version: '0.1.6',
-      cli,
-    }, {}, env);
-    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
-
-    const sessionId = session.cookie.slice('dcat_session='.length).split(';')[0]!;
-    const oldHeartbeat = Date.now() - 60 * 60_000;
-    await kv.put(`relay:agent:${sessionId}`, JSON.stringify({
-      lastSeenAt: oldHeartbeat,
-      agentVersion: '0.1.6',
-      cli,
-    }));
 
     const before = Date.now();
-    const response = await app.request('/api/health', { headers: session.headers }, env);
+    const response = await app.request('/api/health', {}, env);
     const after = Date.now();
-    const body = await response.json() as { time: string };
+    const body = await response.json() as { status: string; time: string };
 
+    expect(body.status).toBe('ok');
     expect(Date.parse(body.time)).toBeGreaterThanOrEqual(before);
     expect(Date.parse(body.time)).toBeLessThanOrEqual(after);
-    expect(Date.parse(body.time)).toBeGreaterThan(oldHeartbeat);
+    expect(kv.reads).toBe(0);
+    expect(kv.writes).toBe(0);
   });
 
   it('surfaces npm update availability on relay status', async () => {

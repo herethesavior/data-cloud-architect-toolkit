@@ -254,7 +254,10 @@ describe('runBridge', () => {
       response: { id: 'task-1', ok: true, result: { installed: true, version: '2.116.6' } },
     });
     expect(JSON.stringify(http.calls)).not.toMatch(/password|accessToken|refreshToken|sfdxAuthUrl/i);
-    expect(http.calls.find((call) => call.path === '/api/relay/poll')?.body).toMatchObject({ version: state.config.version });
+    expect(http.calls.find((call) => call.path === '/api/relay/poll')?.body).toMatchObject({
+      version: state.config.version,
+      wait: true,
+    });
   });
 
   it('responds to a bridge update and stops the old agent after the restart handoff', async () => {

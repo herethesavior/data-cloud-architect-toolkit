@@ -199,6 +199,7 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
     logger('DCAT bridge paired with the site.');
   }
 
+  // Idle polls are held open by the relay. This delay only backs off failures.
   const interval = options.pollIntervalMs ?? 2000;
   logger('DCAT bridge is running. Press Ctrl+C to stop.');
 
@@ -208,6 +209,9 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
         agentToken: token,
         version: state.config.version,
         cli: state.cliStatus,
+        // The relay holds this request until work arrives, so a queued browser
+        // action reaches the bridge without a two-second polling delay.
+        wait: true,
       }, options.signal);
       if (poll.status === 'unpaired') {
         throw new RelayAuthError('The site reset this bridge pairing. Run setup again.');
