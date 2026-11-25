@@ -21,6 +21,7 @@ export interface InventoryActions {
   refreshError: string;
   resumeDiscovery?: (family?: ResourceFamily) => void;
   isResumingDiscovery?: boolean;
+  resumeError?: string;
 }
 
 const InventoryActionsContext = createContext<InventoryActions | null>(null);

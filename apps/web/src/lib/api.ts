@@ -197,6 +197,23 @@ async function hostedUsesFixtures(): Promise<boolean> {
 async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Promise<T> {
   if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
   const session = await getSession();
+  let token = session.token;
+
+  /**
+   * Discovery polls for minutes. A session replaced while it runs invalidates
+   * the token captured at the start, so every request refreshes it once instead
+   * of failing an otherwise valid operation at the next poll.
+   */
+  const relayRequest = async <T>(path: string, options: RequestOptions): Promise<T> => {
+    try {
+      return await request<T>(path, { ...options, token });
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== 'INVALID_SESSION_TOKEN') throw error;
+      clearCachedSession();
+      token = (await getSession()).token;
+      return request<T>(path, { ...options, token });
+    }
+  };
 
   // Abort releases the UI, then best-effort cancels the queued relay request so
   // a reload cannot hit BRIDGE_BUSY behind an abandoned operation.
@@ -227,9 +244,8 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode to use the local bridge.');
     }
     const deadline = Date.now() + RELAY_OPERATION_TIMEOUT_MS[operation.operation];
-    const createRequest = () => request<{ id: string }>('/api/relay/requests', {
+    const createRequest = () => relayRequest<{ id: string }>('/api/relay/requests', {
       method: 'POST',
-      token: session.token,
       body: operation,
       signal,
       timeoutMs: RELAY_POLL_TIMEOUT_MS,
@@ -256,8 +272,7 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       try {
         // The Durable Object holds this read until the request settles, so
         // progressive discovery costs one session read per status poll.
-        state = await request<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}?wait=1`, {
-          token: session.token,
+        state = await relayRequest<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}?wait=1`, {
           signal,
           timeoutMs: RELAY_POLL_TIMEOUT_MS,
         });

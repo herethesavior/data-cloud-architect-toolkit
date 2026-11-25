@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
@@ -179,6 +179,18 @@ describe('InventoryBoundary progressive state', () => {
     expect(screen.getByLabelText('Cached snapshot')).toBeInTheDocument();
     expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
     expect(api.inventory).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a failed resume with a retry action', async () => {
+    const resumeDiscovery = vi.fn();
+    renderExplorer(snapshotFor('failed'), resumeDiscovery, true, {
+      resumeError: 'The local bridge is offline.',
+    });
+
+    const alert = screen.getAllByRole('alert').find((element) => element.textContent?.includes('Resume failed:'));
+    expect(alert).toHaveTextContent('Resume failed: The local bridge is offline.');
+    await userEvent.click(within(alert!).getByRole('button', { name: 'Retry' }));
+    expect(resumeDiscovery).toHaveBeenCalledTimes(1);
   });
 
   it('shows a retryable error instead of spinning on a failed partial load', async () => {

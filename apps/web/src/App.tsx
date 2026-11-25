@@ -414,6 +414,9 @@ export function App() {
       : refreshInventory.error?.message ?? '',
     resumeDiscovery: onResumeDiscovery,
     isResumingDiscovery: resumeInventory.isPending,
+    resumeError: resumeInventory.error instanceof ApiError && resumeInventory.error.code === 'ABORTED'
+      ? ''
+      : resumeInventory.error?.message ?? '',
   }), [
     context,
     mode,
@@ -427,6 +430,7 @@ export function App() {
     refreshInventory.error,
     onResumeDiscovery,
     resumeInventory.isPending,
+    resumeInventory.error,
   ]);
 
   useEffect(() => {

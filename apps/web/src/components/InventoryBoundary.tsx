@@ -160,6 +160,11 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
     'inventory-refresh-error',
     refreshError ? `${context?.contextId ?? 'none'}:${refreshError}` : 'none',
   );
+  const resumeError = actions?.resumeError ?? '';
+  const { visible: resumeErrorVisible, dismiss: dismissResumeError } = useDismissibleNotice(
+    'inventory-resume-error',
+    resumeError ? `${context?.contextId ?? 'none'}:${resumeError}` : 'none',
+  );
 
   // A disabled query is "pending" in React Query. Without this guard every
   // explorer would spin forever when live mode has no authenticated org.
@@ -276,6 +281,13 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           <span className="min-w-0 flex-1">Refresh failed: {refreshError}</span>
           <button type="button" onClick={actions?.refreshInventory} className="font-semibold underline underline-offset-2">Retry</button>
           <NoticeDismissButton label="Dismiss refresh error" onClick={dismissRefreshError} />
+        </p>
+      ) : null}
+      {resumeError && resumeErrorVisible ? (
+        <p className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-danger/20 bg-danger-soft px-4 py-2 text-sm text-danger" role="alert">
+          <span className="min-w-0 flex-1">Resume failed: {resumeError}</span>
+          <button type="button" onClick={() => actions?.resumeDiscovery?.()} className="font-semibold underline underline-offset-2">Retry</button>
+          <NoticeDismissButton label="Dismiss resume error" onClick={dismissResumeError} />
         </p>
       ) : null}
       {children(inventory, freshness)}

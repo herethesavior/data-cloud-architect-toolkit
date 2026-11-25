@@ -159,6 +159,36 @@ describe('web API session handling', () => {
     ]);
   });
 
+  it('refreshes a stale hosted CSRF token instead of failing the relay call', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let sessionCalls = 0;
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') {
+        sessionCalls += 1;
+        return jsonResponse({ ...session, token: sessionCalls === 1 ? 'old-token' : 'new-token', mode: 'live' });
+      }
+      if (path === '/api/relay/requests' && options?.method === 'POST') {
+        const token = (options.headers as Record<string, string>)['x-dcat-token'];
+        if (token === 'old-token') {
+          return jsonResponse({ error: { code: 'INVALID_SESSION_TOKEN', message: 'Refresh the page and try again.' } }, 401);
+        }
+        return jsonResponse({ id: 'req-refreshed' });
+      }
+      if (path.startsWith('/api/relay/requests/')) {
+        return jsonResponse({ status: 'completed', result: [] });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.orgs()).resolves.toEqual([]);
+
+    expect(sessionCalls).toBe(2);
+    const posts = fetchMock.mock.calls.filter(([path, options]) => path === '/api/relay/requests' && options?.method === 'POST');
+    expect(posts).toHaveLength(2);
+    expect((posts[1]![1]!.headers as Record<string, string>)['x-dcat-token']).toBe('new-token');
+  });
+
   it('cancels the queued relay request on abort without breaking serialization', async () => {
     vi.useFakeTimers();
     vi.stubEnv('VITE_HOSTED', 'true');
