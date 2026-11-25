@@ -513,9 +513,19 @@ export function OrgConnections({
           ) : null}
 
           {!demo && status && hosted && status.paired && status.relay === 'unavailable' ? (
-            <div className="rounded-lg border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning" role="alert">
+            <div className="space-y-2 rounded-lg border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning" role="alert">
               <p className="font-medium">Bridge status is temporarily unavailable.</p>
-              <p>Refresh status to try again. The pairing is still valid unless the site reports it as reset.</p>
+              <p>
+                The site could not confirm this pairing. Refresh status to retry, or create a fresh pairing code
+                and rerun setup on this computer. Creating a code resets the current pairing.
+              </p>
+              <Button
+                variant="secondary"
+                onClick={() => createPairing.mutate()}
+                disabled={createPairing.isPending}
+              >
+                {createPairing.isPending ? 'Creating code...' : 'Create new pairing code'}
+              </Button>
             </div>
           ) : null}
 

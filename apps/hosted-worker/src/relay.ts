@@ -186,6 +186,9 @@ export function getBridgeStatus(session: SessionRecord, origin: string, override
   // grace window. Past that, it needs the same repair affordance as a stale one.
   const neverCheckedIn = lastSeenAt === null && pairedAt !== null && now - pairedAt > REPAIR_GRACE_MS;
   const offline = stale || neverCheckedIn;
+  // An unreadable relay DO cannot confirm the pairing at all, so the user must
+  // be able to replace it immediately instead of waiting out the offline grace.
+  const unavailable = override.relay === 'unavailable';
   // Once a bridge has checked in, grace runs from that check-in. Pairing days
   // ago must not turn the first stale status into a destructive re-pair prompt.
   const graceElapsed = lastSeenAt === null
@@ -205,7 +208,7 @@ export function getBridgeStatus(session: SessionRecord, origin: string, override
     lastSeenAt: lastSeenAt === null ? null : new Date(lastSeenAt).toISOString(),
     relay,
     working,
-    canRepairPairing: Boolean(agentToken && pairedAt !== null && offline && graceElapsed),
+    canRepairPairing: Boolean(agentToken && pairedAt !== null && (unavailable || offline && graceElapsed)),
     pairing: pairingFor(session, origin),
     agentVersion: agentVersion ?? null,
     latestVersion: null,
@@ -237,10 +240,14 @@ type AgentStateBody = RelayAgentSnapshot & {
   error?: { code?: string; message?: string };
 };
 
-type PairingState = 'active' | 'unpaired' | 'unavailable';
+type PairingState = 'active' | 'inactive';
 
 function isInvalidAgentToken(body: AgentStateBody | null, status: number): boolean {
   return status === 401 && body?.error?.code === 'INVALID_AGENT_TOKEN';
+}
+
+function isExplicitlyUnpaired(body: AgentStateBody | null, status: number): boolean {
+  return status === 200 && body?.paired === false;
 }
 
 /** Best-effort revocation: a dead DO must not prevent local session recovery. */
@@ -279,7 +286,7 @@ export async function bridgeStatusForSession(
   if (!agentToken) return getBridgeUpdateStatus(session, origin);
 
   const { status, body } = await agentState(env, session);
-  if (isInvalidAgentToken(body, status)) {
+  if (isInvalidAgentToken(body, status) || isExplicitlyUnpaired(body, status)) {
     await revokeAgentToken(env, session);
     resetSessionRelay(session);
     // Persist the reset so status and pairing routes agree immediately.
@@ -306,10 +313,9 @@ export async function bridgeStatusForSession(
 }
 
 async function pairingState(env: Env, session: SessionRecord): Promise<PairingState> {
-  if (!session.relay.agentToken) return 'unpaired';
+  if (!session.relay.agentToken) return 'inactive';
   const { status, body } = await agentState(env, session);
-  if (status === 200 && body?.paired) return 'active';
-  return isInvalidAgentToken(body, status) ? 'unpaired' : 'unavailable';
+  return status === 200 && body?.paired === true ? 'active' : 'inactive';
 }
 
 async function recoverUnpairedSession(env: Env, session: SessionRecord): Promise<void> {
@@ -351,14 +357,9 @@ export function relayRoutes() {
         if (state === 'active') {
           return sendError(context, 409, 'BRIDGE_ALREADY_PAIRED', 'This browser is already paired with a bridge.');
         }
-        if (state === 'unavailable') {
-          return sendRouteError(context, {
-            code: 'BRIDGE_STATUS_UNAVAILABLE',
-            message: 'Bridge status is unavailable. Check the deployment and try again.',
-          });
-        }
-        // An explicit 401 (or a pre-DO session) means the token is gone. Revoke
-        // it best-effort before issuing a fresh code so no bridge is left behind.
+        // A lost or unreachable relay DO cannot confirm this pairing. Treat it
+        // as replaceable: revoke best-effort, clear the browser session, and
+        // issue a fresh code so the user is never trapped with no setup command.
         await recoverUnpairedSession(context.env, session);
       }
       const existing = pairingFor(session, originOf(context.req.url));
@@ -398,12 +399,6 @@ export function relayRoutes() {
         const state = await pairingState(context.env, session);
         if (state === 'active') {
           return sendError(context, 409, 'BRIDGE_ALREADY_PAIRED', 'This browser is already paired with a bridge.');
-        }
-        if (state === 'unavailable') {
-          return sendRouteError(context, {
-            code: 'BRIDGE_STATUS_UNAVAILABLE',
-            message: 'Bridge status is unavailable. Check the deployment and try again.',
-          });
         }
         await recoverUnpairedSession(context.env, session);
       }

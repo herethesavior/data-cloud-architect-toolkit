@@ -141,14 +141,42 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.getByRole('button', { name: 'Copy start command' })).toBeInTheDocument();
   });
 
-  it('keeps the unavailable state focused on the deployment instead of restart instructions', async () => {
+  it('offers a fresh pairing code when the relay status is unavailable', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     vi.mocked(api.bridgeStatus).mockResolvedValue(status({ relay: 'unavailable' }));
     renderOrgConnections();
 
     expect(await screen.findByText('Bridge status is temporarily unavailable.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create new pairing code' })).toBeEnabled();
     expect(screen.queryByText('npx -y @dcat-toolkit/bridge@latest start')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy start command' })).not.toBeInTheDocument();
+  });
+
+  it('shows the setup command after recovering an unavailable pairing', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const pairing = {
+      code: 'PAIR98765432',
+      expiresAt: '2026-11-18T00:10:00.000Z',
+      installCommand: 'npx -y @dcat-toolkit/bridge@latest setup --relay https://dcat.example --code PAIR98765432',
+    };
+    vi.mocked(api.bridgeStatus)
+      .mockResolvedValueOnce(status({ relay: 'unavailable' }))
+      .mockResolvedValue(status({
+        paired: false,
+        relay: 'waiting',
+        cli: { installed: false, version: null, error: null },
+        pairing,
+      }));
+    const unpair = vi.spyOn(api, 'unpairBridge').mockResolvedValue({ paired: false });
+    const relayPairing = vi.spyOn(api, 'relayPairing').mockResolvedValue(pairing);
+    renderOrgConnections();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Create new pairing code' }));
+
+    expect(unpair).toHaveBeenCalledOnce();
+    await waitFor(() => expect(relayPairing).toHaveBeenCalledOnce());
+    expect(await screen.findByText('PAIR98765432')).toBeInTheDocument();
+    expect(screen.getByText(pairing.installCommand)).toBeInTheDocument();
   });
 
   it('shows the one-time pairing command and keeps Connect org locked when hosted setup is pending', async () => {
