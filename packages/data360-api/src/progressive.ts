@@ -143,6 +143,8 @@ export interface ProgressiveDiscoveryState {
   sessionId: string;
   generation: string;
   createdAt: number;
+  /** Grants the same fresh window when a stopped session is resumed. */
+  durationMs: number;
   deadlineAt: number;
   timedOut: boolean;
   signal?: AbortSignal;
@@ -478,20 +480,22 @@ function deadlineReached(state: ProgressiveDiscoveryState): boolean {
 function stopActiveCursors(state: ProgressiveDiscoveryState, code: string, message: string): void {
   for (const family of NON_MAPPING_FAMILIES) {
     const cursor = state.families[family];
-    if (cursor.failed) continue;
+    // A family that already finished needs no interruption warning. An unmet
+    // expected count is the exception: it would otherwise keep polling forever.
+    if (cursor.failed || cursor.done && !canRetryExpectedCount(state, family)) continue;
     stopWithWarning(state, family, cursor, code, message);
     // An unmet expected count would otherwise keep the cursor "active" even
     // though it is done, so the browser would poll a terminal session forever.
     cursor.countMismatch = true;
   }
   for (const task of state.mappings.tasks) {
-    if (task.failed) continue;
+    if (task.failed || task.done) continue;
     stopWithWarning(state, 'mappings', task, code, message);
     task.countMismatch = true;
   }
   state.mappings.degraded = true;
   for (const task of state.relationshipQueries.tasks) {
-    if (task.failed) continue;
+    if (task.failed || task.done) continue;
     stopWithWarning(state, 'dmos', task, code, message);
     task.countMismatch = true;
   }
@@ -999,6 +1003,7 @@ function unavailableState(
     sessionId,
     generation,
     createdAt,
+    durationMs: options.maxDurationMs ?? DEFAULT_DISCOVERY_DURATION_MS,
     deadlineAt: createdAt + (options.maxDurationMs ?? DEFAULT_DISCOVERY_DURATION_MS),
     timedOut: false,
     signal: options.signal,
@@ -1170,6 +1175,7 @@ export async function initializeProgressiveDiscovery(
     sessionId,
     generation,
     createdAt,
+    durationMs: options.maxDurationMs ?? DEFAULT_DISCOVERY_DURATION_MS,
     deadlineAt: createdAt + (options.maxDurationMs ?? DEFAULT_DISCOVERY_DURATION_MS),
     timedOut: false,
     signal: options.signal,
@@ -1352,13 +1358,36 @@ export async function advanceProgressiveDiscovery(
   };
 }
 
-/** Clear a transiently failed family and let the background worker continue. */
+/**
+ * Clear a transient failure or reopen a stopped cursor and let the background
+ * worker continue. Loaded rows are never discarded, so this is safe even after
+ * a deadline or a background interruption.
+ */
 export function resumeProgressiveDiscovery(
   state: ProgressiveDiscoveryState,
   family?: ResourceFamily,
 ): void {
   const clearedFamilies = new Set<string>();
+  const interruptionCodes = new Set(['DISCOVERY_DEADLINE', 'DISCOVERY_INTERRUPTED']);
+  const applies = (name: string) => !family || family === name;
+  const interrupted = (name: string) => state.warnings.some((warning) =>
+    interruptionCodes.has(warning.code) && warning.family === name);
+  const reopen = (cursor: CursorState) => {
+    cursor.done = false;
+    cursor.failed = false;
+    cursor.error = null;
+    cursor.errorStatus = 'error';
+    cursor.degraded = false;
+    cursor.countMismatch = false;
+  };
+  const clearInterruption = (name: string) => {
+    if (!applies(name) || !interrupted(name)) return false;
+    clearedFamilies.add(name);
+    return true;
+  };
+
   for (const name of NON_MAPPING_FAMILIES) {
+    if (clearInterruption(name)) reopen(state.families[name]);
     if (family && family !== name) continue;
     const cursor = state.families[name];
     // Forbidden and unsupported gaps are property of the org, not a retryable
@@ -1370,6 +1399,12 @@ export function resumeProgressiveDiscovery(
     clearedFamilies.add(name);
   }
   if (!family || family === 'mappings') {
+    if (clearInterruption('mappings')) {
+      for (const task of state.mappings.tasks) {
+        if (!task.failed && task.degraded) reopen(task);
+      }
+      reopen(state.mappings);
+    }
     for (const task of state.mappings.tasks) {
       if (!task.failed || task.errorStatus !== 'error') continue;
       task.failed = false;
@@ -1384,6 +1419,12 @@ export function resumeProgressiveDiscovery(
     }
   }
   if (!family || family === 'dmos') {
+    if (clearInterruption('dmos')) {
+      for (const task of state.relationshipQueries.tasks) {
+        if (!task.failed && task.degraded) reopen(task);
+      }
+      reopen(state.relationshipQueries);
+    }
     for (const task of state.relationshipQueries.tasks) {
       if (!task.failed || task.errorStatus !== 'error') continue;
       task.failed = false;
@@ -1401,11 +1442,21 @@ export function resumeProgressiveDiscovery(
   if (clearedFamilies.has('data-streams')) {
     state.streamEnrichment.attempted = false;
   }
+  if (state.warnings.some((warning) => interruptionCodes.has(warning.code) && applies(warning.family))) {
+    state.timedOut = false;
+    // A resume is a new attempt, not a continuation of the exhausted window.
+    state.deadlineAt = Date.now() + state.durationMs;
+    state.mappings.degraded = false;
+    state.mappings.countMismatch = false;
+    state.relationshipQueries.degraded = false;
+    state.relationshipQueries.countMismatch = false;
+  }
   const retryableCodes = new Set([
     'ERROR',
     'RETRY_LIMIT',
     'MAPPING_QUERY_FAILED',
     'RELATIONSHIP_QUERY_FAILED',
+    ...interruptionCodes,
   ]);
   state.warnings = state.warnings.filter((warning) => {
     if (warning.family === STREAM_ENRICHMENT_WARNING_FAMILY && clearedFamilies.has('data-streams')) {

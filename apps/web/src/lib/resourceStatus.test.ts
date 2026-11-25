@@ -8,6 +8,7 @@ import {
   discoveryStages,
   findCapability,
   hasDegradedResources,
+  hasResumableDiscoveryGap,
   isUnsupportedWarning,
   resourceStatusMessage,
   resumableProgressFamilies,
@@ -156,6 +157,23 @@ describe('resource status model', () => {
     expect(hasDegradedResources(demoInventory)).toBe(false);
     expect(demoInventory.warnings).toHaveLength(0);
     expect(discoveryStages(demoInventory).every((stage) => stage.state === 'complete')).toBe(true);
+  });
+
+  it('offers resume for a terminal snapshot stopped by a deadline or interruption', () => {
+    const inventory = structuredClone(demoInventory);
+    expect(hasResumableDiscoveryGap(inventory)).toBe(false);
+
+    inventory.progress = { ...inventory.progress!, state: 'complete' };
+    inventory.warnings = [{
+      family: 'dlos',
+      code: 'DISCOVERY_DEADLINE',
+      message: 'Discovery stopped after 480 second(s); earlier results were kept.',
+      severity: 'warning',
+    }];
+    expect(hasResumableDiscoveryGap(inventory)).toBe(true);
+
+    inventory.warnings[0]!.code = 'DISCOVERY_INTERRUPTED';
+    expect(hasResumableDiscoveryGap(inventory)).toBe(true);
   });
 });
 

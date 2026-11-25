@@ -58,6 +58,22 @@ describe('useInventory', () => {
     expect(inventory).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a cached failed snapshot visible without restarting it on mount', async () => {
+    const failed = {
+      ...runningSnapshot(),
+      progress: { ...runningSnapshot().progress!, state: 'failed' as const },
+    };
+    const inventory = vi.spyOn(api, 'inventory').mockResolvedValue(failed);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
+    client.setQueryData(['inventory', context.contextId], failed);
+
+    const { result } = renderHook(() => useInventory(context), { wrapper: wrapperWith(client) });
+
+    expect(result.current.data).toBeDefined();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(inventory).not.toHaveBeenCalled();
+  });
+
   it('revalidates an incomplete cached snapshot while keeping its rows visible', async () => {
     const inventory = vi.spyOn(api, 'inventory').mockResolvedValue(runningSnapshot());
     const client = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });

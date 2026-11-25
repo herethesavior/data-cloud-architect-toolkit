@@ -9,7 +9,12 @@ import {
   trustedTotal,
 } from '../lib/inventoryDisplay.ts';
 import { formatUpdatedAt, isInventoryStale } from '../lib/inventory.ts';
-import { discoveryStages, humanizeResource, resumableProgressFamilies } from '../lib/resourceStatus.ts';
+import {
+  discoveryStages,
+  hasResumableDiscoveryGap,
+  humanizeResource,
+  resumableProgressFamilies,
+} from '../lib/resourceStatus.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
 import { useDismissibleNotice } from '../lib/noticeDismissal.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
@@ -21,7 +26,7 @@ import { DiscoveryProgress, ResourceStatusNotice } from './ResourceStatusPanel.t
 import { NoOrgState } from './NoOrgState.tsx';
 
 function stalledFamilies(inventory: InventorySnapshot): boolean {
-  return resumableProgressFamilies(inventory) > 0;
+  return resumableProgressFamilies(inventory) > 0 || hasResumableDiscoveryGap(inventory);
 }
 
 /** Visible, exact counters for partial snapshots; never hides loaded rows. */
@@ -29,14 +34,16 @@ function InventoryProgressBanner({
   progress,
   onResume,
   isResuming,
+  resumable = false,
   interrupted = false,
 }: {
   progress: DiscoveryProgressData;
   onResume?: () => void;
   isResuming: boolean;
+  resumable?: boolean;
   interrupted?: boolean;
 }) {
-  const stalled = progress.state === 'failed';
+  const stalled = resumable || progress.state === 'failed';
   const degraded = progress.families.some((family) =>
     family.status === 'partial' || family.status === 'failed');
   const spinning = !interrupted
@@ -50,7 +57,9 @@ function InventoryProgressBanner({
         : 'Loading inventory in batches';
   const detail = loadedDetailLabel(progress.loaded, progressTotal(progress), spinning);
 
-  if (progress.state === 'complete') {
+  // A resumable gap must keep the action-bearing banner even when discovery's
+  // own state is terminal; the compact line is only for genuinely finished work.
+  if (progress.state === 'complete' && !stalled) {
     return (
       <p data-testid="inventory-progress" role="status" className="mb-4 text-xs text-ink-soft">
         <span aria-hidden="true">{degraded ? '! ' : '✓ '}</span>{title} · {detail}
@@ -274,6 +283,7 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           progress={inventory.progress}
           onResume={stalledFamilies(inventory) ? () => actions?.resumeDiscovery?.() : undefined}
           isResuming={Boolean(actions?.isResumingDiscovery)}
+          resumable={stalledFamilies(inventory)}
           interrupted={Boolean(loadError)}
         />
       ) : null}

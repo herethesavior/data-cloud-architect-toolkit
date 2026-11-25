@@ -41,11 +41,12 @@ export function useInventory(context: WorkspaceContext | null) {
     // refresh that owns the same relay slot.
     retry: false,
     ...persistedQueryOptions,
-    // A complete snapshot is enough on reload. An incomplete one revalidates in
-    // the background while its rows stay visible instead of freezing a gap.
+    // A complete snapshot is enough on reload. A running or terminal-partial
+    // snapshot revalidates in the background while its rows stay visible. A
+    // failed snapshot is deliberate: resume/retry is an explicit user action.
     refetchOnMount: (query) => {
-      const snapshot = query.state.data as InventorySnapshot | undefined;
-      return !snapshot?.progress || snapshot.progress.state !== 'complete' ? 'always' : false;
+      const state = (query.state.data as InventorySnapshot | undefined)?.progress?.state;
+      return !state || state === 'running' || state === 'partial' ? 'always' : false;
     },
   });
 }

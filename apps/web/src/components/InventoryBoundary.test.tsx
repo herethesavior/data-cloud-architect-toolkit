@@ -172,6 +172,22 @@ describe('InventoryBoundary progressive state', () => {
     expect(resumeDiscovery).toHaveBeenCalledTimes(1);
   });
 
+  it('offers resume when a complete snapshot was stopped by a deadline', async () => {
+    const snapshot = snapshotFor('complete');
+    snapshot.warnings = [{
+      family: 'dlos',
+      code: 'DISCOVERY_DEADLINE',
+      message: 'Discovery stopped after 480 second(s); earlier results were kept.',
+      severity: 'warning',
+    }];
+    const resumeDiscovery = renderExplorer(snapshot);
+
+    expect(await screen.findByTestId('inventory-progress')).toHaveTextContent('Some collections stopped loading');
+    expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole('button', { name: /Resume loading/ }));
+    expect(resumeDiscovery).toHaveBeenCalledTimes(1);
+  });
+
   it('renders a persisted snapshot immediately and marks an old live snapshot stale', () => {
     renderExplorer(snapshotFor('complete'), vi.fn(), true);
 

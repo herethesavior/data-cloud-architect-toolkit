@@ -216,3 +216,15 @@ export function resumableProgressFamilies(inventory: InventorySnapshot): number 
     && (family.errorStatus === undefined || family.errorStatus === 'error'),
   ).length ?? 0;
 }
+
+const RESUMABLE_GAP_CODES = new Set(['DISCOVERY_DEADLINE', 'DISCOVERY_INTERRUPTED']);
+
+/**
+ * Deadline and interruption warnings can accompany a terminal `complete`
+ * progress state. Without this check the rows look finished while the missing
+ * tail has no recovery action at all.
+ */
+export function hasResumableDiscoveryGap(inventory: InventorySnapshot): boolean {
+  return inventory.warnings.some((warning) =>
+    RESUMABLE_GAP_CODES.has(warning.code) && warning.severity !== 'info');
+}
