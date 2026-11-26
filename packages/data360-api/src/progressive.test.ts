@@ -38,7 +38,7 @@ import {
 const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
 const dloPath = `${base}/data-lake-objects`;
-const dmoPath = `${base}/data-model-objects?limit=100&offset=0`;
+const dmoPath = `${base}/data-model-objects?limit=10&offset=0`;
 const transformPath = buildFamilyPath('data-transforms', '65.0');
 const dmoNames = ['Account_DMO__dlm', 'Contact_DMO__dlm', 'Order_DMO__dlm'];
 const dmoSpaces: Record<string, string> = {
@@ -451,7 +451,7 @@ describe('progressive discovery', () => {
         fields: [],
       })),
     });
-    const nextPath = `${base}/data-model-objects?limit=100&offset=100`;
+    const nextPath = `${base}/data-model-objects?limit=10&offset=100`;
     const cli = fakeCli({
       [dmoPath]: fullPage,
       [nextPath]: dmosOffsetPage2Json,
@@ -483,7 +483,7 @@ describe('progressive discovery', () => {
         })),
       ],
     });
-    const nextPath = `${base}/data-model-objects?limit=100&offset=100`;
+    const nextPath = `${base}/data-model-objects?limit=10&offset=100`;
     const secondPage = JSON.stringify({
       dataModelObject: Array.from({ length: 100 }, (_, index) => ({
         name: `Later_${index}__dlm`,
@@ -577,6 +577,32 @@ describe('progressive discovery', () => {
         certainty: 'confirmed',
       }),
     ]));
+    expect(snapshot.progress?.state).toBe('complete');
+  });
+
+  it('follows offset continuation for relationship pages beyond the request limit', async () => {
+    const relationshipPath = buildDmoRelationshipsPath('Account_DMO__dlm', '65.0', 'default');
+    const secondPagePath = `${relationshipPath}&offset=25`;
+    const template = JSON.parse(dmoRelationshipsJson) as { relationships: Record<string, unknown>[] };
+    const rows = Array.from({ length: 30 }, (_, index) => ({
+      ...template.relationships[0]!,
+      id: `0geREL${String(index).padStart(3, '0')}AAA`,
+    }));
+    const page = (relationships: unknown[]) => JSON.stringify({
+      currentPageUrl: relationshipPath,
+      relationships,
+      totalSize: rows.length,
+    });
+    const cli = fakeCli({
+      [relationshipPath]: page(rows.slice(0, 25)),
+      [secondPagePath]: page(rows.slice(25)),
+    });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(cli.calls).toContain(secondPagePath);
+    expect(snapshot.relationships.filter((edge) => edge.id.startsWith('0geREL'))).toHaveLength(30);
     expect(snapshot.progress?.state).toBe('complete');
   });
 

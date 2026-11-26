@@ -34,7 +34,7 @@ import {
 
 const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
-const dmoPath = `${base}/data-model-objects?limit=100&offset=0`;
+const dmoPath = `${base}/data-model-objects?limit=10&offset=0`;
 const dmoApiNames = ['Account_DMO__dlm', 'Contact_DMO__dlm', 'Order_DMO__dlm'];
 const dmoSpaces: Record<string, string> = {
   Account_DMO__dlm: 'default',
@@ -52,13 +52,13 @@ function fakeCliAtVersion(
   overrides: Record<string, string | Error | Array<string | Error>> = {},
 ): RestClient {
   const versionBase = `services/data/v${version}/ssot`;
-  const versionDmoPath = `${versionBase}/data-model-objects?limit=100&offset=0`;
+  const versionDmoPath = `${versionBase}/data-model-objects?limit=10&offset=0`;
   const paths: Record<string, string | Error | Array<string | Error>> = {
     'services/data/': versionsJson,
     [`${versionBase}/data-spaces`]: dataSpacesJson,
     [`${versionBase}/data-lake-objects`]: dlosJson,
     [versionDmoPath]: dmosJson,
-    [`${versionBase}/data-model-objects?limit=100&offset=100`]: dmosOffsetPage2Json,
+    [`${versionBase}/data-model-objects?limit=10&offset=100`]: dmosOffsetPage2Json,
     [`${versionBase}/data-model-object-mappings`]: mappingsJson,
     ...Object.fromEntries(dmoApiNames.map((name) => [
       buildMappingPath(name, version, dmoSpaces[name]), mappingsJson,
@@ -237,7 +237,7 @@ describe('live Data 360 discovery', () => {
         fields: [],
       })),
     });
-    const nextPath = `${base}/data-model-objects?limit=100&offset=100`;
+    const nextPath = `${base}/data-model-objects?limit=10&offset=100`;
     const cli = fakeCli({
       [dmoPath]: fullPage,
       [nextPath]: dmosOffsetPage2Json,

@@ -17,6 +17,27 @@ const SESSION_TTL_MS = 10 * 60_000;
 const MAX_SESSIONS = 20;
 const BATCH_DELAY_MS = 25;
 
+// A session is not registered until its API version probe finishes. Serialize
+// starts per state so two overlapping requests cannot both build a runner for
+// the same alias and publish competing generations into the shared cache.
+const startsByState = new WeakMap<AppState, Map<string, Promise<void>>>();
+
+function serializeStart<T>(state: AppState, alias: string, operation: () => Promise<T>): Promise<T> {
+  let byAlias = startsByState.get(state);
+  if (!byAlias) {
+    byAlias = new Map();
+    startsByState.set(state, byAlias);
+  }
+  const previous = byAlias.get(alias) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  const settled = current.then(() => undefined, () => undefined);
+  byAlias.set(alias, settled);
+  void settled.finally(() => {
+    if (byAlias.get(alias) === settled) byAlias.delete(alias);
+  });
+  return current;
+}
+
 export interface DiscoverySessionResult {
   sessionId: string;
   snapshot: InventorySnapshot;
@@ -27,6 +48,8 @@ export interface DiscoverySessionOptions {
   refresh?: boolean;
   resume?: boolean;
   family?: ResourceFamily;
+  /** Request cancellation, including the version probe before a session exists. */
+  signal?: AbortSignal;
 }
 
 function newId(): string {
@@ -122,7 +145,18 @@ function ensureRunner(state: AppState, record: DiscoverySessionRecord): void {
 }
 
 /** Start (or reuse) a progressive discovery session and return its first batch. */
-export async function startDiscoverySession(
+export function startDiscoverySession(
+  state: AppState,
+  org: OrgSummary,
+  options: DiscoverySessionOptions = {},
+): Promise<DiscoverySessionResult> {
+  if (options.signal?.aborted) {
+    return Promise.reject(new CliError('COMMAND_FAILED', 'Discovery request was cancelled.'));
+  }
+  return serializeStart(state, org.alias, () => startDiscoverySessionNow(state, org, options));
+}
+
+async function startDiscoverySessionNow(
   state: AppState,
   org: OrgSummary,
   options: DiscoverySessionOptions = {},
@@ -155,18 +189,34 @@ export async function startDiscoverySession(
   const sessionId = options.sessionId ?? newId();
   const generation = `${Date.now().toString(36)}-${newId().slice(0, 8)}`;
   const controller = new AbortController();
+  if (options.signal) {
+    if (options.signal.aborted) {
+      throw new CliError('COMMAND_FAILED', 'Discovery request was cancelled.');
+    }
+    // A disconnected browser must not leave the per-alias start lock held by a
+    // slow version probe or keep a background runner alive.
+    options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
   // Return as soon as the API version is known. The runner publishes every
   // family page to the shared cache, so status polls see rows as they land.
-  const progressive = await initializeProgressiveDiscovery({
-    cli: state.cli,
-    alias: org.alias,
-    org,
-    sessionId,
-    generation,
-    signal: controller.signal,
-    apiVersionSelection: state.compatibility.selection,
-    onApiVersionResolved: recordApiVersionResolution(state),
-  });
+  let progressive;
+  try {
+    progressive = await initializeProgressiveDiscovery({
+      cli: state.cli,
+      alias: org.alias,
+      org,
+      sessionId,
+      generation,
+      signal: controller.signal,
+      apiVersionSelection: state.compatibility.selection,
+      onApiVersionResolved: recordApiVersionResolution(state),
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new CliError('COMMAND_FAILED', 'Discovery request was cancelled.', { cause: error });
+    }
+    throw error;
+  }
   const record: DiscoverySessionRecord = {
     id: sessionId,
     alias: org.alias,

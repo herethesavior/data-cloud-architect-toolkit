@@ -51,6 +51,11 @@ describe('DetailDrawer', () => {
     expect(screen.getByRole('dialog', { name: 'Stream detail' })).toBeInTheDocument();
     expect(close).toHaveFocus();
 
+    // The dialog is still visible while it animates out, so Tab must stay trapped.
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    document.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+
     act(() => { vi.advanceTimersByTime(200); });
     expect(screen.queryByRole('dialog', { name: 'Stream detail' })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();

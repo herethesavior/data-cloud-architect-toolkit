@@ -3,6 +3,7 @@ import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
+import { settleInterruptedInventory } from './lib/inventorySettlement.ts';
 import { describeError } from './lib/userError.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
@@ -158,7 +159,16 @@ export function App() {
 
   const cancelRefresh = () => {
     refreshControllerRef.current?.abort();
+    resumeControllerRef.current?.abort();
     refreshControllerRef.current = null;
+    resumeControllerRef.current = null;
+  };
+
+  const settleInventoryAfterStop = (key: readonly ['inventory', string], contextId: string) => {
+    if (contextId !== activeContextIdRef.current) return;
+    const latest = queryClient.getQueryData<InventorySnapshot>(key);
+    if (!latest) return;
+    queryClient.setQueryData<InventorySnapshot>(key, settleInterruptedInventory(latest));
   };
 
   // Context consumers should rerender for state changes, not because the root
@@ -321,13 +331,14 @@ export function App() {
   const refreshInventory = useMutation({
     mutationFn: async (target: WorkspaceContext | null) => {
       if (!target?.alias) throw new Error('Select an org first.');
-      // Supersede any refresh started under a previous org or mode.
+      // One inventory generation at a time: a refresh and a resume both write
+      // partial rows into the same cache key, so either must supersede the other.
       refreshControllerRef.current?.abort();
+      resumeControllerRef.current?.abort();
       const controller = new AbortController();
       refreshControllerRef.current = controller;
       refreshContextRef.current = target.contextId;
       const key = ['inventory', target.contextId] as const;
-      const previous = queryClient.getQueryData<InventorySnapshot>(key);
       try {
         // The automatic query owns the same relay slot. Stop it before queueing
         // refresh work so two generations cannot interleave in one cache key.
@@ -348,11 +359,7 @@ export function App() {
         }
         return snapshot;
       } catch (error) {
-        // A cancelled or failed refresh must not leave an empty running snapshot
-        // behind: the last good rows are still the truth until new ones land.
-        if (previous && target.contextId === activeContextIdRef.current) {
-          queryClient.setQueryData<InventorySnapshot>(key, previous);
-        }
+        settleInventoryAfterStop(key, target.contextId);
         throw error;
       } finally {
         if (refreshControllerRef.current === controller) refreshControllerRef.current = null;
@@ -372,11 +379,11 @@ export function App() {
     }) => {
       if (!target?.alias) throw new Error('Select an org first.');
       resumeControllerRef.current?.abort();
+      refreshControllerRef.current?.abort();
       const controller = new AbortController();
       resumeControllerRef.current = controller;
       refreshContextRef.current = target.contextId;
       const key = ['inventory', target.contextId] as const;
-      const previous = queryClient.getQueryData<InventorySnapshot>(key);
       try {
         await queryClient.cancelQueries({ queryKey: key });
         const snapshot = await api.inventory(target.alias, {
@@ -397,9 +404,7 @@ export function App() {
         }
         return snapshot;
       } catch (error) {
-        if (previous && target.contextId === activeContextIdRef.current) {
-          queryClient.setQueryData<InventorySnapshot>(key, previous);
-        }
+        settleInventoryAfterStop(key, target.contextId);
         throw error;
       } finally {
         if (resumeControllerRef.current === controller) resumeControllerRef.current = null;

@@ -31,6 +31,16 @@ describe('Tabs', () => {
     expect(screen.getByRole('tab', { name: 'One' })).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('only advertises the panel that is actually rendered', () => {
+    render(<Tabs items={items} label="Sections" />);
+    const active = screen.getByRole('tab', { name: 'One' });
+    const inactive = screen.getByRole('tab', { name: 'Two' });
+    const panel = document.getElementById(active.getAttribute('aria-controls')!);
+
+    expect(panel).toHaveTextContent('First panel');
+    expect(inactive).not.toHaveAttribute('aria-controls');
+  });
+
   it('supports controlled selection for URL-backed tabs', async () => {
     const user = userEvent.setup();
     const onActiveChange = vi.fn();

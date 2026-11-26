@@ -12,11 +12,14 @@ export const DATA360_ENDPOINT_REGISTRY: Record<ResourceFamily, string> = {
   'data-transforms': '/ssot/data-transforms',
 };
 
-/** Verified DMO page size: larger pages time out and the endpoint has no next-page URL. */
-export const DMO_PAGE_SIZE = 100;
+/**
+ * Small verified DMO pages keep early batches useful. Larger pages can time out
+ * and the endpoint has no next-page URL, so DCAT walks bounded offsets instead.
+ */
+export const DMO_PAGE_SIZE = 10;
 
-/** Documented maximum page size for the Data Transform list endpoint. */
-export const DATA_TRANSFORM_PAGE_SIZE = 20;
+/** Small pages expose transforms individually while staying below the documented maximum of 20. */
+export const DATA_TRANSFORM_PAGE_SIZE = 5;
 
 /**
  * The list endpoint defaults to the Big filter group, which includes full
@@ -25,8 +28,12 @@ export const DATA_TRANSFORM_PAGE_SIZE = 20;
  */
 export const DATA_TRANSFORM_FILTER_GROUP = 'Medium';
 
-/** Verified maximum page size for the per-DMO relationship subresource. */
+/**
+ * Verified upper bound for the per-DMO relationship subresource. Requested pages
+ * are deliberately smaller so relationship rows arrive in short batches.
+ */
 export const RELATIONSHIP_PAGE_SIZE = 500;
+export const RELATIONSHIP_REQUEST_PAGE_SIZE = 25;
 
 const DMO_DEVELOPER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 const DATASPACE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
@@ -130,7 +137,7 @@ export function buildDmoRelationshipsPath(
   dmoApiName: string,
   apiVersion: string,
   dataspace?: string | null,
-  limit = RELATIONSHIP_PAGE_SIZE,
+  limit = RELATIONSHIP_REQUEST_PAGE_SIZE,
 ): string {
   const safeName = validateDmoDeveloperName(dmoApiName);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > RELATIONSHIP_PAGE_SIZE) {
@@ -178,6 +185,12 @@ export const TRANSFORM_SUBRESOURCE_SUFFIXES = {
   schedule: '/schedule',
 } as const;
 
+/**
+ * The detail endpoint defaults to Big on Salesforce v68, but requesting it
+ * explicitly keeps the UI graph stable if the org changes that default.
+ */
+export const TRANSFORM_DETAIL_FILTER_GROUP = 'Big';
+
 export type TransformSubresource = keyof typeof TRANSFORM_SUBRESOURCE_SUFFIXES;
 
 /** Guard the id before it is ever placed in a REST path; callers cannot supply URLs. */
@@ -204,7 +217,7 @@ export function buildTransformSubresourcePath(
 }
 
 export function buildTransformDetailPath(id: string, apiVersion: string): string {
-  return buildTransformSubresourcePath(id, 'detail', apiVersion);
+  return `${buildTransformSubresourcePath(id, 'detail', apiVersion)}?filterGroup=${TRANSFORM_DETAIL_FILTER_GROUP}`;
 }
 
 export function buildTransformRunHistoryPath(id: string, apiVersion: string): string {

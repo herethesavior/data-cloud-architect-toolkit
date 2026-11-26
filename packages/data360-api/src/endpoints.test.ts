@@ -20,7 +20,7 @@ const base = 'services/data/v65.0/ssot/data-transforms';
 
 describe('allowlisted transform paths', () => {
   it('builds the three documented GET paths from the registry', () => {
-    expect(buildTransformDetailPath('Normalize_Contacts', '65.0')).toBe(`${base}/Normalize_Contacts`);
+    expect(buildTransformDetailPath('Normalize_Contacts', '65.0')).toBe(`${base}/Normalize_Contacts?filterGroup=Big`);
     expect(buildTransformRunHistoryPath('Normalize_Contacts', '65.0')).toBe(`${base}/Normalize_Contacts/run-history`);
     expect(buildTransformSchedulePath('Normalize_Contacts', '65.0')).toBe(`${base}/Normalize_Contacts/schedule`);
   });
@@ -70,16 +70,16 @@ describe('allowlisted transform paths', () => {
 
   it('builds bounded offset pages for DMOs and Data Transforms and plain paths for other families', () => {
     expect(buildFamilyPath('dmos', '65.0')).toBe(
-      'services/data/v65.0/ssot/data-model-objects?limit=100&offset=0',
+      'services/data/v65.0/ssot/data-model-objects?limit=10&offset=0',
     );
     expect(buildDmoPath('65.0', 100)).toBe(
-      'services/data/v65.0/ssot/data-model-objects?limit=100&offset=100',
+      'services/data/v65.0/ssot/data-model-objects?limit=10&offset=100',
     );
     expect(buildFamilyPath('data-transforms', '65.0')).toBe(
-      'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=20&offset=0',
+      'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=5&offset=0',
     );
     expect(buildDataTransformPath('65.0', 40)).toBe(
-      'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=20&offset=40',
+      'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=5&offset=40',
     );
     expect(buildExpectedCountPath('data-transforms', '65.0')).toBe(
       'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=1&offset=0',
@@ -116,10 +116,10 @@ describe('allowlisted transform paths', () => {
 
   it('builds only the allowlisted per-DMO relationship subresource', () => {
     expect(buildDmoRelationshipsPath('Account_DMO__dlm', '68.0', 'default')).toBe(
-      'services/data/v68.0/ssot/data-model-objects/Account_DMO__dlm/relationships?dataspace=default&limit=500',
+      'services/data/v68.0/ssot/data-model-objects/Account_DMO__dlm/relationships?dataspace=default&limit=25',
     );
     expect(buildDmoRelationshipsPath('Account_DMO__dlm', '68.0')).toBe(
-      'services/data/v68.0/ssot/data-model-objects/Account_DMO__dlm/relationships?limit=500',
+      'services/data/v68.0/ssot/data-model-objects/Account_DMO__dlm/relationships?limit=25',
     );
   });
 

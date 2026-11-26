@@ -51,13 +51,14 @@ function liveCliRunner(): ProcessRunner {
     Object.assign(restBodies, {
       [`${base}/data-spaces`]: dataSpacesJson,
       [`${base}/data-lake-objects`]: dlosJson,
-      [`${base}/data-model-objects?limit=100&offset=0`]: dmosJson,
+      [`${base}/data-model-objects?limit=10&offset=0`]: dmosJson,
       [`${base}/data-model-object-mappings`]: mappingsJson,
       [`${base}/data-streams`]: dataStreamsJson,
       [`${base}/connectors`]: connectorCatalogJson,
       [`${base}/connections?connectorType=SalesforceDotCom`]: connectorConnectionsJson,
       [`/${buildFamilyPath('data-transforms', version)}`]: dataTransformsJson,
       [`${base}/data-transforms/Account_Transform`]: transformDetailJson,
+      [`${base}/data-transforms/Account_Transform?filterGroup=Big`]: transformDetailJson,
       [`${base}/data-transforms/Account_Transform/run-history`]: transformRunHistoryJson,
       [`${base}/data-transforms/Account_Transform/schedule`]: transformScheduleJson,
     });
@@ -409,7 +410,7 @@ describe('local connector API', () => {
       .map(([args]) => args[3])
       .filter((path) => path?.includes('/data-transforms/'));
     expect(restPaths).toEqual(expect.arrayContaining([
-      '/services/data/v67.0/ssot/data-transforms/Account_Transform',
+      '/services/data/v67.0/ssot/data-transforms/Account_Transform?filterGroup=Big',
       '/services/data/v67.0/ssot/data-transforms/Account_Transform/run-history',
       '/services/data/v67.0/ssot/data-transforms/Account_Transform/schedule',
     ]));

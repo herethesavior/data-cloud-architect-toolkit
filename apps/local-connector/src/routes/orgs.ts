@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { RESOURCE_FAMILIES } from '@dcat/core';
 import type { InventorySnapshot, OrgSummary } from '@dcat/core';
@@ -19,6 +19,13 @@ const connectBodySchema = z.object({
   browser: z.enum(['chrome', 'edge', 'firefox']).optional(),
 });
 const sessionIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+
+function clientAbortSignal(request: FastifyRequest): AbortSignal {
+  const controller = new AbortController();
+  if (request.raw.aborted) controller.abort();
+  else request.raw.once('aborted', () => controller.abort());
+  return controller.signal;
+}
 const discoveryStartSchema = z.object({
   sessionId: sessionIdSchema.optional(),
   refresh: z.boolean().optional(),
@@ -164,7 +171,7 @@ export function registerOrgRoutes(app: FastifyInstance, state: AppState): void {
       if (!parsed.success) {
         return reply.code(400).send({ error: { code: 'INVALID_ARGUMENT', message: 'Invalid discovery session request.' } });
       }
-      return await startDiscoverySession(state, org, parsed.data);
+      return await startDiscoverySession(state, org, { ...parsed.data, signal: clientAbortSignal(request) });
     } catch (error) {
       return sendRouteError(reply, error);
     }

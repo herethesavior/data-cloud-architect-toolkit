@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApiVersionStatus } from '@dcat/core';
 import type { OrgSummary, SessionInfo } from '@dcat/core';
-import { demoInventory } from '@dcat/test-fixtures';
+import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
 import { api, clearCachedSession, getSession } from './api.ts';
 
 function jsonResponse(body: unknown, status = 200) {
@@ -176,6 +176,155 @@ describe('web API session handling', () => {
     ]);
   });
 
+  it('acknowledges each hosted relay chunk on the following poll', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests') return jsonResponse({ id: 'req-chunks' });
+      if (path.startsWith('/api/relay/requests/')) {
+        if (path.includes('ack=0')) return jsonResponse({ id: 'req-chunks', status: 'completed', result: demoOrgs });
+        return jsonResponse({
+          id: 'req-chunks',
+          status: 'running',
+          chunked: true,
+          hasMore: true,
+          chunkIndex: 0,
+          chunkCount: 2,
+          result: [demoOrgs[0]],
+        });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.orgs()).resolves.toEqual(demoOrgs);
+    const pollPaths = fetchMock.mock.calls
+      .map(([path]) => path as string)
+      .filter((path) => path.startsWith('/api/relay/requests/'));
+    expect(pollPaths).toEqual([
+      '/api/relay/requests/req-chunks?wait=1',
+      '/api/relay/requests/req-chunks?wait=1&ack=0',
+    ]);
+  });
+
+  it('finishes immediately when the final chunked poll is completed', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests') return jsonResponse({ id: 'req-final' });
+      if (path.startsWith('/api/relay/requests/')) {
+        return jsonResponse({
+          id: 'req-final',
+          status: 'completed',
+          chunked: true,
+          hasMore: false,
+          chunkIndex: 1,
+          chunkCount: 2,
+          result: demoOrgs,
+        });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.orgs()).resolves.toEqual(demoOrgs);
+    expect(fetchMock.mock.calls.filter(([path]) =>
+      String(path).startsWith('/api/relay/requests/'))).toHaveLength(1);
+  });
+
+  it('surfaces a relay failure after an earlier chunk was delivered', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let polls = 0;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests') return jsonResponse({ id: 'req-fail' });
+      if (path.startsWith('/api/relay/requests/')) {
+        polls += 1;
+        return polls === 1
+          ? jsonResponse({
+              id: 'req-fail', status: 'running', chunked: true, hasMore: true,
+              chunkIndex: 0, chunkCount: 3, result: [demoOrgs[0]],
+            })
+          : jsonResponse({
+              id: 'req-fail', status: 'failed', result: null,
+              error: { code: 'REQUEST_FAILED', message: 'The bridge task failed.' },
+            });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.orgs()).rejects.toMatchObject({ code: 'REQUEST_FAILED' });
+  });
+
+  it('cancels an active relay request when the caller aborts mid-stream', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const controller = new AbortController();
+    let polls = 0;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests') return jsonResponse({ id: 'req-cancel' });
+      if (path === '/api/relay/cancel') return jsonResponse({ cancelled: true });
+      if (path.startsWith('/api/relay/requests/')) {
+        polls += 1;
+        if (polls === 1) {
+          controller.abort();
+          return jsonResponse({
+            id: 'req-cancel', status: 'running', chunked: true, hasMore: true,
+            chunkIndex: 0, chunkCount: 3, result: [demoOrgs[0]],
+          });
+        }
+        return jsonResponse({ id: 'req-cancel', status: 'running', result: null, error: null });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.orgs({ signal: controller.signal })).rejects.toMatchObject({ code: 'ABORTED' });
+    expect(fetchMock.mock.calls.some(([path]) => path === '/api/relay/cancel')).toBe(true);
+  });
+
+  it('does not let an aborted create POST race the next relay request', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const controller = new AbortController();
+    const order: string[] = [];
+    let releaseCreate: (() => void) | undefined;
+    const slowCreate = new Promise<ReturnType<typeof jsonResponse>>((resolve) => {
+      releaseCreate = () => resolve(jsonResponse({ id: 'req-slow' }));
+    });
+    let creates = 0;
+    const fetchMock = vi.fn(async (path: string) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests') {
+        creates += 1;
+        order.push(`create-${creates}`);
+        if (creates === 1) {
+          controller.abort();
+          return slowCreate;
+        }
+        return jsonResponse({ id: 'req-next' });
+      }
+      if (path === '/api/relay/cancel') {
+        order.push('cancel');
+        return jsonResponse({ cancelled: true });
+      }
+      if (path.startsWith('/api/relay/requests/')) {
+        return jsonResponse({ id: path.split('/').pop()?.split('?')[0], status: 'completed', result: demoOrgs });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const first = api.orgs({ signal: controller.signal }).catch(() => undefined);
+    const second = api.orgs();
+    await vi.waitFor(() => expect(creates).toBe(1));
+    releaseCreate?.();
+
+    await expect(second).resolves.toEqual(demoOrgs);
+    await first;
+    expect(order).toEqual(['create-1', 'cancel', 'create-2']);
+  });
+
   it('refreshes a stale hosted CSRF token instead of failing the relay call', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     let sessionCalls = 0;
@@ -241,6 +390,41 @@ describe('web API session handling', () => {
     await vi.advanceTimersByTimeAsync(0);
     await expect(next).resolves.toEqual([]);
     expect(relayPosts).toBe(2);
+  });
+
+  it('still cancels the queued request when abort lands during relay creation', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let releaseCreate!: (value: ReturnType<typeof jsonResponse>) => void;
+    const createResponse = new Promise<ReturnType<typeof jsonResponse>>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests' && options?.method === 'POST') return createResponse;
+      if (path === '/api/relay/cancel') return jsonResponse({ cancelled: true });
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const pending = api.inventory('prod-org', { force: true, signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' });
+
+    // The create POST resolves after the caller has already given up; the worker
+    // still needs its id so the abandoned operation can be cancelled.
+    releaseCreate(jsonResponse({ id: 'req-slow' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const createCall = fetchMock.mock.calls.find(([path, options]) =>
+      path === '/api/relay/requests' && options?.method === 'POST');
+    // The create POST keeps its own timeout signal; aborting the caller must not
+    // reject the POST before the worker id is known.
+    expect(createCall?.[1]?.signal).not.toBe(controller.signal);
+    const cancelCall = fetchMock.mock.calls.find(([path]) => path === '/api/relay/cancel');
+    expect(JSON.parse(String(cancelCall?.[1]?.body))).toEqual({ requestId: 'req-slow' });
   });
 
   it('cancels a relay request with the refreshed CSRF token', async () => {

@@ -147,6 +147,9 @@ export const relayRequestStateSchema = z.object({
   /** The Worker is handing a large inventory to the browser in several polls. */
   chunked: z.boolean().optional(),
   hasMore: z.boolean().optional(),
+  /** Delivery position for acknowledged, resumable chunk streams. */
+  chunkIndex: z.number().int().nonnegative().optional(),
+  chunkCount: z.number().int().positive().optional(),
 });
 
 export type RelayRequestState = z.infer<typeof relayRequestStateSchema>;

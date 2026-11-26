@@ -19,7 +19,7 @@ import {
 } from './transforms.ts';
 
 const base = 'services/data/v65.0/ssot/data-transforms/Account_Transform';
-const detailPath = base;
+const detailPath = `${base}?filterGroup=Big`;
 const runPath = `${base}/run-history`;
 const schedulePath = `${base}/schedule`;
 

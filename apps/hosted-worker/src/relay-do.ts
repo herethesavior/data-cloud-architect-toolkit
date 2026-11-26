@@ -209,14 +209,13 @@ export class RelayDurableObjectCore {
         error: { code: 'CANCELLED', message: 'The request was cancelled.' },
       };
     }
-    if (!request.response && this.pendingChunkCount() > 0) {
-      return { id: request.id, status: 'running', result: null, error: null, chunked: true, hasMore: true };
-    }
     if (request.response) {
       return request.response.ok
         ? { id: request.id, status: 'completed', result: request.response.result, error: null }
         : { id: request.id, status: 'failed', result: null, error: request.response.error };
     }
+    // An expired request must not be kept alive by undelivered chunks: that
+    // would hold the single relay slot and block every later operation.
     if (request.expiresAt <= now) {
       return {
         id: request.id,
@@ -224,6 +223,9 @@ export class RelayDurableObjectCore {
         result: null,
         error: { code: 'RELAY_TIMEOUT', message: 'The local bridge did not answer in time.' },
       };
+    }
+    if (this.pendingChunkCount() > 0) {
+      return { id: request.id, status: 'running', result: null, error: null, chunked: true, hasMore: true };
     }
     return {
       id: request.id,
@@ -233,12 +235,48 @@ export class RelayDurableObjectCore {
     };
   }
 
-  /** Only the browser's request poll advances the chunk cursor. */
-  private nextChunkState(request: StoredRequest, now: number): RelayRequestState | null {
+  /**
+   * Serve one chunk per poll, but only advance when the browser acknowledges
+   * the chunk it received. A dropped or timed-out poll is re-delivered instead
+   * of silently skipping rows.
+   */
+  private nextChunkState(request: StoredRequest, now: number, ack: number | null): RelayRequestState | null {
     if (request.response) return null;
+    // A cancelled or expired request must report that terminal state even if a
+    // stale poll arrives carrying an acknowledgement.
+    if (this.getMeta('canceled_request_id') === request.id || request.expiresAt <= now) return null;
     const count = this.getMetaNumber('chunk_count');
-    const index = this.getMetaNumber('chunk_index');
-    if (count === null || index === null || index >= count) return null;
+    let index = this.getMetaNumber('chunk_index');
+    if (count === null || index === null) return null;
+
+    if (ack === index && index < count) {
+      index += 1;
+      this.setMeta('chunk_index', String(index));
+    }
+    if (index >= count) {
+      // The final chunk has been acknowledged. The browser has already merged
+      // every earlier chunk, so completing with the last chunk cannot lose rows.
+      const raw = this.getMeta(`chunk_${count - 1}`);
+      let result: unknown;
+      try {
+        if (raw === null) throw new Error('missing final chunk');
+        result = JSON.parse(raw);
+      } catch {
+        this.clearChunks();
+        return {
+          id: request.id,
+          status: 'failed',
+          result: null,
+          error: { code: 'BAD_RESPONSE', message: 'The relay result could not be read.' },
+        };
+      }
+      this.clearChunks();
+      this.sql.exec('UPDATE current_request SET response = ?, responded_at = ? WHERE slot = 1',
+        JSON.stringify({ id: request.id, ok: true, result }), now);
+      this.wakeRequestWaiters(request.id);
+      return { id: request.id, status: 'completed', result, error: null, chunked: true, hasMore: false };
+    }
+
     const raw = this.getMeta(`chunk_${index}`);
     if (raw === null) return null;
     let result: unknown;
@@ -253,16 +291,16 @@ export class RelayDurableObjectCore {
         error: { code: 'BAD_RESPONSE', message: 'The relay result could not be read.' },
       };
     }
-    const hasMore = index + 1 < count;
-    if (!hasMore) {
-      this.clearChunks();
-      this.sql.exec('UPDATE current_request SET response = ?, responded_at = ? WHERE slot = 1',
-        JSON.stringify({ id: request.id, ok: true, result }), now);
-      this.wakeRequestWaiters(request.id);
-      return { id: request.id, status: 'completed', result, error: null, chunked: true, hasMore: false };
-    }
-    this.setMeta('chunk_index', String(index + 1));
-    return { id: request.id, status: 'running', result, error: null, chunked: true, hasMore: true };
+    return {
+      id: request.id,
+      status: 'running',
+      result,
+      error: null,
+      chunked: true,
+      hasMore: index + 1 < count,
+      chunkIndex: index,
+      chunkCount: count,
+    };
   }
 
   private wakeWaiters(): void {
@@ -508,6 +546,9 @@ export class RelayDurableObjectCore {
       return error('NOT_FOUND', 'The bridge request was not found.', 404);
     }
     const id = body.id;
+    const ack = typeof body.ack === 'number'
+      ? body.ack
+      : typeof body.ack === 'string' && /^\d+$/.test(body.ack) ? Number(body.ack) : null;
     const read = () => this.readRequest();
     const current = read();
     if (!current || current.id !== id) {
@@ -517,7 +558,7 @@ export class RelayDurableObjectCore {
       const request = read();
       if (!request || request.id !== id) return null;
       const now = typeof body.now === 'number' ? body.now : Date.now();
-      const chunk = this.nextChunkState(request, now);
+      const chunk = this.nextChunkState(request, now, ack);
       if (chunk) return chunk;
       const state = this.requestState(request, now);
       return state.status === 'completed' || state.status === 'failed' || state.status === 'expired'
@@ -529,7 +570,7 @@ export class RelayDurableObjectCore {
     if (body.wait !== true) {
       const request = read();
       return json(request
-        ? this.nextChunkState(request, Date.now()) ?? this.requestState(request, Date.now())
+        ? this.nextChunkState(request, Date.now(), ack) ?? this.requestState(request, Date.now())
         : this.requestState(current, Date.now()));
     }
 
@@ -556,7 +597,7 @@ export class RelayDurableObjectCore {
     }
     // The caller's timestamp predates the long poll; use the current time so a
     // request that expired while the browser was waiting is reported as expired.
-    const chunk = this.nextChunkState(after, Date.now());
+    const chunk = this.nextChunkState(after, Date.now(), ack);
     if (chunk) return json(chunk);
     return json(this.requestState(after, Date.now()));
   }

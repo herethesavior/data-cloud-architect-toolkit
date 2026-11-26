@@ -22,6 +22,7 @@ import {
   isValidDataspace,
   isValidDmoDeveloperName,
   offsetPageSizeFor,
+  RELATIONSHIP_REQUEST_PAGE_SIZE,
 } from './endpoints.ts';
 import {
   deriveInferredRelationships,
@@ -492,7 +493,7 @@ async function retrieveRelationshipsByDmo(
     attempts += 1;
     try {
       const attempt = await withBoundedRetry(() =>
-        fetchCollection(cli, alias, path, 'relationships', maxPages, undefined, true));
+        fetchCollection(cli, alias, path, 'relationships', maxPages, RELATIONSHIP_REQUEST_PAGE_SIZE, true));
       const normalized = normalizeDmoRelationships(attempt.value.entries, context);
       edges.push(...normalized.items);
       skipped += normalized.skipped;

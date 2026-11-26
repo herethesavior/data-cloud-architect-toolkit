@@ -46,6 +46,8 @@ const GAP_WARNING_CODES = new Set([
   'RELATIONSHIP_QUERY_FAILED',
   'RELATIONSHIP_QUERY_LIMIT',
 ]);
+// Every chunk carries this warning, including the last one. A chunk only holds
+// a slice of the snapshot, so none of them can prove a row was deleted.
 
 const fingerprints = new WeakMap<object, string>();
 const rowKeys = new WeakMap<object, Map<MergeFamily, string>>();
@@ -107,8 +109,7 @@ function hasGap(warnings: readonly RetrievalWarning[], family: ResourceFamily): 
     if (!GAP_WARNING_CODES.has(warning.code)) return false;
     if (warning.family === family) return true;
     return warning.family === 'inventory'
-      && (warning.code === RESPONSE_CHUNKED_WARNING
-        || warning.code === MORE_ITEMS_AVAILABLE_WARNING);
+      && (warning.code === MORE_ITEMS_AVAILABLE_WARNING || warning.code === RESPONSE_CHUNKED_WARNING);
   });
 }
 
