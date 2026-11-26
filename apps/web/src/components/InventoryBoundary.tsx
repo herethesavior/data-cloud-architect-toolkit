@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { DiscoveryProgress as DiscoveryProgressData, InventorySnapshot } from '@dcat/core';
@@ -16,6 +17,7 @@ import {
   resumableProgressFamilies,
 } from '../lib/resourceStatus.ts';
 import { useInventoryActions } from '../lib/inventoryActions.tsx';
+import { isFullRefresh } from '../lib/refreshScope.ts';
 import { describeError } from '../lib/userError.ts';
 import { useDismissibleNotice } from '../lib/noticeDismissal.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
@@ -119,7 +121,15 @@ function InventoryProgressBanner({
   );
 }
 
-function InventoryRefreshSkeleton({ onCancel }: { onCancel?: () => void }) {
+function InventoryRefreshSkeleton({
+  onCancel,
+  scopeLabel,
+  scoped,
+}: {
+  onCancel?: () => void;
+  scopeLabel: string;
+  scoped: boolean;
+}) {
   return (
     <section
       data-testid="inventory-refresh-skeleton"
@@ -133,9 +143,13 @@ function InventoryRefreshSkeleton({ onCancel }: { onCancel?: () => void }) {
           <p className="label-xs">Inventory refresh</p>
           <h3 className="mt-1 flex items-center gap-2 text-base font-semibold text-ink">
             <Icon name="refresh" size={17} className="animate-spin text-brand" />
-            Getting the latest metadata...
+            Updating {scopeLabel}...
           </h3>
-          <p className="mt-1 text-sm text-ink-soft">Previous results return when the refresh finishes.</p>
+          <p className="mt-1 text-sm text-ink-soft">
+            {scoped
+              ? 'Other families stay as they are. Previous results return when the refresh finishes.'
+              : 'Previous results return when the refresh finishes.'}
+          </p>
         </div>
         {onCancel ? (
           <button
@@ -170,6 +184,10 @@ interface InventoryBoundaryProps {
 
 export function InventoryBoundary({ query, context, children }: InventoryBoundaryProps) {
   const actions = useInventoryActions();
+  const scopeDescriptionId = useId();
+  const refreshScope = actions?.refreshScope;
+  const scopeLabel = refreshScope?.label ?? 'the full inventory';
+  const scopedRefresh = refreshScope ? !isFullRefresh(refreshScope.families) : false;
   const refreshError = actions?.refreshError ?? '';
   // Include the mutation attempt so dismissing one failure does not hide the
   // same error from a later retry.
@@ -195,7 +213,13 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
     // Only a manual refresh can be cancelled. An invalidation-triggered query
     // refetch is owned by React Query, so offering Cancel there would spin
     // forever after the click without actually stopping the request.
-    return <InventoryRefreshSkeleton onCancel={manualRefresh ? actions?.cancelRefresh : undefined} />;
+    return (
+      <InventoryRefreshSkeleton
+        onCancel={manualRefresh ? actions?.cancelRefresh : undefined}
+        scopeLabel={scopeLabel}
+        scoped={scopedRefresh}
+      />
+    );
   }
   if (query.isError && !query.data) {
     const described = describeError(query.error, 'inventory');
@@ -274,7 +298,11 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           onClick={actions.refreshInventory}
           disabled={!context.alias}
           aria-label="Refresh inventory"
-          title="Refresh this inventory from the local connector"
+          aria-describedby={scopedRefresh ? scopeDescriptionId : undefined}
+          title={scopedRefresh
+            ? `Refresh ${scopeLabel} from the local connector`
+            : 'Refresh this inventory from the local connector'}
+          data-refresh-scope={scopedRefresh ? scopeLabel : undefined}
           className="grid size-8 shrink-0 place-items-center rounded-full text-ink-soft transition-colors hover:bg-brand-soft hover:text-brand disabled:opacity-40"
         >
           <Icon name="refresh" size={13} />
@@ -326,6 +354,11 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
         </p>
       ) : null}
       {children(inventory, freshness)}
+      {scopedRefresh ? (
+        <span id={scopeDescriptionId} className="sr-only">
+          Refresh updates {scopeLabel}. Other inventory families stay as they are.
+        </span>
+      ) : null}
     </>
   );
 }

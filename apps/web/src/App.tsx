@@ -3,6 +3,7 @@ import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
+import { ALL_REFRESH_FAMILIES, refreshScopeForPage } from './lib/refreshScope.ts';
 import { settleInterruptedInventory } from './lib/inventorySettlement.ts';
 import { describeError } from './lib/userError.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
@@ -104,6 +105,7 @@ export function App() {
 
   const pageRef = useRef(page);
   pageRef.current = page;
+  const refreshScope = useMemo(() => refreshScopeForPage(page), [page]);
   const navigate = useCallback((nextPage: Page) => {
     // Help tabs use ?topic= while the user stays on Help. Leaving that query
     // on other paths makes a later Help visit reopen an old tab, so drop it
@@ -178,7 +180,7 @@ export function App() {
   const toggleModeRef = useRef<() => void>(() => undefined);
   const retryModeRef = useRef<() => void>(() => undefined);
   const cancelRefreshRef = useRef(cancelRefresh);
-  const refreshInventoryRef = useRef<() => void>(() => undefined);
+  const refreshInventoryRef = useRef<(families?: readonly ResourceFamily[]) => void>(() => undefined);
   const resumeInventoryRef = useRef<(family?: ResourceFamily) => void>(() => undefined);
   actionsContextRef.current = context;
   actionsInventoryRef.current = inventoryQuery.data;
@@ -189,6 +191,9 @@ export function App() {
   const onRetryMode = useCallback(() => retryModeRef.current(), []);
   const onCancelRefresh = useCallback(() => cancelRefreshRef.current(), []);
   const onRefreshInventory = useCallback(() => refreshInventoryRef.current(), []);
+  // Recovery after a terminal delivery failure is always whole-inventory: the
+  // previous session is gone, so no family can be treated as already loaded.
+  const onContinueInventory = useCallback(() => refreshInventoryRef.current(ALL_REFRESH_FAMILIES), []);
   const onResumeDiscovery = useCallback((family?: ResourceFamily) => resumeInventoryRef.current(family), []);
 
   // Stop an in-flight refresh in the same tick as a context change. The query
@@ -329,7 +334,10 @@ export function App() {
       : `${page}-${context?.contextId ?? 'none'}-${dataEpoch}`;
 
   const refreshInventory = useMutation({
-    mutationFn: async (target: WorkspaceContext | null) => {
+    mutationFn: async ({ target, families }: {
+      target: WorkspaceContext | null;
+      families?: readonly ResourceFamily[];
+    }) => {
       if (!target?.alias) throw new Error('Select an org first.');
       // One inventory generation at a time: a refresh and a resume both write
       // partial rows into the same cache key, so either must supersede the other.
@@ -345,6 +353,7 @@ export function App() {
         await queryClient.cancelQueries({ queryKey: key });
         const snapshot = await api.inventory(target.alias, {
           force: true,
+          families,
           signal: controller.signal,
           onSnapshot: (incoming) => {
             if (refreshControllerRef.current !== controller || target.contextId !== activeContextIdRef.current) return;
@@ -415,13 +424,17 @@ export function App() {
     },
   });
 
-  refreshInventoryRef.current = () => refreshInventory.mutate(actionsContextRef.current);
+  refreshInventoryRef.current = (families) => refreshInventory.mutate({
+    target: actionsContextRef.current,
+    families: families ?? refreshScope.families,
+  });
   resumeInventoryRef.current = (family) => {
     const sessionId = actionsInventoryRef.current?.progress?.sessionId;
     // A failed resume can leave no resumable session. Retrying must still do
-    // something visible, so start a fresh inventory load in that case.
+    // something visible. Recover with a full load: a scoped load could leave
+    // other views without rows they never got a chance to fetch.
     if (!sessionId) {
-      refreshInventory.mutate(actionsContextRef.current);
+      refreshInventory.mutate({ target: actionsContextRef.current, families: ALL_REFRESH_FAMILIES });
       return;
     }
     resumeInventory.mutate({ target: actionsContextRef.current, sessionId, family });
@@ -435,7 +448,8 @@ export function App() {
     onToggleMode,
     isTogglingMode,
     refreshInventory: onRefreshInventory,
-    continueInventory: onRefreshInventory,
+    refreshScope,
+    continueInventory: onContinueInventory,
     cancelRefresh: onCancelRefresh,
     isRefreshingInventory: refreshInventory.isPending,
     refreshError: !refreshInventory.error || refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
@@ -456,6 +470,8 @@ export function App() {
     onToggleMode,
     isTogglingMode,
     onRefreshInventory,
+    onContinueInventory,
+    refreshScope,
     onCancelRefresh,
     refreshInventory.isPending,
     refreshInventory.error,

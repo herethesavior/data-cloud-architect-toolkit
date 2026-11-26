@@ -29,8 +29,10 @@ import {
   createProgressiveDiscovery,
   initializeProgressiveDiscovery,
   interruptProgressiveDiscovery,
+  interruptProgressiveFamilies,
   isProgressiveDiscoveryActive,
   progressiveSnapshot,
+  restartProgressiveDiscovery,
   resumeProgressiveDiscovery,
   withPageRetry,
 } from './progressive.ts';
@@ -689,6 +691,103 @@ describe('progressive discovery', () => {
       expect.objectContaining({ code: 'DISCOVERY_INTERRUPTED' }),
     ]));
     expect(progressiveSnapshot(state).dlos.length).toBeGreaterThan(loadedBefore);
+  });
+
+  it('restarts only the requested families without discarding the rest of the session', async () => {
+    const state = await createProgressiveDiscovery({
+      cli: fakeCli(),
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+    });
+    await drain(state);
+    const spacesBefore = state.families['data-spaces'].items.length;
+    const dlosBefore = state.families.dlos.items.length;
+    const mappingsBefore = state.mappings.items.length;
+    const relationshipsBefore = state.relationships.length;
+    state.warnings.push({
+      family: 'dlos',
+      code: 'MORE_ITEMS_AVAILABLE',
+      severity: 'warning',
+      message: 'Old DLO gap.',
+    });
+
+    restartProgressiveDiscovery(state, ['dlos'], 'restart-dlos');
+
+    expect(state.generation).toBe('restart-dlos');
+    expect(state.families.dlos.items).toEqual([]);
+    expect(state.warnings.some((warning) => warning.family === 'dlos')).toBe(false);
+    expect(state.families['data-spaces'].items).toHaveLength(spacesBefore);
+    expect(state.mappings.items).toHaveLength(mappingsBefore);
+    expect(state.relationships).toHaveLength(relationshipsBefore);
+
+    await drain(state);
+    expect(state.families.dlos.items).toHaveLength(dlosBefore);
+    expect(state.families['data-spaces'].items).toHaveLength(spacesBefore);
+
+    restartProgressiveDiscovery(state, ['dmos'], 'restart-dmos');
+    expect(state.relationships).toEqual([]);
+    expect(state.relationshipQueries.tasks).toEqual([]);
+    expect(state.families.dlos.items).toHaveLength(dlosBefore);
+    expect(state.mappings.items).toHaveLength(mappingsBefore);
+  });
+
+  it('interrupts only the families cancelled by a scoped refresh', async () => {
+    const state = await initializeProgressiveDiscovery({
+      cli: fakeCli(),
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+    });
+    restartProgressiveDiscovery(state, ['dlos'], 'cancel-dlos');
+
+    interruptProgressiveFamilies(state, ['dlos'], 'page refresh cancelled');
+
+    expect(state.families.dlos.done).toBe(true);
+    expect(state.families.dlos.degraded).toBe(true);
+    expect(state.families['data-spaces'].done).toBe(false);
+    expect(state.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'DISCOVERY_INTERRUPTED', family: 'dlos' }),
+    ]));
+    expect(state.warnings.some((warning) =>
+      warning.code === 'DISCOVERY_INTERRUPTED' && warning.family === 'data-spaces')).toBe(false);
+  });
+
+  it('treats the mapping query limit as a resume checkpoint instead of a permanent gap', async () => {
+    const cli = fakeCli({
+      [dmoPath]: JSON.stringify({
+        records: dmoNames.map((apiName) => ({
+          apiName,
+          label: apiName,
+          isCustom: true,
+          dataSpace: dmoSpaces[apiName],
+        })),
+      }),
+    });
+    const state = await createProgressiveDiscovery({
+      cli,
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+      maxMappingQueries: 1,
+    });
+    await drain(state);
+
+    expect(state.mappings.tasks.map((task) => task.dmoName)).toEqual([dmoNames[0]]);
+    expect(state.mappings.limitHit).toBe(true);
+    expect(state.capabilities.find((entry) => entry.family === 'mappings')?.message)
+      .toContain('resume loading to check the rest');
+
+    resumeProgressiveDiscovery(state);
+
+    expect(state.mappings.limitHit).toBe(false);
+    expect(state.mappings.tasks.map((task) => task.dmoName)).toEqual(expect.arrayContaining([dmoNames[1]]));
+    expect(state.mappings.tasks.map((task) => task.dmoName)).not.toContain(dmoNames[0]);
+    await drain(state);
+    expect(state.mappings.tasks.every((task) => task.done && !task.failed)).toBe(true);
   });
 
   it('does not keep polling a deadline-stopped family with an unmet expected count', async () => {

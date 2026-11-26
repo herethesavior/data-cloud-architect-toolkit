@@ -31,6 +31,7 @@ import {
   type RelayHttp,
 } from './bridge.ts';
 import { loadConfig } from './config.ts';
+import { startDiscoverySession } from './discovery-sessions.ts';
 import { loadApiVersionSelection } from './api-compatibility-store.ts';
 import { createAppState, type AppState, type DiscoverySessionRecord } from './state.ts';
 
@@ -218,6 +219,54 @@ describe('executeRelayOperation', () => {
     })).resolves.toMatchObject({ sessionId: 'shared' });
 
     await operation(state, { operation: 'mode.set', mode: 'demo' });
+  });
+
+  it('restarts only the requested families inside an existing discovery session', async () => {
+    const state = createState();
+    const first = await operation<{ sessionId: string }>(state, {
+      operation: 'inventory.start',
+      alias: 'demo-uat',
+    });
+    const record = state.discoverySessions.get(first.sessionId)!;
+    await vi.waitFor(() => expect(record.state.families['data-spaces'].items.length).toBeGreaterThan(0));
+    const spacesCursor = record.state.families['data-spaces'];
+    const generationBefore = record.generation;
+
+    const second = await operation<{ sessionId: string; snapshot: InventorySnapshot }>(state, {
+      operation: 'inventory.start',
+      alias: 'demo-uat',
+      refresh: true,
+      families: ['dlos', 'mappings', 'data-streams'],
+    });
+
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(record.generation).not.toBe(generationBefore);
+    expect(record.state.families['data-spaces']).toBe(spacesCursor);
+    expect(record.state.families.dmos).toBeDefined();
+  });
+
+  it('cancels a scoped refresh without stopping the reused session', async () => {
+    const state = createState();
+    const [org] = await operation<OrgSummary[]>(state, { operation: 'org.list' });
+    const first = await operation<{ sessionId: string }>(state, {
+      operation: 'inventory.start',
+      alias: org!.alias,
+    });
+    const record = state.discoverySessions.get(first.sessionId)!;
+    const spacesCursor = record.state.families['data-spaces'];
+    const controller = new AbortController();
+
+    await startDiscoverySession(state, org!, {
+      refresh: true,
+      families: ['dlos'],
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    expect(state.discoverySessions.has(first.sessionId)).toBe(true);
+    expect(record.controller.signal.aborted).toBe(false);
+    expect(record.state.families.dlos.done).toBe(true);
+    expect(record.state.families['data-spaces']).toBe(spacesCursor);
   });
 
   it('changes the bridge-local API version through a typed relay operation', async () => {

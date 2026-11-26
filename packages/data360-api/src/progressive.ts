@@ -69,6 +69,15 @@ type WarningFamily = ResourceFamily | 'api-versions' | typeof STREAM_ENRICHMENT_
 const MAX_REST_PATH_LENGTH = 480;
 const MAPPING_CONCURRENCY = 4;
 const RELATIONSHIP_CONCURRENCY = 4;
+/**
+ * Mapping discovery is one lookup per eligible DMO. Large orgs routinely have
+ * more than 500 DMOs, so the old 500-query ceiling cut mappings off mid-org.
+ * Keep a bounded ceiling for safety, but let resume continue past it instead of
+ * leaving the family permanently partial.
+ */
+export const DEFAULT_MAX_MAPPING_QUERIES = 2_000;
+/** Repeated resumes may extend the checkpoint, but never without a ceiling. */
+const MAX_MAPPING_QUERY_BUDGET = 50_000;
 /** Bounded count-repair passes prevent an inconsistent endpoint from looping forever. */
 const MAX_EXPECTED_COUNT_RETRIES = 2;
 /** A session must reach a terminal state even when a slow org cannot drain its queues. */
@@ -420,7 +429,10 @@ function identityFor(family: ResourceFamily, item: unknown): string {
     const fields = Array.isArray(record.fieldMappings)
       ? record.fieldMappings.map((field) => JSON.stringify(field)).join('|')
       : '';
-    return `mapping|${String(record.apiName ?? '')}|${String(record.sourceObject ?? '')}|${String(record.targetObject ?? '')}|${fields}`;
+    // `apiName` is a label that can change between runs; the endpoints and
+    // field map are the mapping's identity. Match the browser merge so chunks
+    // and later generations reconcile the same row.
+    return `mapping|${String(record.sourceObject ?? '')}|${String(record.targetObject ?? '')}|${fields}`;
   }
   if (typeof item === 'object' && item !== null) {
     const record = item as Record<string, unknown>;
@@ -481,29 +493,44 @@ function deadlineReached(state: ProgressiveDiscoveryState): boolean {
   return !state.timedOut && Date.now() >= state.deadlineAt;
 }
 
-function stopActiveCursors(state: ProgressiveDiscoveryState, code: string, message: string): void {
-  for (const family of NON_MAPPING_FAMILIES) {
-    const cursor = state.families[family];
-    // A family that already finished needs no interruption warning. An unmet
-    // expected count is the exception: it would otherwise keep polling forever.
-    if (cursor.failed || cursor.done && !canRetryExpectedCount(state, family)) continue;
-    stopWithWarning(state, family, cursor, code, message);
-    // An unmet expected count would otherwise keep the cursor "active" even
-    // though it is done, so the browser would poll a terminal session forever.
-    cursor.countMismatch = true;
-  }
+function stopFamilyCursor(
+  state: ProgressiveDiscoveryState,
+  family: NonMappingFamily,
+  code: string,
+  message: string,
+): void {
+  const cursor = state.families[family];
+  // A family that already finished needs no interruption warning. An unmet
+  // expected count is the exception: it would otherwise keep polling forever.
+  if (cursor.failed || cursor.done && !canRetryExpectedCount(state, family)) return;
+  stopWithWarning(state, family, cursor, code, message);
+  // An unmet expected count would otherwise keep the cursor "active" even
+  // though it is done, so the browser would poll a terminal session forever.
+  cursor.countMismatch = true;
+}
+
+function stopMappingTasks(state: ProgressiveDiscoveryState, code: string, message: string): void {
   for (const task of state.mappings.tasks) {
     if (task.failed || task.done) continue;
     stopWithWarning(state, 'mappings', task, code, message);
     task.countMismatch = true;
   }
   state.mappings.degraded = true;
+}
+
+function stopRelationshipTasks(state: ProgressiveDiscoveryState, code: string, message: string): void {
   for (const task of state.relationshipQueries.tasks) {
     if (task.failed || task.done) continue;
     stopWithWarning(state, 'dmos', task, code, message);
     task.countMismatch = true;
   }
   state.relationshipQueries.degraded = true;
+}
+
+function stopActiveCursors(state: ProgressiveDiscoveryState, code: string, message: string): void {
+  for (const family of NON_MAPPING_FAMILIES) stopFamilyCursor(state, family, code, message);
+  stopMappingTasks(state, code, message);
+  stopRelationshipTasks(state, code, message);
   state.streamEnrichment.attempted = true;
   state.timedOut = code === 'DISCOVERY_DEADLINE';
 }
@@ -511,6 +538,28 @@ function stopActiveCursors(state: ProgressiveDiscoveryState, code: string, messa
 /** Terminalize a discovery state after a background runner exception. */
 export function interruptProgressiveDiscovery(state: ProgressiveDiscoveryState, reason: string): void {
   stopActiveCursors(state, 'DISCOVERY_INTERRUPTED', `Background discovery stopped: ${reason}`);
+  recompute(state);
+}
+
+/**
+ * Stop only the families a cancelled page refresh restarted. Other cursors in
+ * the reused session keep running and their loaded rows stay intact.
+ */
+export function interruptProgressiveFamilies(
+  state: ProgressiveDiscoveryState,
+  families: readonly ResourceFamily[],
+  reason: string,
+): void {
+  const scope = new Set(families);
+  if (scope.size === 0) return;
+  const code = 'DISCOVERY_INTERRUPTED';
+  const message = `Background discovery stopped: ${reason}`;
+  for (const family of NON_MAPPING_FAMILIES) {
+    if (scope.has(family)) stopFamilyCursor(state, family, code, message);
+  }
+  if (scope.has('mappings')) stopMappingTasks(state, code, message);
+  if (scope.has('dmos')) stopRelationshipTasks(state, code, message);
+  if (scope.has('data-streams')) state.streamEnrichment.attempted = true;
   recompute(state);
 }
 
@@ -667,7 +716,7 @@ function syncMappingTasks(state: ProgressiveDiscoveryState): void {
         state.mappings.limitHit = true;
         stopWithWarning(state, 'mappings', state.mappings,
           'MAPPING_QUERY_LIMIT',
-          `Checked the first ${state.options.maxMappingQueries} DMOs; remaining mapping lookups were not attempted.`);
+          `Checked the first ${state.options.maxMappingQueries} eligible DMOs; resume loading to check the rest.`);
       }
       break;
     }
@@ -831,6 +880,26 @@ function dedupeEdges(edges: RelationshipEdge[]): RelationshipEdge[] {
   });
 }
 
+const MAPPING_GAP_CODES = new Set([
+  'MAPPING_QUERY_LIMIT',
+  'MAPPING_QUERY_FAILED',
+  'OUTPUT_LIMIT',
+  'DISCOVERY_DEADLINE',
+  'DISCOVERY_INTERRUPTED',
+]);
+
+/** Explain why mapping discovery stopped instead of repeating a generic gap. */
+function mappingGapMessage(state: ProgressiveDiscoveryState, loaded: number): string {
+  const warning = state.warnings.find((entry) =>
+    entry.family === 'mappings' && MAPPING_GAP_CODES.has(entry.code));
+  if (!warning) return `${loaded} item(s) loaded; some results may be missing.`;
+  const detail = warning.message.charAt(0).toLowerCase() + warning.message.slice(1);
+  const hint = warning.code === 'DISCOVERY_DEADLINE' || warning.code === 'DISCOVERY_INTERRUPTED'
+    ? ' Resume loading to continue.'
+    : '';
+  return `${loaded} item(s) loaded; ${detail}${hint}`;
+}
+
 function recompute(state: ProgressiveDiscoveryState): void {
   if (!state.apiVersion) return;
 
@@ -846,7 +915,9 @@ function recompute(state: ProgressiveDiscoveryState): void {
       && state.families.dmos.done
       && state.mappings.tasks.length === 0;
     const degradedMessage = status === 'partial' && cursorState.degraded
-      ? `${loaded} item(s) loaded; some results may be missing.`
+      ? family === 'mappings'
+        ? mappingGapMessage(state, loaded)
+        : `${loaded} item(s) loaded; some results may be missing.`
       : null;
     const sizeFailureMessage = cursorState.error && isOutputLimitMessage(cursorState.error)
       ? cursorState.error
@@ -1038,7 +1109,7 @@ function unavailableState(
     },
     options: {
       maxPages: options.maxPages ?? 1_000,
-      maxMappingQueries: options.maxMappingQueries ?? 500,
+      maxMappingQueries: options.maxMappingQueries ?? DEFAULT_MAX_MAPPING_QUERIES,
       maxRelationshipQueries: options.maxRelationshipQueries ?? MAX_RELATIONSHIP_DMO_QUERIES,
       retry: retryOptions(options.retry),
     },
@@ -1211,7 +1282,7 @@ export async function initializeProgressiveDiscovery(
     },
     options: {
       maxPages: options.maxPages ?? 1_000,
-      maxMappingQueries: options.maxMappingQueries ?? 500,
+      maxMappingQueries: options.maxMappingQueries ?? DEFAULT_MAX_MAPPING_QUERIES,
       maxRelationshipQueries: options.maxRelationshipQueries ?? MAX_RELATIONSHIP_DMO_QUERIES,
       retry: retryOptions(options.retry),
     },
@@ -1452,6 +1523,33 @@ export function resumeProgressiveDiscovery(
       state.mappings.error = null;
       clearedFamilies.add('mappings');
     }
+    // The query budget is a resume checkpoint, not a permanent failure.
+    // `queuedDmos` remembers every DMO already paid for, so only the candidates
+    // beyond the checkpoint are added; active tasks from the stopped pass reopen.
+    const hitQueryLimit = state.mappings.limitHit
+      || state.warnings.some((warning) => warning.family === 'mappings' && warning.code === 'MAPPING_QUERY_LIMIT');
+    if (hitQueryLimit) {
+      state.mappings.limitHit = false;
+      state.mappings.degraded = false;
+      state.mappings.done = false;
+      state.mappings.failed = false;
+      state.mappings.error = null;
+      state.options.maxMappingQueries = Math.min(
+        MAX_MAPPING_QUERY_BUDGET,
+        state.options.maxMappingQueries + DEFAULT_MAX_MAPPING_QUERIES,
+      );
+      // Completed lookups stay in `queuedDmos` so they are never paid for
+      // twice, but they must not occupy the next pass's query budget.
+      state.mappings.tasks = state.mappings.tasks.filter((task) => {
+        if (!task.failed) return !task.done;
+        task.failed = false;
+        task.error = null;
+        task.errorStatus = 'error';
+        return true;
+      });
+      clearedFamilies.add('mappings');
+      syncMappingTasks(state);
+    }
   }
   if (!family || family === 'dmos') {
     if (clearInterruption('dmos')) {
@@ -1490,6 +1588,7 @@ export function resumeProgressiveDiscovery(
     'ERROR',
     'RETRY_LIMIT',
     'MAPPING_QUERY_FAILED',
+    'MAPPING_QUERY_LIMIT',
     'RELATIONSHIP_QUERY_FAILED',
     ...interruptionCodes,
   ]);
@@ -1499,6 +1598,62 @@ export function resumeProgressiveDiscovery(
     }
     return !clearedFamilies.has(warning.family) || !retryableCodes.has(warning.code);
   });
+  recompute(state);
+}
+
+/**
+ * Restart only the requested families of an existing session. Loaded rows and
+ * cursors for every other family stay in place, so a page refresh does not pay
+ * for an unrelated CLI discovery pass or throw away metadata it already has.
+ */
+export function restartProgressiveDiscovery(
+  state: ProgressiveDiscoveryState,
+  families: readonly ResourceFamily[],
+  generation = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+): void {
+  const scope = new Set(families);
+  const apiVersion = state.apiVersion;
+  // An unavailable session has no cursors to restart; the caller starts fresh.
+  if (scope.size === 0 || !apiVersion) return;
+
+  for (const family of NON_MAPPING_FAMILIES) {
+    if (scope.has(family)) state.families[family] = makeFamily(family, apiVersion);
+  }
+  if (scope.has('mappings')) {
+    state.mappings = {
+      ...makeCursor(buildData360Path('mappings', apiVersion)),
+      family: 'mappings',
+      items: [],
+      tasks: [],
+      queuedDmos: new Set<string>(),
+      failedQueries: 0,
+      limitHit: false,
+    };
+  }
+  if (scope.has('dmos')) {
+    state.relationshipQueries = makeRelationshipQueries(apiVersion);
+    // Relationship edges are accumulated in a separate array; without clearing
+    // it a fresh DMO pass would append duplicate edges to the previous ones.
+    state.relationships = [];
+  }
+  if (scope.has('data-streams')) state.streamEnrichment.attempted = false;
+
+  // Warnings describe the previous attempt. Clearing them for the restarted
+  // families keeps a stale gap from outliving its fresh pass; global delivery
+  // warnings still apply because they qualify every snapshot.
+  state.warnings = state.warnings.filter((warning) => {
+    if (warning.family === STREAM_ENRICHMENT_WARNING_FAMILY) return !scope.has('data-streams');
+    return !scope.has(warning.family as ResourceFamily);
+  });
+
+  const now = Date.now();
+  const retrievedAt = new Date(now).toISOString();
+  state.generation = generation;
+  state.createdAt = now;
+  state.generatedAt = retrievedAt;
+  state.base.retrievedAt = retrievedAt;
+  state.deadlineAt = now + state.durationMs;
+  state.timedOut = false;
   recompute(state);
 }
 

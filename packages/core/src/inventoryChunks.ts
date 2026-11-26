@@ -8,6 +8,8 @@ export const MORE_ITEMS_AVAILABLE_WARNING = 'MORE_ITEMS_AVAILABLE';
 export const ITEM_DETAILS_OMITTED_WARNING = 'ITEM_DETAILS_OMITTED';
 /** Small row batches keep every explorer responsive while progressive rows land. */
 export const MAX_CHUNK_ROWS = 5;
+/** Field maps are the bulkiest mapping rows; keep enough to explain the join. */
+const MAX_COMPACT_FIELD_MAPPINGS = 12;
 /**
  * Large orgs must not turn into thousands of relay polls. Small batches are
  * preferred, but the row size grows once that many chunks would be needed.
@@ -75,6 +77,8 @@ function compactRow(field: ArrayField, row: unknown): unknown {
     delete compact.raw;
   } else if (field === 'dlos' || field === 'dmos') {
     delete compact.fields;
+  } else if (field === 'mappings' && Array.isArray(compact.fieldMappings)) {
+    compact.fieldMappings = compact.fieldMappings.slice(0, MAX_COMPACT_FIELD_MAPPINGS);
   }
   return compact;
 }

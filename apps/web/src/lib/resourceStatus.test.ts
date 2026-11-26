@@ -60,6 +60,14 @@ describe('resource status model', () => {
     );
   });
 
+  it('does not repeat a count and gap message already supplied by discovery', () => {
+    expect(resourceStatusMessage(capability({
+      status: 'partial',
+      itemCount: 18,
+      message: '18 item(s) loaded; checked the first 500 eligible DMOs; resume loading to check the rest.',
+    }))).toBe('18 item(s) loaded; checked the first 500 eligible DMOs; resume loading to check the rest.');
+  });
+
   it('derives partial and blocked stages from capability results', () => {
     const inventory = inventoryWith([
       capability({ family: 'data-spaces', status: 'available' }),

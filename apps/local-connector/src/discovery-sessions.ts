@@ -1,12 +1,15 @@
 import { randomBytes } from 'node:crypto';
+import { RESOURCE_FAMILIES } from '@dcat/core';
 import type { InventorySnapshot, OrgSummary, ResourceFamily } from '@dcat/core';
 import { CliError } from '@dcat/salesforce-cli';
 import {
   advanceProgressiveDiscovery,
   initializeProgressiveDiscovery,
   interruptProgressiveDiscovery,
+  interruptProgressiveFamilies,
   isProgressiveDiscoveryActive,
   progressiveSnapshot,
+  restartProgressiveDiscovery,
   resumeProgressiveDiscovery,
 } from '@dcat/data360-api';
 import { recordApiVersionResolution } from './state.ts';
@@ -21,6 +24,47 @@ const BATCH_DELAY_MS = 25;
 // starts per state so two overlapping requests cannot both build a runner for
 // the same alias and publish competing generations into the shared cache.
 const startsByState = new WeakMap<AppState, Map<string, Promise<void>>>();
+
+interface CallerAbortLink {
+  signal: AbortSignal;
+  handler: () => void;
+}
+
+// A reused session can be refreshed from several callers. Keep only the latest
+// abort binding so one cancelled poll cannot stop a later refresh's runner.
+const callerAborts = new WeakMap<DiscoverySessionRecord, CallerAbortLink>();
+
+function unbindCallerAbort(record: DiscoverySessionRecord): void {
+  const previous = callerAborts.get(record);
+  if (previous) previous.signal.removeEventListener('abort', previous.handler);
+  callerAborts.delete(record);
+}
+
+function bindCallerAbort(
+  state: AppState,
+  record: DiscoverySessionRecord,
+  signal?: AbortSignal,
+  scope: 'session' | 'families' = 'session',
+  families: readonly ResourceFamily[] = [],
+): void {
+  unbindCallerAbort(record);
+  if (!signal) return;
+  const handler = () => {
+    if (scope === 'families') {
+      unbindCallerAbort(record);
+      if (!isCurrent(state, record)) return;
+      interruptProgressiveFamilies(record.state, families, 'page refresh cancelled');
+      publish(state, record);
+      return;
+    }
+    stopSession(state, record);
+  };
+  if (signal.aborted) handler();
+  else {
+    signal.addEventListener('abort', handler, { once: true });
+    callerAborts.set(record, { signal, handler });
+  }
+}
 
 function serializeStart<T>(state: AppState, alias: string, operation: () => Promise<T>): Promise<T> {
   let byAlias = startsByState.get(state);
@@ -48,6 +92,8 @@ export interface DiscoverySessionOptions {
   refresh?: boolean;
   resume?: boolean;
   family?: ResourceFamily;
+  /** Families to re-run inside an existing session; omitted means all of them. */
+  families?: readonly ResourceFamily[];
   /** Request cancellation, including the version probe before a session exists. */
   signal?: AbortSignal;
 }
@@ -65,6 +111,7 @@ function isExpired(record: DiscoverySessionRecord): boolean {
 }
 
 function stopSession(state: AppState, record: DiscoverySessionRecord): void {
+  unbindCallerAbort(record);
   record.controller.abort();
   state.discoverySessions.delete(record.id);
   if (state.discoveryByAlias.get(record.alias) === record.id) {
@@ -164,6 +211,26 @@ async function startDiscoverySessionNow(
   if (state.mode === 'demo') return { sessionId: 'demo', snapshot: demoInventory };
   pruneSessions(state);
 
+  // A scoped refresh reuses the live session and restarts only the requested
+  // families. Without a reusable session there is no DMO/DLO seed for derived
+  // families such as mappings, so the caller gets a normal first load instead.
+  const scopedFamilies = options.families?.filter((family) => RESOURCE_FAMILIES.includes(family));
+  if (options.refresh && scopedFamilies?.length && scopedFamilies.length < RESOURCE_FAMILIES.length && !options.sessionId) {
+    const activeId = state.discoveryByAlias.get(org.alias);
+    const active = activeId ? state.discoverySessions.get(activeId) : undefined;
+    if (active && active.alias === org.alias && !isExpired(active)
+      && !active.controller.signal.aborted && active.state.apiVersion) {
+      restartProgressiveDiscovery(active.state, scopedFamilies);
+      active.generation = active.state.generation;
+      publish(state, active);
+      // Cancelling a page-level refresh must not discard the reused session:
+      // rows from other families are still valid and may still be loading.
+      bindCallerAbort(state, active, options.signal, 'families', scopedFamilies);
+      ensureRunner(state, active);
+      return resultOf(active);
+    }
+  }
+
   const reusedId = options.sessionId ?? state.discoveryByAlias.get(org.alias);
   if (reusedId && !options.refresh) {
     const existing = state.discoverySessions.get(reusedId);
@@ -189,14 +256,13 @@ async function startDiscoverySessionNow(
   const sessionId = options.sessionId ?? newId();
   const generation = `${Date.now().toString(36)}-${newId().slice(0, 8)}`;
   const controller = new AbortController();
-  if (options.signal) {
-    if (options.signal.aborted) {
-      throw new CliError('COMMAND_FAILED', 'Discovery request was cancelled.');
-    }
-    // A disconnected browser must not leave the per-alias start lock held by a
-    // slow version probe or keep a background runner alive.
-    options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  if (options.signal?.aborted) {
+    throw new CliError('COMMAND_FAILED', 'Discovery request was cancelled.');
   }
+  // A disconnected browser must not leave the per-alias start lock held by a
+  // slow version probe. Once the session exists, bindCallerAbort owns this.
+  const abortProbe = () => controller.abort();
+  options.signal?.addEventListener('abort', abortProbe, { once: true });
   // Return as soon as the API version is known. The runner publishes every
   // family page to the shared cache, so status polls see rows as they land.
   let progressive;
@@ -216,6 +282,8 @@ async function startDiscoverySessionNow(
       throw new CliError('COMMAND_FAILED', 'Discovery request was cancelled.', { cause: error });
     }
     throw error;
+  } finally {
+    options.signal?.removeEventListener('abort', abortProbe);
   }
   const record: DiscoverySessionRecord = {
     id: sessionId,
@@ -230,6 +298,7 @@ async function startDiscoverySessionNow(
   };
   state.discoverySessions.set(sessionId, record);
   state.discoveryByAlias.set(org.alias, sessionId);
+  bindCallerAbort(state, record, options.signal);
   publish(state, record);
   ensureRunner(state, record);
   return resultOf(record);

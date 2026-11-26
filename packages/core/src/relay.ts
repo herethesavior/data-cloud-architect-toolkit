@@ -18,6 +18,8 @@ export const RELAY_OPERATIONS = [
 
 const aliasSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/);
 
+export const refreshFamiliesSchema = z.array(z.enum(RESOURCE_FAMILIES)).min(1);
+
 const instanceUrlSchema = z
   .string()
   .trim()
@@ -56,6 +58,8 @@ export const relayOperationSchema = z.discriminatedUnion('operation', [
     // Reusing an opaque session id is idempotent; refresh starts a new generation.
     sessionId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
     refresh: z.boolean().optional(),
+    /** A scoped refresh restarts these families inside the existing session. */
+    families: refreshFamiliesSchema.optional(),
   }),
   z.object({
     operation: z.literal('inventory.status'),

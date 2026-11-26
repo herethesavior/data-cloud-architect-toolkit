@@ -531,6 +531,29 @@ describe('web API session handling', () => {
     await assertion;
   });
 
+  it('sends a scoped refresh family list and keeps unrelated rows out of the incoming snapshot', async () => {
+    const complete = { ...demoInventory, progress: undefined };
+    const fetchMock = vi.fn(async (path: string, _options?: RequestInit) => {
+      if (path === '/api/session') return jsonResponse(session);
+      if (path === '/api/orgs/prod-org/inventory/session') {
+        return jsonResponse({ sessionId: 'session-1', snapshot: complete });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const families = ['dlos', 'mappings', 'data-streams'] as const;
+    const snapshot = await api.inventory('prod-org', { force: true, families });
+
+    const startCall = fetchMock.mock.calls.find(([path, options]) =>
+      path === '/api/orgs/prod-org/inventory/session' && options?.method === 'POST');
+    expect(startCall).toBeDefined();
+    expect(JSON.parse(String(startCall![1]?.body))).toEqual({ refresh: true, families: [...families] });
+    expect(snapshot.dlos).toEqual(demoInventory.dlos);
+    expect(snapshot.dataSpaces).toEqual([]);
+    expect(snapshot.dmos).toEqual([]);
+  });
+
   it('bounds a hanging local transform detail request with the relay deadline', async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn((_path: string, options?: RequestInit) => new Promise((_resolve, reject) => {
