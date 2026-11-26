@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
-import { createApiVersionStatus } from '@dcat/core';
+import { createApiVersionStatus, RESOURCE_FAMILIES } from '@dcat/core';
 import type { ApiVersionStatus, InventorySnapshot, OrgSummary } from '@dcat/core';
 import { demoInventory, demoOrgs, demoTransformBundles } from '@dcat/test-fixtures';
 
@@ -1158,6 +1158,48 @@ test('ERD canvas catches up when progressive discovery adds objects after mount'
   await expect(page.locator('.react-flow__node-erdObject')).toHaveCount(8);
   await expect(page.getByText('8 objects', { exact: true })).toBeVisible();
   expect(sessionCalls).toBeGreaterThanOrEqual(2);
+});
+
+test('navigating pages does not restart a fully loaded live inventory with gapped families', async ({ page }) => {
+  await seedLiveMode(page);
+  const state = createConnectorState();
+  await mockConnector(page, state);
+  let sessionCalls = 0;
+  const partial = {
+    ...structuredClone(state.inventories['prod-org']!),
+    progress: {
+      sessionId: 'gapped-session',
+      generation: 'gen-1',
+      state: 'partial' as const,
+      loaded: 30,
+      total: null,
+      families: RESOURCE_FAMILIES.map((family) => ({
+        family,
+        status: 'complete' as const,
+        loaded: 5,
+        total: null,
+        pagesFetched: 1,
+        hasMore: false,
+        error: null,
+      })),
+      message: 'Inventory loaded with gaps. Earlier results were kept.',
+    },
+  };
+  await page.route('**/api/orgs/prod-org/inventory/session**', (route: Route) => {
+    sessionCalls += 1;
+    return route.fulfill({ json: { sessionId: 'gapped-session', snapshot: partial } });
+  });
+
+  await page.goto('/');
+  await expect(page.getByText('LIVE · PRODUCTION')).toBeVisible();
+  await expect(page.getByText('30 records loaded so far').first()).toBeVisible();
+  expect(sessionCalls).toBe(1);
+
+  for (const name of ['Data Stream Explorer', 'DLO Explorer', 'Dashboard', 'Data Stream Explorer']) {
+    await page.locator('#desktop-sidebar').getByRole('link', { name }).click();
+    await expect(page.locator('h1')).toBeVisible();
+  }
+  expect(sessionCalls).toBe(1);
 });
 
 test('Data Lineage Explorer joins all metadata families and persists grounded filters', async ({ page }) => {
