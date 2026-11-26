@@ -1346,17 +1346,24 @@ export async function advanceProgressiveDiscovery(
     notifyProgress(state, options);
   }
 
-  if (primarySettled && !deadlineReached(state)) {
+  // Mapping lookups depend only on DMOs already loaded, not on the DMO family
+  // finishing. Start them alongside pagination so large orgs expose mappings in
+  // the first batches instead of only after every DMO page has arrived. Keep
+  // relationships behind primary pagination; they are numerous and would delay
+  // the mapping results this change is meant to surface early.
+  if (!deadlineReached(state)) {
     syncMappingTasks(state);
     const tasks = state.mappings.tasks
       .filter((task) => !task.done && !task.failed)
-      .slice(0, MAPPING_CONCURRENCY);
+      .slice(0, primarySettled ? MAPPING_CONCURRENCY : 1);
     for (const task of tasks) {
       if (deadlineReached(state)) break;
       changedFlags.push(await fetchMappingTaskPage(state, task));
       notifyProgress(state, options);
     }
+  }
 
+  if (primarySettled && !deadlineReached(state)) {
     syncRelationshipTasks(state);
     const relationshipTasks = state.relationshipQueries.tasks
       .filter((task) => !task.done && !task.failed)
