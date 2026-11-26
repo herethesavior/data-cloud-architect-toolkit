@@ -114,7 +114,7 @@ export function resourceStatusMessage(capability: ApiCapability): string {
   }
   if (capability.status === 'partial') {
     const count = capability.itemCount ?? 0;
-    const detail = sanitizeDetail(capability.message, 'Check the retryable families on the Dashboard.');
+    const detail = sanitizeDetail(capability.message, 'Check Discovery health on the Dashboard for details.');
     return `${count} ${count === 1 ? 'item' : 'items'} loaded; some results may be missing. ${detail}`.trim();
   }
   if (capability.status === 'not-started') return sanitizeDetail(capability.message, 'Not started.');
@@ -166,7 +166,7 @@ export function discoveryStages(
         label: stage.label,
         state: inventory ? gaps.length > 0 ? 'partial' : 'complete' : loading ? 'loading' : 'pending',
         detail: inventory
-          ? `${inventory.relationships.length} relationship edges in the current snapshot.${gaps.length > 0 ? ` ${gaps.length} lookup gap warning(s).` : ''}`
+          ? `${inventory.relationships.length} relationship edges in the current snapshot.${gaps.length > 0 ? ` ${gaps.length} relationship lookup gap${gaps.length === 1 ? '' : 's'}.` : ''}`
           : 'Waiting for the inventory snapshot.',
       };
     }

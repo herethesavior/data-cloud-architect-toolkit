@@ -175,7 +175,15 @@ export function Settings({
       ? ''
       : bridge?.paired !== true
         ? 'Connect a bridge before changing the API version.'
-        : 'Wait for the bridge to reconnect before changing the API version.';
+        : bridge.relay === 'working'
+          ? 'Wait for the bridge to finish its current operation before changing the API version.'
+          : bridge.relay === 'waiting'
+            ? 'Wait for the bridge to check in before changing the API version.'
+            : bridge.relay === 'stale'
+              ? 'Bring the bridge back online before changing the API version.'
+              : bridge.relay === 'unavailable'
+                ? 'Bridge status is temporarily unavailable. Refresh status before changing the API version.'
+                : 'Check the bridge connection, then try again.';
 
   const clearMetadata = async () => {
     setDataNotice('');
@@ -236,7 +244,7 @@ export function Settings({
     : bridge?.relay === 'unavailable'
       ? { tone: 'warning' as const, text: 'Bridge status is temporarily unavailable. Refresh to try again.' }
       : bridge?.relay === 'working'
-        ? { tone: 'brand' as const, text: 'The bridge is running a long operation. Status updates when it finishes.' }
+        ? { tone: 'brand' as const, text: 'The bridge is running a long operation. It will check in again when it finishes. The API version stays unchanged until then.' }
         : bridge?.relay === 'stale'
           ? { tone: 'danger' as const, text: 'The bridge has not checked in for about a minute. Check its network connection, then restart it if it is still running.' }
           : bridge?.paired && bridge.relay === 'waiting'

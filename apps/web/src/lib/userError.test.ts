@@ -24,6 +24,14 @@ describe('describeError', () => {
     });
   });
 
+  it('names a busy bridge request without suggesting a reconnect', () => {
+    expect(describeError(new ApiError('BRIDGE_BUSY', 'raw detail'), 'compatibility')).toEqual({
+      message: 'Another bridge request is still running.',
+      hint: 'Wait for it to finish, then try again.',
+      recovery: 'retry',
+    });
+  });
+
   it('prefers a specific recovery path when the code is known', () => {
     expect(describeError(new ApiError('BRIDGE_PAIRING_RESET', 'raw reset detail'), 'refresh')).toEqual({
       message: 'The bridge pairing was reset.',

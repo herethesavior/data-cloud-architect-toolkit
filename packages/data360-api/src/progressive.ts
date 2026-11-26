@@ -968,7 +968,7 @@ export function discoveryProgress(state: ProgressiveDiscoveryState): DiscoveryPr
     message: sessionState === 'failed'
       ? 'Some families stopped after a page failure. Earlier results are still available.'
       : active ? 'Loading metadata in small batches.'
-        : degraded ? 'Inventory loaded with gaps. Earlier results were kept.'
+        : degraded ? 'Inventory loaded with gaps. The records that loaded are still available.'
           : 'All discovered metadata is loaded.',
   };
 }

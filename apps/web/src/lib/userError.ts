@@ -127,8 +127,8 @@ const codeCopy: Record<string, UserError> = {
     recovery: 'connect',
   },
   BRIDGE_BUSY: {
-    message: 'Another request is still running.',
-    hint: 'Wait a moment, then try again.',
+    message: 'Another bridge request is still running.',
+    hint: 'Wait for it to finish, then try again.',
     recovery: 'retry',
   },
   BRIDGE_STATUS_UNAVAILABLE: {
