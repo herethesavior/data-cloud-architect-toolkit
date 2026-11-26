@@ -141,6 +141,27 @@ function explicitEnd(value: unknown): boolean {
   return false;
 }
 
+/** Offset endpoints can also announce completion without exposing a cursor. */
+export function hasExplicitEnd(value: unknown): boolean {
+  const seen = new WeakSet<object>();
+  let frontier: unknown[] = [value];
+  for (let depth = 0; depth < 8 && frontier.length > 0; depth += 1) {
+    const next: unknown[] = [];
+    for (const candidate of frontier) {
+      if (!isRecord(candidate) || seen.has(candidate)) continue;
+      seen.add(candidate);
+      if (explicitEnd(candidate)) return true;
+      for (const key of NESTED_KEYS) {
+        const nested = candidate[key];
+        if (Array.isArray(nested)) next.push(...nested);
+        else if (isRecord(nested)) next.push(nested);
+      }
+    }
+    frontier = next;
+  }
+  return false;
+}
+
 function explicitMore(value: unknown): boolean {
   if (!isRecord(value)) return false;
   for (const key of MORE_KEYS) {
@@ -269,6 +290,9 @@ export function offsetContinuation(
   pageItemCount: number,
 ): Continuation {
   const total = extractTotal(decoded);
+  if (hasExplicitEnd(decoded)) {
+    return { cursor: null, param: 'offset', nextPath: null, total, hasMore: false, uncertain: false };
+  }
   const offset = pathOffset(requestPath) ?? 0;
   const loaded = offset + pageItemCount;
   const hasMore = pageItemCount > 0

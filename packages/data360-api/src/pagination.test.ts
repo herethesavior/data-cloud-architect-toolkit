@@ -64,6 +64,14 @@ describe('opaque continuation handling', () => {
     expect(extractContinuation({ totalSize: 10, done: true, nextToken: 'ignored' }).hasMore).toBe(false);
   });
 
+  it('honors an explicit end before requesting another offset page', () => {
+    const path = 'services/data/v68.0/ssot/data-transforms?filterGroup=Medium&limit=20&offset=0';
+    const rows = new Array(20).fill({ name: 'Transform' });
+    const continuation = offsetContinuation({ dataTransforms: rows, hasMore: false }, path, 20, 20);
+    expect(continuation.hasMore).toBe(false);
+    expect(buildNextPath(path, continuation)).toBe(path);
+  });
+
   it('flags a reported next page that has no usable cursor', () => {
     const continuation = extractContinuation({ meta: { hasNextPage: true } });
     expect(continuation.hasMore).toBe(true);

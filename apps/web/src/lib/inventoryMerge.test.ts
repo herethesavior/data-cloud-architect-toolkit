@@ -188,6 +188,23 @@ describe('mergeInventorySnapshot', () => {
     expect(mergeInventorySnapshot(previous, incoming).dlos).toHaveLength(10);
   });
 
+  it('keeps rows when a CLI output-limit gap makes a shorter result untrustworthy', () => {
+    const previous = snapshot({}, progress('complete', {
+      'data-transforms': { status: 'complete', loaded: 10, pagesFetched: 1 },
+    }));
+    previous.dataTransforms = Array.from({ length: 10 }, (_, index) => ({
+      ...structuredClone(demoInventory.dataTransforms[0]!),
+      apiName: `Transform_${index}`,
+    })) as InventorySnapshot['dataTransforms'];
+    const incoming = snapshot(
+      { dataTransforms: [] },
+      progress('complete', { 'data-transforms': { status: 'complete', loaded: 0, pagesFetched: 1 } }),
+      [{ family: 'data-transforms', code: 'OUTPUT_LIMIT', message: 'gap', severity: 'error' }],
+    );
+
+    expect(mergeInventorySnapshot(previous, incoming).dataTransforms).toHaveLength(10);
+  });
+
   it('keeps rows for a failed family even when the session is terminal', () => {
     const previous = snapshot({}, progress('failed', {
       dlos: { status: 'failed', loaded: 10, pagesFetched: 2 },

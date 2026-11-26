@@ -17,11 +17,23 @@ export function extractHttpStatus(message: string): number | null {
   return null;
 }
 
+export const OUTPUT_LIMIT_MESSAGE =
+  'Salesforce CLI could not read this response because it was too large. Start a new load to use smaller pages.';
+
+/** The CLI output cap is a size problem, not an access or capability failure. */
+export function isOutputLimitMessage(message: string): boolean {
+  return /Salesforce CLI output exceeded the safe size limit|could not read this response because it was too large/i
+    .test(message);
+}
+
 /** A 403 is access denied, not proof that Data 360 is disabled. */
 export function classifyRestFailure(status: number | null, message: string): {
   status: Extract<RetrievalStatus, 'forbidden' | 'unsupported' | 'error'>;
   message: string;
 } {
+  if (isOutputLimitMessage(message)) {
+    return { status: 'error', message: OUTPUT_LIMIT_MESSAGE };
+  }
   if (status === 403) {
     return {
       status: 'forbidden',

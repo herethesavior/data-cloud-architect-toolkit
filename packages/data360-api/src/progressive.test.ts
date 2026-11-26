@@ -18,8 +18,10 @@ import type { RestClient } from './discover.ts';
 import {
   buildConnectorCatalogPath,
   buildConnectorConnectionsPath,
+  buildDataTransformPath,
   buildDmoRelationshipsPath,
   buildExpectedCountPath,
+  buildFamilyPath,
   buildMappingPath,
 } from './endpoints.ts';
 import {
@@ -37,6 +39,7 @@ const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
 const dloPath = `${base}/data-lake-objects`;
 const dmoPath = `${base}/data-model-objects?limit=100&offset=0`;
+const transformPath = buildFamilyPath('data-transforms', '65.0');
 const dmoNames = ['Account_DMO__dlm', 'Contact_DMO__dlm', 'Order_DMO__dlm'];
 const dmoSpaces: Record<string, string> = {
   Account_DMO__dlm: 'default',
@@ -76,10 +79,25 @@ function pagedDlos(total = 200, perPage = 10): Record<string, string> {
   return pages;
 }
 
+function pagedTransforms(total = 22, perPage = 20): Record<string, string> {
+  const pages: Record<string, string> = {};
+  for (let offset = 0; offset < total; offset += perPage) {
+    const path = buildDataTransformPath('65.0', offset);
+    const records = Array.from({ length: Math.min(perPage, total - offset) }, (_, index) => ({
+      apiName: `Transform_${String(offset + index + 1).padStart(3, '0')}`,
+      label: `Transform ${offset + index + 1}`,
+      type: 'BATCH',
+    }));
+    pages[path] = JSON.stringify({ dataTransforms: records, totalSize: total });
+  }
+  return pages;
+}
+
 function fakeCli(
   overrides: Record<string, string> = {},
   failures: Record<string, number> = {},
   errors: Record<string, string> = {},
+  thrown: Record<string, unknown> = {},
 ): FakeCli {
   const calls: string[] = [];
   const attempts = new Map<string, number>();
@@ -89,6 +107,7 @@ function fakeCli(
     'data-streams': dataStreamsJson,
     'data-transforms': dataTransformsJson,
   } as const;
+
   const countPaths = Object.fromEntries(Object.entries(countFixtures).map(([family, response]) => [
     buildExpectedCountPath(family as keyof typeof countFixtures, '65.0')!,
     response,
@@ -102,7 +121,7 @@ function fakeCli(
     [`${base}/data-streams`]: dataStreamsJson,
     [buildConnectorCatalogPath('65.0')]: connectorCatalogJson,
     [buildConnectorConnectionsPath('65.0', 'SalesforceDotCom')]: connectorConnectionsJson,
-    [`${base}/data-transforms`]: dataTransformsJson,
+    [transformPath]: dataTransformsJson,
     ...countPaths,
     ...Object.fromEntries(dmoNames.map((name) => [
       buildMappingPath(name, '65.0', dmoSpaces[name]), mappingsJson,
@@ -117,6 +136,7 @@ function fakeCli(
       calls.push(path);
       const count = (attempts.get(path) ?? 0) + 1;
       attempts.set(path, count);
+      if (path in thrown) throw thrown[path];
       if (errors[path]) {
         throw new CliError('COMMAND_FAILED', errors[path]!);
       }
@@ -180,6 +200,69 @@ describe('progressive discovery', () => {
     expect(familyProgress('dmos').expectedTotal).toBeNull();
     expect(familyProgress('mappings').expectedTotal).toBeNull();
     expect(cli.calls).not.toContain(`${dloPath}?limit=1`);
+  });
+
+  it('loads a large Data Transform inventory in bounded offset pages', async () => {
+    const pages = pagedTransforms();
+    const cli = fakeCli({
+      ...pages,
+      [buildExpectedCountPath('data-transforms', '65.0')!]: JSON.stringify({
+        dataTransforms: [],
+        totalSize: 22,
+      }),
+    });
+    const state = await createProgressiveDiscovery({
+      cli,
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+    });
+
+    expect(cli.calls).toContain(transformPath);
+    expect(cli.calls).not.toContain(`${base}/data-transforms`);
+
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(snapshot.dataTransforms.map((transform) => transform.apiName)).toEqual(
+      Array.from({ length: 22 }, (_, index) => `Transform_${String(index + 1).padStart(3, '0')}`),
+    );
+    expect(cli.calls).toContain(buildDataTransformPath('65.0', 20));
+    expect(snapshot.capabilities.find((capability) => capability.family === 'data-transforms')).toMatchObject({
+      status: 'available',
+      itemCount: 22,
+    });
+    expect(snapshot.warnings.some((warning) => warning.code === 'OUTPUT_LIMIT')).toBe(false);
+  });
+
+  it('translates a CLI size limit into an actionable Data Transform gap', async () => {
+    const cli = fakeCli({}, {}, {}, {
+      [transformPath]: new CliError('OUTPUT_LIMIT', 'Salesforce CLI output exceeded the safe size limit.'),
+    });
+    const state = await createProgressiveDiscovery({
+      cli,
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+    });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(snapshot.dataTransforms).toHaveLength(0);
+    expect(snapshot.capabilities.find((capability) => capability.family === 'data-transforms')).toMatchObject({
+      status: 'error',
+    });
+    expect(snapshot.capabilities.find((capability) => capability.family === 'data-transforms')?.message)
+      .toMatch(/too large.*smaller pages/i);
+    expect(snapshot.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        family: 'data-transforms',
+        code: 'OUTPUT_LIMIT',
+        message: expect.stringMatching(/too large.*smaller pages/i),
+      }),
+    ]));
   });
 
   it('retries a reported count gap, then ends with a visible gap instead of looping forever', async () => {

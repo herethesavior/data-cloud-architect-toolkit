@@ -25,6 +25,14 @@ import type { NormalizeContext } from './normalize.ts';
 
 export const MAX_TRANSFORM_RUN_PAGES = 20;
 
+/**
+ * Relay responses have a hard 5 MiB cap and transform bundles cannot be split
+ * like inventory snapshots. Keep one transform's raw definition below that cap
+ * before the bridge tries to relay it.
+ */
+export const MAX_TRANSFORM_METADATA_BYTES = 512 * 1024;
+const OMITTED_METADATA_MESSAGE = 'Large transform metadata was omitted to keep this view responsive.';
+
 export interface FetchTransformBundleOptions {
   client: RestClient;
   alias: string;
@@ -64,6 +72,37 @@ function sanitizeTransform(transform: DataTransform): DataTransform {
   return transform.raw === null || transform.raw === undefined
     ? transform
     : { ...transform, raw: sanitizeRaw(transform.raw) };
+}
+
+interface Prepared<T> {
+  value: T;
+  omitted: boolean;
+}
+
+function metadataBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value ?? null)).byteLength;
+}
+
+function omitIfTooLarge(value: unknown, fallback: unknown): { value: unknown; omitted: boolean } {
+  return metadataBytes(value) > MAX_TRANSFORM_METADATA_BYTES
+    ? { value: fallback, omitted: true }
+    : { value, omitted: false };
+}
+
+/** Preserve summary fields while dropping a definition that cannot be relayed. */
+function prepareTransform(transform: DataTransform): Prepared<DataTransform> {
+  const sanitized = sanitizeTransform(transform);
+  const definition = omitIfTooLarge(sanitized.definition, OMITTED_METADATA_MESSAGE);
+  const raw = omitIfTooLarge(sanitized.raw, { omitted: true, reason: OMITTED_METADATA_MESSAGE });
+  return {
+    value: { ...sanitized, definition: definition.value as string | undefined, raw: raw.value },
+    omitted: definition.omitted || raw.omitted,
+  };
+}
+
+function prepareSchedule(schedule: TransformSchedule): Prepared<TransformSchedule> {
+  const raw = omitIfTooLarge(schedule.raw, { omitted: true, reason: OMITTED_METADATA_MESSAGE });
+  return { value: { ...schedule, raw: raw.value }, omitted: raw.omitted };
 }
 
 /** Accept documented single-resource envelopes without guessing at unknown shapes. */
@@ -196,14 +235,17 @@ export async function fetchTransformBundle(options: FetchTransformBundleOptions)
     if (!normalized) {
       throw new CliError('UNEXPECTED_RESPONSE', 'The transform detail response did not contain a recognizable data transform.');
     }
-    transform = sanitizeTransform(normalized);
+    const prepared = prepareTransform(normalized);
+    transform = prepared.value;
     detailState = {
-      status: 'available',
-      message: 'Transform details were retrieved from the detail endpoint.',
+      status: prepared.omitted ? 'partial' : 'available',
+      message: prepared.omitted
+        ? `Transform details were retrieved. ${OMITTED_METADATA_MESSAGE}`
+        : 'Transform details were retrieved from the detail endpoint.',
     };
   } catch (error) {
     const failure = sectionFailure(error);
-    transform = seed ? sanitizeTransform(seed) : null;
+    transform = seed ? prepareTransform(seed).value : null;
     detailState = {
       status: failure.status,
       message: seed
@@ -245,15 +287,18 @@ export async function fetchTransformBundle(options: FetchTransformBundleOptions)
         message: 'The schedule endpoint returned no schedule metadata for this transform.',
       };
     } else {
-      schedule = normalizeTransformSchedule(decoded, {
+      const normalizedSchedule = normalizeTransformSchedule(decoded, {
         ...base,
         apiVersion,
         endpoint: schedulePath,
       });
-      schedule = { ...schedule, raw: sanitizeRaw(schedule.raw) };
+      const prepared = prepareSchedule(normalizedSchedule);
+      schedule = prepared.value;
       scheduleState = {
-        status: 'available',
-        message: 'Schedule metadata was retrieved from the schedule endpoint.',
+        status: prepared.omitted ? 'partial' : 'available',
+        message: prepared.omitted
+          ? `Schedule metadata was retrieved. ${OMITTED_METADATA_MESSAGE}`
+          : 'Schedule metadata was retrieved from the schedule endpoint.',
       };
     }
   } catch (error) {
