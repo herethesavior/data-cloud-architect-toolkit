@@ -22,7 +22,7 @@ import { Icon } from './Icon.tsx';
 import { PageIntro } from './PageIntro.tsx';
 import { navigateFromLink } from './AppShell.tsx';
 import { pageHref, pagePath } from '../navigation.ts';
-import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from './ui/index.ts';
+import { Badge, Button, CopyButton, DataTable, DetailDrawer, PaginatedList, SearchField, Tabs } from './ui/index.ts';
 import type { DataTableColumn, TabItem } from './ui/index.ts';
 
 interface ObjectExplorerProps {
@@ -267,9 +267,13 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                 content: selectedLinks.relationships.length === 0 ? (
                   <p className="text-sm text-ink-soft">No relationships are recorded for this object.</p>
                 ) : (
-                  <ul className="space-y-2">
-                    {selectedLinks.relationships.map((edge) => (
-                      <li key={edge.id} className="rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm">
+                  <PaginatedList
+                    items={selectedLinks.relationships}
+                    pageSize={25}
+                    getKey={(edge) => edge.id}
+                    container={(children) => <ul className="space-y-2">{children}</ul>}
+                    render={(edge) => (
+                      <li className="rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <span className="mono text-ink">{edge.source}</span>
@@ -288,8 +292,8 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                           ) : null}
                         </div>
                       </li>
-                    ))}
-                  </ul>
+                    )}
+                  />
                 ),
               },
               {
@@ -298,9 +302,13 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                 content: selectedLinks.mappings.length === 0 ? (
                   <p className="text-sm text-ink-soft">No mapping records reference this object.</p>
                 ) : (
-                  <ul className="space-y-2">
-                    {selectedLinks.mappings.map((mapping) => (
-                      <li key={mapping.apiName ?? `${mapping.sourceObject}-${mapping.targetObject}`} className="rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm">
+                  <PaginatedList
+                    items={selectedLinks.mappings}
+                    pageSize={25}
+                    getKey={(mapping) => mapping.apiName ?? `${mapping.sourceObject}-${mapping.targetObject}`}
+                    container={(children) => <ul className="space-y-2">{children}</ul>}
+                    render={(mapping) => (
+                      <li className="rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm">
                         <div className="flex flex-wrap items-center gap-2 font-medium text-ink">
                           <span className="mono">{mapping.sourceObject}</span>
                           <Icon name="arrowRight" size={14} className="text-ink-faint" />
@@ -308,8 +316,8 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                         </div>
                         <p className="mt-1 text-xs text-ink-soft">{mapping.fieldMappings.length} field mappings</p>
                       </li>
-                    ))}
-                  </ul>
+                    )}
+                  />
                 ),
               },
               {
@@ -320,15 +328,19 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                     {selectedLinks.streams.length === 0 ? (
                       <p className="text-sm text-ink-soft">No data streams record this object as their target.</p>
                     ) : (
-                      <ul className="space-y-2">
-                        {selectedLinks.streams.map((stream) => (
-                          <li key={stream.apiName} className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm">
+                      <PaginatedList
+                        items={selectedLinks.streams}
+                        pageSize={25}
+                        getKey={(stream) => stream.apiName}
+                        container={(children) => <ul className="space-y-2">{children}</ul>}
+                        render={(stream) => (
+                          <li className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm">
                             <span className="font-medium text-ink">{stream.label ?? stream.apiName}</span>
                             <Badge tone="neutral">{stream.status ?? 'Status unknown'}</Badge>
                             {stream.refreshMetadata ? <span className="text-xs text-ink-soft">{stream.refreshMetadata}</span> : null}
                           </li>
-                        ))}
-                      </ul>
+                        )}
+                      />
                     )}
                     <p className="text-xs text-ink-soft">
                       Transform linkage is not exposed in the current metadata, so none is inferred here.
@@ -449,10 +461,13 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
               />
             ) : (
               <>
-                <div className="grid gap-2 md:hidden">
-                  {filtered.map((object) => (
+                <PaginatedList
+                  items={filtered}
+                  pageSize={100}
+                  getKey={(object) => object.apiName}
+                  container={(children) => <div className="grid gap-2 md:hidden">{children}</div>}
+                  render={(object) => (
                     <button
-                      key={object.apiName}
                       type="button"
                       onClick={() => setSelected(object)}
                       className="panel w-full p-4 text-left"
@@ -470,8 +485,8 @@ export function ObjectExplorer({ context, kind, focusObject, onFocusHandled, onN
                       </div>
                       {linkBadges(object)}
                     </button>
-                  ))}
-                </div>
+                  )}
+                />
                 <div className="panel hidden overflow-hidden md:block">
                   <DataTable
                     columns={columns}

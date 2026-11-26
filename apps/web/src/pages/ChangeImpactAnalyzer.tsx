@@ -13,7 +13,7 @@ import type { InventorySnapshot } from '@dcat/core';
 import { navigateFromLink } from '../components/AppShell.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
-import { Badge, Panel, SearchField, SectionHeading } from '../components/ui/index.ts';
+import { Badge, PaginatedList, Panel, SearchField, SectionHeading } from '../components/ui/index.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
 import { useInventory } from '../lib/useInventory.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
@@ -190,10 +190,10 @@ function AnalyzerView({
 
   const filteredTargets = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return targets.slice(0, 60);
+    if (!q) return targets;
     return targets.filter((target) =>
       [target.label, target.anchorLabel, target.subtitle, target.apiName].some((value) => value.toLowerCase().includes(q)),
-    ).slice(0, 60);
+    );
   }, [targets, search]);
 
   useEffect(() => {
@@ -276,12 +276,18 @@ function AnalyzerView({
               </button>
             ))}
           </div>
-          <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1" aria-label="Impact targets">
-            {filteredTargets.length === 0 ? (
-              <p className="text-sm text-ink-soft">No targets match “{search}”.</p>
-            ) : filteredTargets.map((target) => (
+          <PaginatedList
+            items={filteredTargets}
+            pageSize={25}
+            getKey={(target) => target.id}
+            container={(children) => (
+              <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1" aria-label="Impact targets">
+                {children}
+              </div>
+            )}
+            emptyMessage={`No targets match “${search}”.`}
+            render={(target) => (
               <button
-                key={target.id}
                 type="button"
                 onClick={() => updateParams({ target: target.id })}
                 className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
@@ -295,8 +301,8 @@ function AnalyzerView({
                 <p className="mono mt-1 truncate text-xs text-ink-faint">{target.anchorLabel}</p>
                 <p className="mt-1 text-xs text-ink-soft">{target.subtitle}</p>
               </button>
-            ))}
-          </div>
+            )}
+          />
         </Panel>
 
         <div className="space-y-4">
@@ -347,11 +353,15 @@ function AnalyzerView({
               ) : groups.map((group) => (
                 <Panel key={group.group}>
                   <SectionHeading title={group.label} description={`${group.items.length} item${group.items.length === 1 ? '' : 's'} to review`} />
-                  <ul className="space-y-3">
-                    {group.items.map((item) => (
-                      <ResultCard key={`${item.group}:${item.id}:${item.direction}`} item={item} onNavigate={onNavigate} />
-                    ))}
-                  </ul>
+                  <PaginatedList
+                    items={group.items}
+                    pageSize={25}
+                    getKey={(item) => `${item.group}:${item.id}:${item.direction}`}
+                    container={(children) => <ul className="space-y-3">{children}</ul>}
+                    render={(item) => (
+                      <ResultCard item={item} onNavigate={onNavigate} />
+                    )}
+                  />
                 </Panel>
               ))}
             </>

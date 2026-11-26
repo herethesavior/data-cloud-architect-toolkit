@@ -6,6 +6,8 @@ export { CopyButton } from './CopyButton.tsx';
 export { DataTable } from './DataTable.tsx';
 export type { DataTableColumn } from './DataTable.tsx';
 export { DetailDrawer } from './DetailDrawer.tsx';
+export { PaginationControls, paginate, usePagination } from './Pagination.tsx';
+export { PaginatedList } from './PaginatedList.tsx';
 export { Panel } from './Panel.tsx';
 export { SearchField } from './SearchField.tsx';
 export { SectionHeading } from './SectionHeading.tsx';

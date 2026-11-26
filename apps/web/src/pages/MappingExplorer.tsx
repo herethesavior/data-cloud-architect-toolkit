@@ -14,7 +14,7 @@ import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
-import { Badge, DataTable, Panel, SearchField } from '../components/ui/index.ts';
+import { Badge, DataTable, PaginatedList, Panel, SearchField } from '../components/ui/index.ts';
 import type { DataTableColumn } from '../components/ui/index.ts';
 import { useInventory } from '../lib/useInventory.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
@@ -125,9 +125,13 @@ export function MappingExplorer({ context }: { context: WorkspaceContext | null 
                   : 'No mappings match that search.'}
               </Panel>
             ) : (
-              <div className="grid gap-4 xl:grid-cols-2">
-                {mappings.map((mapping, index) => (
-                  <Panel key={mapping.apiName ?? `${mapping.sourceObject}-${mapping.targetObject}-${index}`} padded={false}>
+              <PaginatedList
+                items={mappings}
+                pageSize={50}
+                getKey={(mapping, index) => mapping.apiName ?? `${mapping.sourceObject}-${mapping.targetObject}-${index}`}
+                container={(children) => <div className="grid gap-4 xl:grid-cols-2">{children}</div>}
+                render={(mapping) => (
+                  <Panel padded={false}>
                     <div className="p-5">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <Badge tone="neutral">Mapping</Badge>
@@ -163,8 +167,8 @@ export function MappingExplorer({ context }: { context: WorkspaceContext | null 
                       </details>
                     </div>
                   </Panel>
-                ))}
-              </div>
+                )}
+              />
             )}
           </>
         );

@@ -27,7 +27,7 @@ import type { ExportMenuItem } from '../components/ExportMenu.tsx';
 import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
-import { Badge, Panel, SectionHeading } from '../components/ui/index.ts';
+import { Badge, DataTable, PaginatedList, Panel, SectionHeading } from '../components/ui/index.ts';
 import { pagePath } from '../navigation.ts';
 import type { Page } from '../navigation.ts';
 import {
@@ -577,10 +577,14 @@ function ErdExplorerView({ context, inventory, freshness, onNavigate }: ErdViewP
             title="Relationship detail"
             description="Certainty is shown on every edge so inferred links are never mistaken for source facts."
           />
-          <div className="grid gap-2 md:grid-cols-2">
-            {edges.map((edge) => (
+          <PaginatedList
+            items={edges}
+            pageSize={25}
+            getKey={(edge) => edge.id}
+            container={(children) => <div className="grid gap-2 md:grid-cols-2">{children}</div>}
+            emptyMessage="No relationships match this filter."
+            render={(edge) => (
               <button
-                key={edge.id}
                 type="button"
                 onClick={() => focusEdge(edge.id)}
                 className={`rounded-lg border px-3 py-3 text-left transition-colors ${
@@ -604,11 +608,8 @@ function ErdExplorerView({ context, inventory, freshness, onNavigate }: ErdViewP
                   ) : null}
                 </p>
               </button>
-            ))}
-            {edges.length === 0 ? (
-              <p className="text-sm text-ink-soft">No relationships match this filter.</p>
-            ) : null}
-          </div>
+            )}
+          />
         </Panel>
 
         <Panel>
@@ -625,26 +626,29 @@ function ErdExplorerView({ context, inventory, freshness, onNavigate }: ErdViewP
                   <span className="tabular-nums">{selectedObject.fields.length}</span> fields · <span className="tabular-nums">{selectedRelationships.length}</span> relationships
                 </p>
               </div>
-              <div className="max-h-64 overflow-auto rounded-lg border border-line">
-                <table className="data-table" aria-label={`Fields for ${selectedNode.data.label}`}>
-                  <thead>
-                    <tr><th>Field</th><th>Type</th><th>Key</th></tr>
-                  </thead>
-                  <tbody>
-                    {selectedNode.data.fields.map((field) => (
-                      <tr key={field.apiName}>
-                        <td className="mono text-ink">{field.apiName}</td>
-                        <td className="text-xs text-ink-soft">{field.dataType}</td>
-                        <td className="text-xs text-ink-soft">
+              <div className="rounded-lg border border-line">
+                <DataTable
+                  columns={[
+                    { key: 'field', header: 'Field', render: (field) => <span className="mono text-ink">{field.apiName}</span> },
+                    { key: 'type', header: 'Type', render: (field) => <span className="text-xs text-ink-soft">{field.dataType}</span> },
+                    {
+                      key: 'key',
+                      header: 'Key',
+                      render: (field) => (
+                        <span className="text-xs text-ink-soft">
                           {[
                             field.isPrimaryKey ? 'PK' : '',
                             field.isForeignKey ? 'FK' : '',
                           ].filter(Boolean).join(' / ') || '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </span>
+                      ),
+                    },
+                  ]}
+                  rows={selectedNode.data.fields}
+                  getRowKey={(field) => field.apiName}
+                  ariaLabel={`Fields for ${selectedNode.data.label}`}
+                  pageSize={50}
+                />
               </div>
               {selectedEdge ? (() => {
                 const href = `${pagePath('change-impact')}?target=${encodeURIComponent(`relationship:${selectedEdge.id}`)}`;

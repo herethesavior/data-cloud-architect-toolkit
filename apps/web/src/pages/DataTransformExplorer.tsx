@@ -8,7 +8,7 @@ import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
-import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from '../components/ui/index.ts';
+import { Badge, Button, CopyButton, DataTable, DetailDrawer, PaginatedList, SearchField, Tabs } from '../components/ui/index.ts';
 import type { DataTableColumn, TabItem } from '../components/ui/index.ts';
 import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.ts';
 import { filterByQuery, safeDateText } from '../lib/inventory.ts';
@@ -70,11 +70,15 @@ function ObjectRefList({ values, objects, empty }: {
 }) {
   if (!values || values.length === 0) return <p className="text-sm text-ink-soft">{empty}</p>;
   return (
-    <ul className="space-y-2">
-      {values.map((value) => {
+    <PaginatedList
+      items={values}
+      pageSize={25}
+      getKey={(value) => value}
+      container={(children) => <ul className="space-y-2">{children}</ul>}
+      render={(value) => {
         const match = objects.find((object) => object.apiName === value);
         return (
-          <li key={value} className="rounded-lg border border-line bg-surface-alt px-3 py-2.5">
+          <li className="rounded-lg border border-line bg-surface-alt px-3 py-2.5">
             <p className="mono text-sm text-ink">{value}</p>
             <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
               <Badge tone={match ? 'success' : 'neutral'} dot>
@@ -85,8 +89,8 @@ function ObjectRefList({ values, objects, empty }: {
             </p>
           </li>
         );
-      })}
-    </ul>
+      }}
+    />
   );
 }
 
@@ -497,10 +501,13 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
               />
             ) : (
               <>
-                <div className="grid gap-2 md:hidden">
-                  {transforms.map((transform) => (
+                <PaginatedList
+                  items={transforms}
+                  pageSize={100}
+                  getKey={transformId}
+                  container={(children) => <div className="grid gap-2 md:hidden">{children}</div>}
+                  render={(transform) => (
                     <button
-                      key={transformId(transform)}
                       type="button"
                       onClick={() => setSelectedApiName(transform.apiName)}
                       className="panel w-full p-4 text-left"
@@ -518,8 +525,8 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
                         <span>{shown(transform.lastRunStatus, 'No run data')}</span>
                       </div>
                     </button>
-                  ))}
-                </div>
+                  )}
+                />
                 <div className="panel hidden overflow-hidden md:block">
                   <DataTable
                     columns={columns}

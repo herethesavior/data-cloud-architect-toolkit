@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
+import { PaginationControls, paginate, usePagination } from './Pagination.tsx';
 
 export interface DataTableColumn<T> {
   key: string;
@@ -33,14 +34,7 @@ export function DataTable<T>({
   emptyMessage = 'No matching records.',
   pageSize,
 }: DataTableProps<T>) {
-  const [page, setPage] = useState(1);
-  const totalPages = pageSize ? Math.max(1, Math.ceil(rows.length / pageSize)) : 1;
-  // Filtered rows can shrink under the current page; clamp during render so the
-  // table never flashes empty before the effect can reset the page state.
-  const currentPage = Math.min(page, totalPages);
-  useEffect(() => {
-    if (page !== currentPage) setPage(currentPage);
-  }, [page, currentPage]);
+  const { page, totalPages, goPrevious, goNext } = usePagination(rows.length, pageSize);
 
   if (rows.length === 0) {
     return (
@@ -53,7 +47,6 @@ export function DataTable<T>({
     );
   }
 
-  const paged = pageSize ? rows.slice((currentPage - 1) * pageSize, currentPage * pageSize) : rows;
   return (
     <>
       <div className="overflow-x-auto">
@@ -71,7 +64,7 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {paged.map((row) => (
+            {paginate(rows, page, pageSize).map((row) => (
               <tr key={getRowKey(row)}>
                 {columns.map((column) => (
                   <td
@@ -86,33 +79,12 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
-      {totalPages > 1 ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
-          <span role="status" className="tabular-nums">
-            Page {currentPage} of {totalPages}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              disabled={currentPage <= 1}
-              aria-label="Previous page"
-              className="min-h-8 rounded-lg border border-line-strong bg-surface px-3 font-semibold transition-colors hover:bg-surface hover:text-ink disabled:opacity-40"
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-              disabled={currentPage >= totalPages}
-              aria-label="Next page"
-              className="min-h-8 rounded-lg border border-line-strong bg-surface px-3 font-semibold text-brand transition-colors hover:bg-brand-soft disabled:opacity-40"
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <PaginationControls
+        page={page}
+        totalPages={totalPages}
+        goPrevious={goPrevious}
+        goNext={goNext}
+      />
     </>
   );
 }

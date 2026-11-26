@@ -13,6 +13,7 @@ Both modes include a clearly labelled **Demo** mode. Demo mode needs no Salesfor
 
 - Repository: https://github.com/herethesavior/data-cloud-architect-toolkit
 - Hosted site: https://sfdcat.pages.dev/
+- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the local connector, hosted relay, inventory lifecycle, and view layers in plain language.
 
 > Release status: local discovery, hosted live-org inventory, the outbound bridge, and CI are in place. The current release adds the **Change Impact Analyzer** and the latest stability pass described under [What changed](README.md#what-changed).
 
@@ -305,6 +306,7 @@ packages/
   exporters/           Local export helpers
   test-fixtures/       Sanitized CLI output and demo inventory
 docs/
+  ARCHITECTURE.md
   HOSTED_ONBOARDING.md
   CLOUDFLARE_PAGES_SETUP.md
 ```

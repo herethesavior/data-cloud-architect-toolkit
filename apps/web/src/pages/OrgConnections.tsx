@@ -764,7 +764,7 @@ export function OrgConnections({
           ) : null}
           {orgListReady && !inventoryLocked && activeOrgs.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-line">
-              <DataTable columns={columns} rows={activeOrgs} getRowKey={(org) => org.alias} ariaLabel="Authenticated Salesforce orgs" />
+              <DataTable columns={columns} rows={activeOrgs} getRowKey={(org) => org.alias} ariaLabel="Authenticated Salesforce orgs" pageSize={50} />
             </div>
           ) : null}
           {orgListReady && showHidden && hiddenOrgs.length > 0 ? (
@@ -773,7 +773,7 @@ export function OrgConnections({
                 Hidden from DCAT only. Restoring an org does not change Salesforce CLI authentication.
               </p>
               <div className="overflow-x-auto rounded-lg border border-line bg-surface">
-                <DataTable columns={hiddenColumns} rows={hiddenOrgs} getRowKey={(org) => org.alias} ariaLabel="Orgs hidden from DCAT" />
+                <DataTable columns={hiddenColumns} rows={hiddenOrgs} getRowKey={(org) => org.alias} ariaLabel="Orgs hidden from DCAT" pageSize={50} />
               </div>
             </div>
           ) : null}
