@@ -36,6 +36,7 @@ import {
   isValidDataspace,
   isValidDmoDeveloperName,
   offsetPageSizeFor,
+  RELATIONSHIP_REQUEST_PAGE_SIZE,
 } from './endpoints.ts';
 import {
   deriveInferredRelationships,
@@ -758,7 +759,9 @@ async function fetchRelationshipTaskPage(
       pushWarning(state, 'dmos', 'RELATIONSHIP_RETRY_SUCCEEDED',
         `Relationship lookup for DMO ${task.dmoName} succeeded after a transient retry.`, 'info');
     }
-    const continuation = extractContinuation(decoded);
+    // Relationship subresources use the same bounded offset contract as DMOs.
+    // A full 25-row page with a larger total must not be mistaken for the end.
+    const continuation = offsetContinuation(decoded, task.path, RELATIONSHIP_REQUEST_PAGE_SIZE, entries.length);
     applyContinuation(state, 'dmos', task, continuation);
     state.relationshipQueries.pageIndex += task.pageIndex - before;
     state.relationshipQueries.total = Math.max(state.relationshipQueries.total ?? 0, task.total ?? 0) || state.relationshipQueries.total;
@@ -1177,7 +1180,7 @@ export async function initializeProgressiveDiscovery(
   const generation = options.generation ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const versionsPath = buildVersionsPath();
   const resolved = await resolveApiVersion(
-    () => options.cli.restGet(options.alias, versionsPath),
+    () => options.cli.restGet(options.alias, versionsPath, { signal: options.signal }),
     options.apiVersionSelection,
     options.onApiVersionResolved,
   );

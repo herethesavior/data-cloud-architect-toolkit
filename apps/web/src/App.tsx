@@ -3,6 +3,7 @@ import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack
 import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
+import { settleInterruptedInventory } from './lib/inventorySettlement.ts';
 import { describeError } from './lib/userError.ts';
 import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
@@ -163,20 +164,11 @@ export function App() {
     resumeControllerRef.current = null;
   };
 
-  // A stopped load keeps every row that already landed; only its running flag
-  // changes, so the progress banner stops without rolling back partial data.
   const settleInventoryAfterStop = (key: readonly ['inventory', string], contextId: string) => {
     if (contextId !== activeContextIdRef.current) return;
     const latest = queryClient.getQueryData<InventorySnapshot>(key);
-    if (latest?.progress?.state !== 'running') return;
-    queryClient.setQueryData<InventorySnapshot>(key, {
-      ...latest,
-      progress: {
-        ...latest.progress,
-        state: 'partial',
-        message: 'Loading stopped after several batches. Earlier results were kept.',
-      },
-    });
+    if (!latest) return;
+    queryClient.setQueryData<InventorySnapshot>(key, settleInterruptedInventory(latest));
   };
 
   // Context consumers should rerender for state changes, not because the root

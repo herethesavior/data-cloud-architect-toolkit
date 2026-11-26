@@ -6,6 +6,7 @@ import {
   type RetrievalWarning,
   ITEM_DETAILS_OMITTED_WARNING,
   MORE_ITEMS_AVAILABLE_WARNING,
+  RESPONSE_CHUNKED_WARNING,
 } from '@dcat/core';
 import { streamRowKey } from './streamDetail.ts';
 
@@ -36,6 +37,7 @@ const GAP_WARNING_CODES = new Set([
   'ITEMS_SKIPPED',
   ITEM_DETAILS_OMITTED_WARNING,
   MORE_ITEMS_AVAILABLE_WARNING,
+  RESPONSE_CHUNKED_WARNING,
   'MAPPING_QUERY_FAILED',
   'MAPPING_QUERY_LIMIT',
   'OUTPUT_LIMIT',
@@ -44,8 +46,8 @@ const GAP_WARNING_CODES = new Set([
   'RELATIONSHIP_QUERY_FAILED',
   'RELATIONSHIP_QUERY_LIMIT',
 ]);
-// A chunked response is deliberately not treated as a gap: its final chunk still
-// represents a complete snapshot, so a clean pass can reconcile deletions.
+// Every chunk carries this warning, including the last one. A chunk only holds
+// a slice of the snapshot, so none of them can prove a row was deleted.
 
 const fingerprints = new WeakMap<object, string>();
 const rowKeys = new WeakMap<object, Map<MergeFamily, string>>();
@@ -106,7 +108,8 @@ function hasGap(warnings: readonly RetrievalWarning[], family: ResourceFamily): 
   return warnings.some((warning) => {
     if (!GAP_WARNING_CODES.has(warning.code)) return false;
     if (warning.family === family) return true;
-    return warning.family === 'inventory' && warning.code === MORE_ITEMS_AVAILABLE_WARNING;
+    return warning.family === 'inventory'
+      && (warning.code === MORE_ITEMS_AVAILABLE_WARNING || warning.code === RESPONSE_CHUNKED_WARNING);
   });
 }
 

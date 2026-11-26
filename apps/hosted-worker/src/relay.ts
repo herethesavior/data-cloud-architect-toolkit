@@ -568,6 +568,7 @@ export function relayRoutes() {
           id: context.req.param('id'),
           now: Date.now(),
           wait: context.req.query('wait') === '1',
+          ack: context.req.query('ack'),
         },
       );
       if (response.status === 401) {

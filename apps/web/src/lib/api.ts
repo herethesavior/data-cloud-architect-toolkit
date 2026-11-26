@@ -230,6 +230,7 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal, onC
   // Abort releases the UI, then best-effort cancels the queued relay request so
   // a reload cannot hit BRIDGE_BUSY behind an abandoned operation.
   let activeRequestId: string | null = null;
+  let ackedChunkIndex: number | null = null;
   let cancelSent = false;
   const cancelRelayRequest = (id: string) => {
     if (cancelSent) return;
@@ -249,6 +250,11 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal, onC
       await send(token);
     }).catch(() => undefined);
   };
+  // The next relay caller waits for an aborted call's create POST to settle,
+  // but not for the rest of that call: the browser is already released and the
+  // abandoned request is cancelled by id as soon as it exists.
+  let finishCreate: () => void = () => undefined;
+  const createSettled = new Promise<void>((resolve) => { finishCreate = resolve; });
   let onAbort: (() => void) | undefined;
   const cancellation = new Promise<never>((_resolve, reject) => {
     onAbort = () => {
@@ -259,75 +265,94 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal, onC
   });
 
   const execute = async (): Promise<T> => {
-    if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
-    if (isHosted() && await hostedUsesFixtures() && operation.operation !== 'cli.status') {
-      throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode to use the local bridge.');
-    }
-    const deadline = Date.now() + RELAY_OPERATION_TIMEOUT_MS[operation.operation];
-    const createRequest = () => relayRequest<{ id: string }>('/api/relay/requests', {
-      method: 'POST',
-      body: operation,
-      // Do not abort the create POST itself: if the worker already queued the
-      // request, the caller needs its id to send an explicit cancellation.
-      timeoutMs: RELAY_POLL_TIMEOUT_MS,
-    });
-
-    let created: { id: string };
     try {
-      created = await createRequest();
-    } catch (error) {
-      // A slow creation response is recoverable: the Worker reuses the id of an
-      // identical active request, so retrying cannot enqueue a duplicate.
-      if (!(error instanceof ApiError && error.code === 'TIMEOUT') || Date.now() >= deadline) throw error;
-      created = await createRequest();
-    }
-    activeRequestId = created.id;
-    if (signal?.aborted) {
-      cancelRelayRequest(created.id);
-      throw new ApiError('ABORTED', 'Request cancelled.');
-    }
-
-    while (Date.now() < deadline) {
       if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
-      let state: RelayRequestState;
+      if (isHosted() && await hostedUsesFixtures() && operation.operation !== 'cli.status') {
+        throw new ApiError('INVALID_ARGUMENT', 'Switch to live mode to use the local bridge.');
+      }
+      const deadline = Date.now() + RELAY_OPERATION_TIMEOUT_MS[operation.operation];
+      const createRequest = () => relayRequest<{ id: string }>('/api/relay/requests', {
+        method: 'POST',
+        body: operation,
+        // Do not abort the create POST itself: if the worker already queued the
+        // request, the caller needs its id to send an explicit cancellation.
+        timeoutMs: RELAY_POLL_TIMEOUT_MS,
+      });
+
+      let created!: { id: string };
       try {
-        // The Durable Object holds this read until the request settles, so
-        // progressive discovery costs one session read per status poll.
-        state = await relayRequest<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}?wait=1`, {
-          signal,
-          timeoutMs: RELAY_POLL_TIMEOUT_MS,
-        });
+        created = await createRequest();
       } catch (error) {
+        // A slow creation response is recoverable: the Worker reuses the id of an
+        // identical active request, so retrying cannot enqueue a duplicate.
+        if (!(error instanceof ApiError && error.code === 'TIMEOUT') || Date.now() >= deadline) throw error;
+        created = await createRequest();
+      }
+      activeRequestId = created.id;
+      if (signal?.aborted) {
+        cancelRelayRequest(created.id);
+        throw new ApiError('ABORTED', 'Request cancelled.');
+      }
+      // The relay slot is identified now. Later polls can keep running while a
+      // cancelled caller releases the queue.
+      finishCreate();
+
+      while (Date.now() < deadline) {
         if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
-        // A slow status poll is recoverable until the operation deadline. Keep
-        // polling so a bridge that answers late still completes the user action.
-        if (error instanceof ApiError && error.code === 'TIMEOUT' && Date.now() < deadline) {
-          await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
+        let state: RelayRequestState;
+        try {
+          // The Durable Object holds this read until the request settles, so
+          // progressive discovery costs one session read per status poll.
+          const ack = ackedChunkIndex === null ? '' : `&ack=${ackedChunkIndex}`;
+          state = await relayRequest<RelayRequestState>(`/api/relay/requests/${encodeURIComponent(created.id)}?wait=1${ack}`, {
+            signal,
+            timeoutMs: RELAY_POLL_TIMEOUT_MS,
+          });
+        } catch (error) {
+          if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
+          // A slow status poll is recoverable until the operation deadline. Keep
+          // polling so a bridge that answers late still completes the user action.
+          if (error instanceof ApiError && error.code === 'TIMEOUT' && Date.now() < deadline) {
+            await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
+            continue;
+          }
+          throw error;
+        }
+        if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
+        if (state.status === 'completed') return state.result as T;
+        // The Worker can split an oversized inventory into consecutive polls.
+        // Emit each partial result immediately; the final poll completes normally.
+        if (state.chunked && state.result !== null && state.result !== undefined) {
+          // Only acknowledge a chunk that actually reached the caller. The next
+          // poll uses this index so a timeout can re-deliver rather than skip it.
+          ackedChunkIndex = state.chunkIndex ?? null;
+          onChunk?.(state.result as T);
           continue;
         }
-        throw error;
+        if (state.status === 'failed' || state.status === 'expired') {
+          throw new ApiError(state.error?.code ?? 'RELAY_FAILED', 'The local bridge request failed.');
+        }
+        await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
       }
-      if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
-      if (state.status === 'completed') return state.result as T;
-      // The Worker can split an oversized inventory into consecutive polls.
-      // Emit each partial result immediately; the final poll completes normally.
-      if (state.chunked && state.result !== null && state.result !== undefined) {
-        onChunk?.(state.result as T);
-        continue;
-      }
-      if (state.status === 'failed' || state.status === 'expired') {
-        throw new ApiError(state.error?.code ?? 'RELAY_FAILED', 'The local bridge request failed.');
-      }
-      await wait(Math.min(1_200, Math.max(0, deadline - Date.now())), signal);
-    }
 
-    throw new ApiError('RELAY_TIMEOUT', 'The local bridge did not answer in time. Check that it is still running.');
+      // A deadline is a give-up too: release the single relay slot even though
+      // the user did not press Cancel. Otherwise BRIDGE_BUSY blocks later loads.
+      if (activeRequestId) cancelRelayRequest(activeRequestId);
+      throw new ApiError('RELAY_TIMEOUT', 'The local bridge did not answer in time. Check that it is still running.');
+    } finally {
+      // Covers early failures before a relay request id exists.
+      finishCreate();
+    }
   };
 
   const result = relayChain.then(execute);
-  relayChain = result.catch(() => undefined);
+  const settled = Promise.race([result, cancellation]);
+  // A normal caller keeps the queue until it settles. An aborted caller only
+  // blocks the next one until its un-abortable create POST has resolved; the
+  // abandoned request is cancelled by id and cannot steal that next caller's slot.
+  relayChain = settled.then(() => undefined, () => createSettled);
   try {
-    return await Promise.race([result, cancellation]);
+    return await settled;
   } finally {
     if (onAbort) signal?.removeEventListener('abort', onAbort);
     activeRequestId = null;

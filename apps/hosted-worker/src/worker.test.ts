@@ -512,7 +512,16 @@ describe('hosted bridge relay', () => {
           state: 'complete',
           loaded: 60,
           total: 60,
-          families: [],
+          families: [{
+            family: 'dlos',
+            status: 'complete',
+            loaded: 60,
+            total: 60,
+            pagesFetched: 6,
+            hasMore: false,
+            error: null,
+            errorStatus: null,
+          }],
           message: 'All discovered metadata is loaded.',
         },
       },
@@ -531,19 +540,114 @@ describe('hosted bridge relay', () => {
       status: string;
       chunked?: boolean;
       hasMore?: boolean;
+      chunkIndex?: number;
       result?: { snapshot?: { dlos: unknown[] } };
     };
-    let last: RelayRead | undefined;
-    let delivered = 0;
-    // Five rows per chunk means this 60-row snapshot needs twelve reads.
-    for (let poll = 0; poll < 20; poll += 1) {
-      const response = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
-      last = await response.json() as RelayRead;
-      delivered += last.result?.snapshot?.dlos.length ?? 0;
+    const readChunk = async (ack?: number) => {
+      const query = ack === undefined ? '' : `?ack=${ack}`;
+      const response = await app.request(`/api/relay/requests/${created.id}${query}`, { headers: session.headers }, env);
+      return response.json() as Promise<RelayRead>;
+    };
+    const first = await readChunk();
+    const redelivered = await readChunk();
+    // An unacknowledged poll re-delivers the same chunk instead of skipping it.
+    expect(redelivered.result?.snapshot?.dlos).toEqual(first.result?.snapshot?.dlos);
+
+    let last: RelayRead | undefined = first;
+    let delivered = first.result?.snapshot?.dlos.length ?? 0;
+    let ack = first.chunkIndex;
+    // Five rows per chunk means this 60-row snapshot needs twelve deliveries.
+    for (let poll = 0; poll < 24; poll += 1) {
+      last = await readChunk(ack);
+      if (last.chunkIndex !== undefined) ack = last.chunkIndex;
+      // The ack response repeats the final chunk; it was already counted when
+      // that chunk was delivered as a running poll.
       if (last.status === 'completed') break;
+      delivered += last.result?.snapshot?.dlos.length ?? 0;
     }
     expect(last).toMatchObject({ status: 'completed', chunked: true, hasMore: false });
     expect(delivered).toBe(60);
+  });
+
+  it('reports cancellation instead of delivering later chunks', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    const provenance = {
+      orgId: '00D',
+      orgAlias: 'test',
+      sourceEndpoint: '/ssot/dlos',
+      apiVersion: '67.0',
+      retrievedAt: '2026-01-01T00:00:00.000Z',
+      confidence: 'source',
+    };
+    const result = {
+      snapshot: {
+        capabilities: [],
+        dataSpaces: [],
+        dlos: Array.from({ length: 60 }, (_, index) => ({
+          apiName: `DLO_${index}__dll`,
+          label: 'x'.repeat(120_000),
+          fields: [],
+          provenance,
+        })),
+        dmos: [],
+        mappings: [],
+        dataStreams: [],
+        dataTransforms: [],
+        relationships: [],
+        warnings: [],
+        progress: {
+          sessionId: 'session-1',
+          generation: 'generation-1',
+          state: 'complete',
+          loaded: 60,
+          total: 60,
+          families: [{
+            family: 'dlos',
+            status: 'complete',
+            loaded: 60,
+            total: 60,
+            pagesFetched: 6,
+            hasMore: false,
+            error: null,
+            errorStatus: null,
+          }],
+          message: 'All discovered metadata is loaded.',
+        },
+      },
+    };
+    const responded = await app.request('/api/relay/respond', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentToken: paired.agentToken, response: { id: created.id, ok: true, result } }),
+    }, env);
+    expect(responded.status).toBe(200);
+
+    type RelayRead = { status: string; chunkIndex?: number };
+    const read = async (ack?: number) => {
+      const query = ack === undefined ? '' : `?ack=${ack}`;
+      const response = await app.request(`/api/relay/requests/${created.id}${query}`, { headers: session.headers }, env);
+      return response.json() as Promise<RelayRead>;
+    };
+    const first = await read();
+    expect(first.chunkIndex).toBe(0);
+    await postJson('/api/mode', { mode: 'demo' }, session.headers, env);
+
+    expect(await read(first.chunkIndex)).toMatchObject({
+      id: created.id,
+      status: 'failed',
+      error: { code: 'CANCELLED' },
+    });
   });
 
   it('invalidates an unused pairing code when the browser unpairs', async () => {

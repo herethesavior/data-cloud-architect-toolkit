@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { chunkRelayResult } from '@dcat/core';
 import {
   RESOURCE_FAMILIES,
   type DiscoveryProgress,
@@ -67,6 +68,23 @@ function manyDlos(count: number): InventorySnapshot['dlos'] {
 }
 
 describe('mergeInventorySnapshot', () => {
+  it('reconstructs every row from all relay chunks', () => {
+    const rows = manyDlos(23);
+    const source = snapshot(
+      { dlos: rows },
+      progress('complete', { dlos: { status: 'complete', loaded: rows.length, pagesFetched: 3 } }),
+    );
+    const chunks = chunkRelayResult({ snapshot: source }, 5 * 1024 * 1024);
+    expect(chunks).not.toBeNull();
+
+    let merged: InventorySnapshot | undefined;
+    for (const chunk of chunks!) merged = mergeInventorySnapshot(merged, chunk.snapshot);
+
+    expect(merged?.dlos.map((row) => row.apiName)).toEqual(rows.map((row) => row.apiName));
+    expect(merged?.progress?.state).toBe('complete');
+    expect(merged?.warnings.some((warning) => warning.code === 'RESPONSE_CHUNKED')).toBe(true);
+  });
+
   it('returns the incoming snapshot when nothing was cached', () => {
     const incoming = snapshot();
     expect(mergeInventorySnapshot(undefined, incoming)).toBe(incoming);
@@ -270,7 +288,7 @@ describe('mergeInventorySnapshot', () => {
     expect(mergeInventorySnapshot(previous, terminal).relationships).toEqual([]);
   });
 
-  it('unions non-final relay chunks, then lets the final complete chunk reconcile deletions', () => {
+  it('unions every relay chunk, including the final complete one', () => {
     const complete = progress('complete', {
       dlos: { status: 'complete', loaded: 4, pagesFetched: 1 },
     });
@@ -292,6 +310,6 @@ describe('mergeInventorySnapshot', () => {
     expect(partial.dlos).toHaveLength(4);
 
     const final = mergeInventorySnapshot(partial, second);
-    expect(final.dlos.map((row) => row.apiName)).toEqual(['DLO_2', 'DLO_3']);
+    expect(final.dlos.map((row) => row.apiName)).toEqual(all.map((row) => row.apiName));
   });
 });

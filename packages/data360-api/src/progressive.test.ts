@@ -580,6 +580,32 @@ describe('progressive discovery', () => {
     expect(snapshot.progress?.state).toBe('complete');
   });
 
+  it('follows offset continuation for relationship pages beyond the request limit', async () => {
+    const relationshipPath = buildDmoRelationshipsPath('Account_DMO__dlm', '65.0', 'default');
+    const secondPagePath = `${relationshipPath}&offset=25`;
+    const template = JSON.parse(dmoRelationshipsJson) as { relationships: Record<string, unknown>[] };
+    const rows = Array.from({ length: 30 }, (_, index) => ({
+      ...template.relationships[0]!,
+      id: `0geREL${String(index).padStart(3, '0')}AAA`,
+    }));
+    const page = (relationships: unknown[]) => JSON.stringify({
+      currentPageUrl: relationshipPath,
+      relationships,
+      totalSize: rows.length,
+    });
+    const cli = fakeCli({
+      [relationshipPath]: page(rows.slice(0, 25)),
+      [secondPagePath]: page(rows.slice(25)),
+    });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(cli.calls).toContain(secondPagePath);
+    expect(snapshot.relationships.filter((edge) => edge.id.startsWith('0geREL'))).toHaveLength(30);
+    expect(snapshot.progress?.state).toBe('complete');
+  });
+
   it('retries transient page failures with bounded attempts', async () => {
     let attempts = 0;
     const result = await withPageRetry(async () => {

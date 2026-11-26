@@ -3,6 +3,7 @@ import type { InventorySnapshot } from './domain.ts';
 import {
   chunkInventorySnapshot,
   chunkRelayResult,
+  MAX_CHUNK_COUNT,
   MAX_CHUNK_ROWS,
   MORE_ITEMS_AVAILABLE_WARNING,
   RESPONSE_CHUNKED_WARNING,
@@ -85,6 +86,40 @@ describe('inventory relay chunks', () => {
     expect(chunks).toHaveLength(3);
     expect(chunks.map((chunk) => chunk.dlos.length)).toEqual([5, 5, 2]);
     expect(chunks.reduce((total, chunk) => total + chunk.dlos.length, 0)).toBe(12);
+  });
+
+  it('preserves source warnings and reports rows accumulated so far', () => {
+    const inventory = inventoryWithRows(12);
+    inventory.warnings = [{
+      family: 'dlos',
+      code: 'EXPECTED_COUNT_MISMATCH',
+      message: 'The count probe disagreed with the page.',
+      severity: 'warning',
+    }];
+    inventory.progress = {
+      ...inventory.progress!,
+      families: [{
+        family: 'dlos',
+        status: 'complete',
+        loaded: 12,
+        total: 12,
+        pagesFetched: 2,
+        hasMore: false,
+      }],
+    };
+    const chunks = chunkInventorySnapshot(inventory, 5 * 1024 * 1024);
+
+    expect(chunks.every((chunk) => chunk.warnings.some((warning) =>
+      warning.code === 'EXPECTED_COUNT_MISMATCH'))).toBe(true);
+    expect(chunks.map((chunk) => chunk.progress?.loaded)).toEqual([5, 10, 12]);
+    expect(chunks.map((chunk) => chunk.progress?.families[0]?.loaded)).toEqual([5, 10, 12]);
+  });
+
+  it('bounds the number of polls for very large inventories', () => {
+    const chunks = chunkInventorySnapshot(inventoryWithRows(MAX_CHUNK_COUNT * 8), 5 * 1024 * 1024);
+
+    expect(chunks).toHaveLength(MAX_CHUNK_COUNT);
+    expect(chunks.reduce((total, chunk) => total + chunk.dlos.length, 0)).toBe(MAX_CHUNK_COUNT * 8);
   });
 
   it('keeps the session envelope on progressive result chunks', () => {
