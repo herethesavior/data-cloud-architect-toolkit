@@ -226,6 +226,20 @@ describe('Settings bridge diagnostics', () => {
     expect(await screen.findByText('Working')).toBeInTheDocument();
     expect(screen.getByText(/running a long operation/)).toBeInTheDocument();
     expect(screen.queryByText(/has not checked in/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('Change API version'));
+    expect(screen.getByText('Wait for the bridge to finish its current operation before changing the API version.')).toBeInTheDocument();
+    expect(screen.queryByText(/bridge to reconnect/)).not.toBeInTheDocument();
+  });
+
+  it('asks for a stale bridge to come back online before changing the API version', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue({ ...bridge, relay: 'stale' });
+    renderSettings();
+
+    expect(await screen.findByText('Offline')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Change API version'));
+    expect(screen.getByText('Bring the bridge back online before changing the API version.')).toBeInTheDocument();
   });
 
   it('shows a degraded status when the relay state is temporarily unavailable', async () => {
@@ -234,8 +248,11 @@ describe('Settings bridge diagnostics', () => {
     renderSettings();
 
     expect(await screen.findByText('Unavailable')).toBeInTheDocument();
-    expect(screen.getByText(/temporarily unavailable/)).toBeInTheDocument();
+    expect(screen.getByText('Bridge status is temporarily unavailable. Refresh to try again.')).toBeInTheDocument();
     expect(diagnosticValue('Bridge status')).toHaveTextContent('Unavailable');
+
+    await userEvent.click(screen.getByText('Change API version'));
+    expect(screen.getByText('Bridge status is temporarily unavailable. Refresh status before changing the API version.')).toBeInTheDocument();
   });
 
   it('does not show the relay version before a hosted bridge has paired', async () => {

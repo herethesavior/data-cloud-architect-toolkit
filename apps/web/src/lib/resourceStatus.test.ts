@@ -51,7 +51,13 @@ describe('resource status model', () => {
     const stage = discoveryStages(inventory).find((entry) => entry.id === 'relationships');
 
     expect(stage?.state).toBe('partial');
-    expect(stage?.detail).toContain('1 lookup gap warning');
+    expect(stage?.detail).toContain('1 relationship lookup gap.');
+  });
+
+  it('points partial results at discovery health rather than a retry button', () => {
+    expect(resourceStatusMessage(capability({ status: 'partial', itemCount: 2, message: null }))).toBe(
+      '2 items loaded; some results may be missing. Check Discovery health on the Dashboard for details.',
+    );
   });
 
   it('derives partial and blocked stages from capability results', () => {

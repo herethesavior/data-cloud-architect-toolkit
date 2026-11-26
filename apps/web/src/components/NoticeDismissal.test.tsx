@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { UseQueryResult } from '@tanstack/react-query';
-import type { InventorySnapshot } from '@dcat/core';
+import type { ApiCapability, InventorySnapshot } from '@dcat/core';
 import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
 import { InventoryActionsProvider } from '../lib/inventoryActions.tsx';
 import { markExport, resetNoticeDismissals } from '../lib/noticeDismissal.ts';
@@ -18,6 +18,17 @@ function partialInventory(families: number): InventorySnapshot {
     ...inventory,
     capabilities: inventory.capabilities.map((capability, index) =>
       index < families ? { ...capability, status: 'partial' as const } : capability),
+  };
+}
+
+function inventoryWithStatuses(statuses: Partial<Record<string, ApiCapability['status']>>): InventorySnapshot {
+  const inventory = structuredClone(demoInventory);
+  return {
+    ...inventory,
+    capabilities: inventory.capabilities.map((capability) => {
+      const status = statuses[capability.family];
+      return status ? { ...capability, status } : capability;
+    }),
   };
 }
 
@@ -69,6 +80,43 @@ describe('dismissible notices', () => {
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Dismiss inventory status notice' })[0]!);
     expect(screen.queryAllByText('Inventory loaded with gaps')).toHaveLength(0);
+  });
+
+  it('names gapped families clearly instead of repeating the status', () => {
+    render(<ResourceStatusNotice inventory={inventoryWithStatuses({
+      dlos: 'partial',
+      dmos: 'partial',
+      'data-streams': 'partial',
+      'data-transforms': 'partial',
+    })} />);
+
+    expect(screen.getByText('Inventory loaded with gaps')).toBeInTheDocument();
+    expect(screen.getByText(
+      'Some results are missing from DLOs, DMOs, Data Streams, and Data Transforms. The records that loaded are still available.',
+    )).toBeInTheDocument();
+    expect(screen.queryByText(/returned partial results/)).not.toBeInTheDocument();
+  });
+
+  it('keeps partial families visible when other families failed', () => {
+    render(<ResourceStatusNotice inventory={inventoryWithStatuses({
+      mappings: 'error',
+      dlos: 'partial',
+      dmos: 'partial',
+    })} />);
+
+    expect(screen.getByText('Some inventory families need attention')).toBeInTheDocument();
+    expect(screen.getByText(
+      'Mappings could not be retrieved. DLOs and DMOs returned only some records. The records that loaded are still available.',
+    )).toBeInTheDocument();
+  });
+
+  it('does not describe unavailable families as partial', () => {
+    render(<ResourceStatusNotice inventory={inventoryWithStatuses({ 'data-transforms': 'unsupported' })} />);
+
+    expect(screen.getByText('Some inventory families are unavailable')).toBeInTheDocument();
+    expect(screen.getByText(
+      'Data Transforms is unavailable for this org or API version. Other loaded families are still available.',
+    )).toBeInTheDocument();
   });
 
   it('hides a refresh failure for its attempt but shows the same failure after a retry', async () => {

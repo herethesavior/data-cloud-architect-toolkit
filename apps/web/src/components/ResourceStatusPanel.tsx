@@ -2,7 +2,7 @@ import type { InventorySnapshot } from '@dcat/core';
 import { Badge } from './ui/index.ts';
 import type { BadgeTone } from './ui/index.ts';
 import { Icon } from './Icon.tsx';
-import { data360NotEnabled, hasDegradedResources, statusLabel } from '../lib/resourceStatus.ts';
+import { data360NotEnabled, hasDegradedResources, humanizeResource, statusLabel } from '../lib/resourceStatus.ts';
 import type { ResourceStage, ResourceStageState } from '../lib/resourceStatus.ts';
 import { useDismissibleNotice } from '../lib/noticeDismissal.ts';
 import { NoticeDismissButton } from './NoticeDismissButton.tsx';
@@ -68,6 +68,13 @@ export function DiscoveryProgress({ stages, label = 'Discovering your Data 360 i
   );
 }
 
+function familyList(families: readonly { family: string }[]): string {
+  const names = families.map((capability) => humanizeResource(capability.family));
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')}, and ${names.at(-1)}`;
+}
+
 /** Surfaced on every inventory view so one failed family cannot look like empty data. */
 export function ResourceStatusNotice({ inventory, onReview }: { inventory: InventorySnapshot; onReview?: () => void }) {
   const data360Unavailable = data360NotEnabled(inventory);
@@ -75,16 +82,23 @@ export function ResourceStatusNotice({ inventory, onReview }: { inventory: Inven
     capability.status === 'error' || capability.status === 'forbidden',
   );
   const partial = inventory.capabilities.filter((capability) => capability.status === 'partial');
+  const unsupported = inventory.capabilities.filter((capability) => capability.status === 'unsupported');
   const title = data360Unavailable
-    ? 'Data 360 is not enabled for this org'
+    ? 'Data 360 is not enabled for this user or org'
     : failures.length > 0
       ? 'Some inventory families need attention'
-      : 'Inventory loaded with gaps';
+      : partial.length > 0
+        ? 'Inventory loaded with gaps'
+        : 'Some inventory families are unavailable';
+  const failureDetail = failures.length > 0 ? `${familyList(failures)} could not be retrieved.` : '';
+  const partialDetail = partial.length > 0 ? `${familyList(partial)} returned only some records.` : '';
   const detail = data360Unavailable
-    ? 'Ask an administrator to enable Data Cloud for this user or org. No metadata families are available to retry.'
+    ? 'Ask an administrator to enable Data 360 for this user or org. No metadata families are available to retry.'
     : failures.length > 0
-      ? `${failures.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} could not be retrieved. Other families are still available.`
-      : `${partial.map((capability) => capability.family.replace(/-/g, ' ')).join(', ')} returned partial results.`;
+      ? `${failureDetail}${partialDetail ? ` ${partialDetail}` : ''} The records that loaded are still available.`
+      : partial.length > 0
+        ? `Some results are missing from ${familyList(partial)}. The records that loaded are still available.`
+        : `${familyList(unsupported)} ${unsupported.length === 1 ? 'is' : 'are'} unavailable for this org or API version. Other loaded families are still available.`;
   const statusSignature = inventory.capabilities
     .map((capability) => `${capability.family}:${capability.status}`)
     .sort()

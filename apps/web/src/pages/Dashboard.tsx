@@ -284,7 +284,7 @@ export function Dashboard({ context, mode, onNavigate }: DashboardProps) {
                 {data360Unavailable ? (
                   <div className="mb-3 flex items-start gap-2 rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-sm text-ink-soft" role="status">
                     <Icon name="info" size={16} className="mt-0.5 shrink-0 text-brand" />
-                    <span>Data 360 is not enabled for this user or org. Ask an administrator to enable Data Cloud, then refresh the inventory.</span>
+                    <span>Data 360 is not enabled for this user or org. Ask an administrator to enable it, then refresh the inventory.</span>
                   </div>
                 ) : null}
                 <div className="space-y-2">

@@ -166,7 +166,7 @@ describe('InventoryBoundary progressive state', () => {
   it('offers resume on a failed family without hiding earlier rows', async () => {
     const resumeDiscovery = renderExplorer(snapshotFor('failed'));
 
-    expect(await screen.findByTestId('inventory-progress')).toHaveTextContent('Some collections stopped loading');
+    expect(await screen.findByTestId('inventory-progress')).toHaveTextContent('Some inventory families stopped loading');
     expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole('button', { name: /Resume loading/ }));
     expect(resumeDiscovery).toHaveBeenCalledTimes(1);
@@ -182,10 +182,28 @@ describe('InventoryBoundary progressive state', () => {
     }];
     const resumeDiscovery = renderExplorer(snapshot);
 
-    expect(await screen.findByTestId('inventory-progress')).toHaveTextContent('Some collections stopped loading');
+    expect(await screen.findByTestId('inventory-progress')).toHaveTextContent('Some inventory families stopped loading');
     expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole('button', { name: /Resume loading/ }));
     expect(resumeDiscovery).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not present a settled partial snapshot as loading or complete', async () => {
+    const snapshot = snapshotFor('partial');
+    snapshot.progress = {
+      ...snapshot.progress!,
+      families: snapshot.progress!.families.map((family) => ({
+        ...family,
+        status: 'complete',
+        hasMore: false,
+      })),
+    };
+    renderExplorer(snapshot);
+
+    const banner = await screen.findByTestId('inventory-progress');
+    expect(banner).toHaveTextContent('Inventory loaded with gaps');
+    expect(banner).not.toHaveTextContent('Loading inventory in batches');
+    expect(banner).not.toHaveTextContent('Inventory complete');
   });
 
   it('renders a persisted snapshot immediately and marks an old live snapshot stale', () => {

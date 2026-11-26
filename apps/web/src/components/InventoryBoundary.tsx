@@ -45,22 +45,25 @@ function InventoryProgressBanner({
   interrupted?: boolean;
 }) {
   const stalled = resumable || progress.state === 'failed';
-  const degraded = progress.families.some((family) =>
+  const degraded = progress.state === 'partial' || progress.families.some((family) =>
     family.status === 'partial' || family.status === 'failed');
   const spinning = !interrupted
     && (progress.state === 'running' || progress.families.some((family) => family.hasMore));
+  // A terminal `partial` snapshot is a settled result with gapped families, so
+  // it must not be presented as still loading.
+  const finished = !spinning && (progress.state === 'complete' || progress.state === 'partial');
   const title = interrupted
     ? 'Inventory loading stopped'
     : stalled
-      ? 'Some collections stopped loading'
-      : progress.state === 'complete'
-        ? degraded ? 'Discovery finished with gaps' : 'Inventory complete'
+      ? 'Some inventory families stopped loading'
+      : finished
+        ? degraded ? 'Inventory loaded with gaps' : 'Inventory complete'
         : 'Loading inventory in batches';
   const detail = loadedDetailLabel(progress.loaded, progressTotal(progress), spinning);
 
   // A resumable gap must keep the action-bearing banner even when discovery's
   // own state is terminal; the compact line is only for genuinely finished work.
-  if (progress.state === 'complete' && !stalled) {
+  if (finished && !stalled) {
     return (
       <p data-testid="inventory-progress" role="status" className="mb-4 text-xs text-ink-soft">
         <span aria-hidden="true">{degraded ? '! ' : '✓ '}</span>{title} · {detail}
@@ -104,7 +107,7 @@ function InventoryProgressBanner({
             <span className="truncate font-medium text-ink">{humanizeResource(family.family)}</span>
             <span className="whitespace-nowrap tabular-nums">
               {loadedCountLabel(family.loaded, trustedTotal(family))}
-              {family.hasMore ? ' · more' : ''}
+              {family.hasMore ? ' · more to load' : ''}
               {family.status === 'failed' ? ' · stopped' : ''}
             </span>
           </li>

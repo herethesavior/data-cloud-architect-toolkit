@@ -1182,7 +1182,7 @@ test('navigating pages does not restart a fully loaded live inventory with gappe
         hasMore: false,
         error: null,
       })),
-      message: 'Inventory loaded with gaps. Earlier results were kept.',
+      message: 'Inventory loaded with gaps. The records that loaded are still available.',
     },
   };
   await page.route('**/api/orgs/prod-org/inventory/session**', (route: Route) => {
