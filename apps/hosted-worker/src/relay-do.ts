@@ -443,12 +443,12 @@ export class RelayDurableObjectCore {
       const rejected: RelayResponse = {
         id: response.data.id,
         ok: false,
-        error: { code: 'RESPONSE_TOO_LARGE', message: 'The bridge result is too large to relay.' },
+        error: { code: 'RESPONSE_TOO_LARGE', message: 'The result is too large to relay in one response.' },
       };
       this.sql.exec('UPDATE current_request SET response = ?, responded_at = ? WHERE slot = 1',
         JSON.stringify(rejected), Date.now());
       this.wakeRequestWaiters(response.data.id);
-      return error('RESPONSE_TOO_LARGE', 'The bridge result is too large to relay.', 413);
+      return error('RESPONSE_TOO_LARGE', 'The result is too large to relay in one response.', 413);
     }
     this.sql.exec('UPDATE current_request SET response = ?, responded_at = ? WHERE slot = 1',
       JSON.stringify(response.data), Date.now());

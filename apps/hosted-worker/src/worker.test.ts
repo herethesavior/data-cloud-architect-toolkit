@@ -448,7 +448,7 @@ describe('hosted bridge relay', () => {
     expect(await failed.json()).toMatchObject({
       id: created.id,
       status: 'failed',
-      error: { code: 'RESPONSE_TOO_LARGE', message: 'The bridge result is too large to relay.' },
+      error: { code: 'RESPONSE_TOO_LARGE', message: 'The result is too large to relay in one response.' },
     });
   });
 

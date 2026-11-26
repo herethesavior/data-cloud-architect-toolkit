@@ -3,8 +3,10 @@ import { CliError } from '@dcat/salesforce-cli';
 import {
   buildConnectorCatalogPath,
   buildConnectorConnectionsPath,
+  buildDataTransformPath,
   buildDmoPath,
   buildDmoRelationshipsPath,
+  buildExpectedCountPath,
   buildFamilyPath,
   buildMappingPath,
   buildTransformDetailPath,
@@ -66,17 +68,30 @@ describe('allowlisted transform paths', () => {
     expect(() => buildTransformSubresourcePath('Account_Transform', 'delete' as never, '65.0')).toThrow(CliError);
   });
 
-  it('builds explicit offset pages for DMOs and plain paths for other families', () => {
+  it('builds bounded offset pages for DMOs and Data Transforms and plain paths for other families', () => {
     expect(buildFamilyPath('dmos', '65.0')).toBe(
       'services/data/v65.0/ssot/data-model-objects?limit=100&offset=0',
     );
     expect(buildDmoPath('65.0', 100)).toBe(
       'services/data/v65.0/ssot/data-model-objects?limit=100&offset=100',
     );
+    expect(buildFamilyPath('data-transforms', '65.0')).toBe(
+      'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=20&offset=0',
+    );
+    expect(buildDataTransformPath('65.0', 40)).toBe(
+      'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=20&offset=40',
+    );
+    expect(buildExpectedCountPath('data-transforms', '65.0')).toBe(
+      'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=1&offset=0',
+    );
     expect(buildFamilyPath('dlos', '65.0')).toBe(
       'services/data/v65.0/ssot/data-lake-objects',
     );
+    expect(buildExpectedCountPath('dlos', '65.0')).toBe(
+      'services/data/v65.0/ssot/data-lake-objects?limit=1',
+    );
     expect(() => buildDmoPath('65.0', -1)).toThrow(CliError);
+    expect(() => buildDataTransformPath('65.0', -1)).toThrow(CliError);
   });
 
   it('builds the required, encoded DMO filter for mapping lookups', () => {

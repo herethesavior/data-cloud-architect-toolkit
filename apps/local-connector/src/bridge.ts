@@ -19,7 +19,7 @@ export class RelayAuthError extends Error {
   }
 }
 
-/** A rejected result cannot succeed on retry; the bridge must not spin on it. */
+/** A rejected result cannot succeed for this stored request; the bridge must not spin on it. */
 export class RelayTerminalError extends Error {
   readonly code: string;
 
@@ -291,7 +291,7 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
           if (error instanceof RelayTerminalError) {
             // The Worker has stored a terminal failure for the browser; the
             // bridge itself is still healthy and must keep serving new tasks.
-            logger(`Bridge result rejected: ${safeErrorMessage(error)} This request cannot be retried.`);
+            logger(`Bridge result rejected for this request: ${safeErrorMessage(error)} The browser can start a new load in smaller batches.`);
             continue;
           }
           throw error;

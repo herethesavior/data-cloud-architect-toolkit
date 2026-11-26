@@ -15,6 +15,16 @@ export const DATA360_ENDPOINT_REGISTRY: Record<ResourceFamily, string> = {
 /** Verified DMO page size: larger pages time out and the endpoint has no next-page URL. */
 export const DMO_PAGE_SIZE = 100;
 
+/** Documented maximum page size for the Data Transform list endpoint. */
+export const DATA_TRANSFORM_PAGE_SIZE = 20;
+
+/**
+ * The list endpoint defaults to the Big filter group, which includes full
+ * transform definitions. Medium keeps inventory fields without pulling those
+ * potentially multi-megabyte graphs through Salesforce CLI.
+ */
+export const DATA_TRANSFORM_FILTER_GROUP = 'Medium';
+
 /** Verified maximum page size for the per-DMO relationship subresource. */
 export const RELATIONSHIP_PAGE_SIZE = 500;
 
@@ -51,10 +61,20 @@ export function buildData360Path(family: ResourceFamily, apiVersion: string): st
   return `services/data/v${apiVersion}${DATA360_ENDPOINT_REGISTRY[family]}`;
 }
 
-/** Initial request path for a family. DMOs need explicit offset pagination. */
+/** Families whose list endpoints paginate by offset rather than a next-page token. */
+export function offsetPageSizeFor(family: ResourceFamily): number | null {
+  if (family === 'dmos') return DMO_PAGE_SIZE;
+  if (family === 'data-transforms') return DATA_TRANSFORM_PAGE_SIZE;
+  return null;
+}
+
+/** Initial request path for a family. Offset-paginated families start at page zero. */
 export function buildFamilyPath(family: ResourceFamily, apiVersion: string): string {
-  const base = buildData360Path(family, apiVersion);
-  return family === 'dmos' ? `${base}?limit=${DMO_PAGE_SIZE}&offset=0` : base;
+  if (family === 'dmos') {
+    return `${buildData360Path(family, apiVersion)}?limit=${DMO_PAGE_SIZE}&offset=0`;
+  }
+  if (family === 'data-transforms') return buildDataTransformPath(apiVersion, 0);
+  return buildData360Path(family, apiVersion);
 }
 
 /**
@@ -64,7 +84,14 @@ export function buildFamilyPath(family: ResourceFamily, apiVersion: string): str
  */
 export function buildExpectedCountPath(family: ResourceFamily, apiVersion: string): string | null {
   if (family === 'dmos' || family === 'mappings') return null;
-  return `${buildFamilyPath(family, apiVersion)}?limit=1`;
+  const path = buildFamilyPath(family, apiVersion);
+  try {
+    const url = new URL(path, 'https://dcat.local');
+    url.searchParams.set('limit', '1');
+    return `${url.pathname.replace(/^\//, '')}${url.search}`;
+  } catch {
+    return `${path}${path.includes('?') ? '&' : '?'}limit=1`;
+  }
 }
 
 export function buildDmoPath(apiVersion: string, offset: number): string {
@@ -72,6 +99,14 @@ export function buildDmoPath(apiVersion: string, offset: number): string {
     throw new CliError('INVALID_ARGUMENT', 'An invalid DMO offset was supplied.');
   }
   return `${buildData360Path('dmos', apiVersion)}?limit=${DMO_PAGE_SIZE}&offset=${offset}`;
+}
+
+export function buildDataTransformPath(apiVersion: string, offset = 0): string {
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new CliError('INVALID_ARGUMENT', 'An invalid Data Transform offset was supplied.');
+  }
+  return `${buildData360Path('data-transforms', apiVersion)}`
+    + `?filterGroup=${DATA_TRANSFORM_FILTER_GROUP}&limit=${DATA_TRANSFORM_PAGE_SIZE}&offset=${offset}`;
 }
 
 /** Salesforce rejects unfiltered mapping lookups, so an empty name is never sent. */

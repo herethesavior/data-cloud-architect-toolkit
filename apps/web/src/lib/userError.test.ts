@@ -40,6 +40,13 @@ describe('describeError', () => {
     });
   });
 
+  it('does not offer inventory batching for an oversized transform detail', () => {
+    expect(describeError(new ApiError('RESPONSE_TOO_LARGE', 'raw detail'), 'transform')).toEqual({
+      message: 'That transform is too large to display in one view.',
+      hint: 'Refresh the inventory, then open the transform again.',
+    });
+  });
+
   it('uses the context fallback for unmapped codes', () => {
     expect(describeError(new ApiError('COMMAND_FAILED', 'Production CLI is unavailable.'), 'refresh')).toEqual({
       message: "We couldn't refresh the org list.",

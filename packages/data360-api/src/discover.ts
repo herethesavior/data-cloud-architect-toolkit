@@ -10,7 +10,7 @@ import type {
 } from '@dcat/core';
 import { RESOURCE_FAMILIES, inventorySnapshotSchema } from '@dcat/core';
 import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
-import { classifyRestFailure, extractHttpStatus } from './capabilities.ts';
+import { classifyRestFailure, extractHttpStatus, isOutputLimitMessage } from './capabilities.ts';
 import { enrichStreamConnectors } from './connectors.ts';
 import {
   buildData360Path,
@@ -19,9 +19,9 @@ import {
   buildMappingPath,
   buildVersionsPath,
   DATA360_ENDPOINT_REGISTRY,
-  DMO_PAGE_SIZE,
   isValidDataspace,
   isValidDmoDeveloperName,
+  offsetPageSizeFor,
 } from './endpoints.ts';
 import {
   deriveInferredRelationships,
@@ -197,7 +197,7 @@ async function retrieveFamily<T, N extends NormalizedCollection<T>>(
       endpoint,
       family,
       maxPages,
-      family === 'dmos' ? DMO_PAGE_SIZE : undefined,
+      offsetPageSizeFor(family) ?? undefined,
     ));
     const fetched = attempt.value;
     const normalized = normalizer(fetched.entries, context);
@@ -243,7 +243,7 @@ async function retrieveFamily<T, N extends NormalizedCollection<T>>(
     const classified = classifyRestFailure(extractHttpStatus(message), message);
     const warnings: RetrievalWarning[] = [{
       family,
-      code: classified.status.toUpperCase(),
+      code: isOutputLimitMessage(message) ? 'OUTPUT_LIMIT' : classified.status.toUpperCase(),
       message: classified.message,
       severity: classified.status === 'unsupported' ? 'warning' : 'error',
     }];

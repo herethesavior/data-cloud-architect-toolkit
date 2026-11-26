@@ -26,7 +26,9 @@ import type { RestClient } from './discover.ts';
 import {
   buildConnectorCatalogPath,
   buildConnectorConnectionsPath,
+  buildDataTransformPath,
   buildDmoRelationshipsPath,
+  buildFamilyPath,
   buildMappingPath,
 } from './endpoints.ts';
 
@@ -64,7 +66,7 @@ function fakeCliAtVersion(
     [`${versionBase}/data-streams`]: dataStreamsJson,
     [buildConnectorCatalogPath(version)]: connectorCatalogJson,
     [buildConnectorConnectionsPath(version, 'SalesforceDotCom')]: connectorConnectionsJson,
-    [`${versionBase}/data-transforms`]: dataTransformsJson,
+    [buildFamilyPath('data-transforms', version)]: dataTransformsJson,
     ...overrides,
   };
   const indexes = new Map<string, number>();
@@ -252,6 +254,58 @@ describe('live Data 360 discovery', () => {
     expect(inventory.warnings).toHaveLength(0);
   });
 
+  it('follows bounded Data Transform offset pages in one-shot discovery', async () => {
+    const transformPage1 = JSON.stringify({
+      dataTransforms: Array.from({ length: 20 }, (_, index) => ({
+        name: `Transform_${String(index + 1).padStart(3, '0')}`,
+        label: `Transform ${index + 1}`,
+      })),
+      totalSize: 21,
+    });
+    const transformPage2 = JSON.stringify({
+      dataTransforms: [{ name: 'Transform_021', label: 'Transform 21' }],
+      totalSize: 21,
+    });
+    const cli = fakeCli({
+      [buildFamilyPath('data-transforms', '65.0')]: transformPage1,
+      [buildDataTransformPath('65.0', 20)]: transformPage2,
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
+
+    expect(inventory.dataTransforms.map((transform) => transform.apiName)).toEqual([
+      ...Array.from({ length: 20 }, (_, index) => `Transform_${String(index + 1).padStart(3, '0')}`),
+      'Transform_021',
+    ]);
+    expect(pathCalls(cli, buildDataTransformPath('65.0', 20))).toBe(1);
+    expect(inventory.capabilities.find((entry) => entry.family === 'data-transforms')).toMatchObject({
+      status: 'available',
+      itemCount: 21,
+    });
+  });
+
+  it('classifies a CLI output limit as a size gap instead of raw CLI text', async () => {
+    const cli = fakeCli({
+      [buildFamilyPath('data-transforms', '65.0')]: new CliError(
+        'OUTPUT_LIMIT',
+        'Salesforce CLI output exceeded the safe size limit.',
+      ),
+    });
+    const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
+
+    expect(inventory.capabilities.find((entry) => entry.family === 'data-transforms')).toMatchObject({
+      status: 'error',
+    });
+    expect(inventory.capabilities.find((entry) => entry.family === 'data-transforms')?.message)
+      .toMatch(/too large.*smaller pages/i);
+    expect(inventory.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        family: 'data-transforms',
+        code: 'OUTPUT_LIMIT',
+        message: expect.stringMatching(/too large.*smaller pages/i),
+      }),
+    ]));
+  });
+
   it('does not follow a continuation into an unrelated REST endpoint', async () => {
     const crossFamilyPath = 'services/data/v65.0/query/01gABC?locator=abc%2B123';
     const cli = fakeCli({
@@ -389,7 +443,7 @@ describe('live Data 360 discovery', () => {
         new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
       ])),
       [`${base}/data-streams`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
-      [`${base}/data-transforms`]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
+      [buildFamilyPath('data-transforms', '65.0')]: new CliError('COMMAND_FAILED', `Salesforce CLI command failed: FUNCTIONALITY_NOT_ENABLED: ${functionalityNotEnabled}`),
     });
     const inventory = await discoverInventory({ cli, alias: org.alias, org, apiVersionSelection: { mode: 'latest' } });
 

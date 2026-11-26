@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildFamilyPath } from '@dcat/data360-api';
 import type { ProcessRunner, RunOptions } from '@dcat/salesforce-cli';
 import {
   cliVersionOutput,
@@ -55,7 +56,7 @@ function liveCliRunner(): ProcessRunner {
       [`${base}/data-streams`]: dataStreamsJson,
       [`${base}/connectors`]: connectorCatalogJson,
       [`${base}/connections?connectorType=SalesforceDotCom`]: connectorConnectionsJson,
-      [`${base}/data-transforms`]: dataTransformsJson,
+      [`/${buildFamilyPath('data-transforms', version)}`]: dataTransformsJson,
       [`${base}/data-transforms/Account_Transform`]: transformDetailJson,
       [`${base}/data-transforms/Account_Transform/run-history`]: transformRunHistoryJson,
       [`${base}/data-transforms/Account_Transform/schedule`]: transformScheduleJson,

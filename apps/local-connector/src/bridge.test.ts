@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CliStatus, InventorySnapshot, OrgSummary, RelayTask, TransformBundle } from '@dcat/core';
+import { buildFamilyPath } from '@dcat/data360-api';
 import type { ProcessRunner, RunOptions } from '@dcat/salesforce-cli';
 import { CliError } from '@dcat/salesforce-cli';
 import {
@@ -44,7 +45,7 @@ for (const version of ['65.0', '67.0']) {
     [`${base}/data-streams`]: dataStreamsJson,
     [`${base}/connectors`]: connectorCatalogJson,
     [`${base}/connections?connectorType=SalesforceDotCom`]: connectorConnectionsJson,
-    [`${base}/data-transforms`]: dataTransformsJson,
+    [`/${buildFamilyPath('data-transforms', version)}`]: dataTransformsJson,
     [`${base}/data-transforms/Account_Transform`]: transformDetailJson,
     [`${base}/data-transforms/Account_Transform/run-history`]: transformRunHistoryJson,
     [`${base}/data-transforms/Account_Transform/schedule`]: transformScheduleJson,
@@ -302,6 +303,36 @@ describe('runBridge', () => {
     });
   });
 
+  it('logs a rejected result as terminal for this request but recoverable by a new load', async () => {
+    const controller = new AbortController();
+    const relay = new FakeRelayHttp([task({ operation: 'cli.status' })], controller);
+    const http: RelayHttp = {
+      async post<T>(path: string, body: unknown): Promise<T> {
+        if (path === '/api/relay/respond') {
+          controller.abort();
+          throw new RelayTerminalError('RESPONSE_TOO_LARGE', 'The result is too large to relay in one response.');
+        }
+        return relay.post<T>(path, body);
+      },
+    };
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    expect(logger).toHaveBeenCalledWith(
+      'Bridge result rejected for this request: The result is too large to relay in one response. '
+      + 'The browser can start a new load in smaller batches.',
+    );
+  });
+
   it('retries a dropped result POST so completed work is not lost', async () => {
     const controller = new AbortController();
     const relay = new FakeRelayHttp([task({ operation: 'cli.status' })], controller);
@@ -406,7 +437,7 @@ describe('runBridge', () => {
 
   it('treats an oversized relay result as terminal instead of retryable', async () => {
     const fetchFn = vi.fn(async () => new Response(JSON.stringify({
-      error: { code: 'RESPONSE_TOO_LARGE', message: 'The bridge result is too large to relay.' },
+      error: { code: 'RESPONSE_TOO_LARGE', message: 'The result is too large to relay in one response.' },
     }), { status: 413, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
     const http = new FetchRelayHttp('https://dcat.example', fetchFn);
 

@@ -15,7 +15,7 @@ import type {
 } from '@dcat/core';
 import { RESOURCE_FAMILIES } from '@dcat/core';
 import { safeErrorMessage } from '@dcat/salesforce-cli';
-import { classifyRestFailure } from './capabilities.ts';
+import { classifyRestFailure, isOutputLimitMessage } from './capabilities.ts';
 import { enrichStreamConnectors, STREAM_ENRICHMENT_WARNING_FAMILY } from './connectors.ts';
 import type { RestClient } from './discover.ts';
 import {
@@ -33,9 +33,9 @@ import {
   buildMappingPath,
   buildVersionsPath,
   DATA360_ENDPOINT_REGISTRY,
-  DMO_PAGE_SIZE,
   isValidDataspace,
   isValidDmoDeveloperName,
+  offsetPageSizeFor,
 } from './endpoints.ts';
 import {
   deriveInferredRelationships,
@@ -460,8 +460,8 @@ function markFailure(
   cursor.failed = true;
   cursor.error = prefix ? `${prefix} ${classified.message}` : classified.message;
   cursor.errorStatus = classified.status;
-  pushWarning(state, family, classified.status.toUpperCase(), cursor.error,
-    classified.status === 'unsupported' ? 'warning' : 'error');
+  pushWarning(state, family, isOutputLimitMessage(message) ? 'OUTPUT_LIMIT' : classified.status.toUpperCase(),
+    cursor.error, classified.status === 'unsupported' ? 'warning' : 'error');
 }
 
 function stopWithWarning(
@@ -570,6 +570,19 @@ function applyContinuation(
   cursor.param = continuation.param;
 }
 
+/** Offset families need a bounded first page even when Salesforce omits a next cursor. */
+function continuationForFamily(
+  family: ResourceFamily,
+  decoded: unknown,
+  path: string,
+  itemCount: number,
+): ReturnType<typeof extractContinuation> {
+  const pageSize = offsetPageSizeFor(family);
+  return pageSize === null
+    ? extractContinuation(decoded)
+    : offsetContinuation(decoded, path, pageSize, itemCount);
+}
+
 async function requestPage<T>(
   state: ProgressiveDiscoveryState,
   family: ResourceFamily,
@@ -605,9 +618,7 @@ async function requestPage<T>(
       pushWarning(state, family, 'RETRY_SUCCEEDED',
         `Retrieved a page after ${attempt.attempts} attempts following a transient failure.`, 'info');
     }
-    const continuation = family === 'dmos'
-      ? offsetContinuation(decoded, cursor.path, DMO_PAGE_SIZE, entries.length)
-      : extractContinuation(decoded);
+    const continuation = continuationForFamily(family, decoded, cursor.path, entries.length);
     applyContinuation(state, family, cursor, continuation, loadedForFamily(state, family));
     return cursor.pageIndex > before || cursor.done !== false;
   } catch (error) {
@@ -834,6 +845,9 @@ function recompute(state: ProgressiveDiscoveryState): void {
     const degradedMessage = status === 'partial' && cursorState.degraded
       ? `${loaded} item(s) loaded; some results may be missing.`
       : null;
+    const sizeFailureMessage = cursorState.error && isOutputLimitMessage(cursorState.error)
+      ? cursorState.error
+      : null;
     const capability: ApiCapability = {
       family,
       status,
@@ -843,7 +857,7 @@ function recompute(state: ProgressiveDiscoveryState): void {
       apiVersion: state.apiVersion,
       message: skippedMappings
         ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
-        : degradedMessage ?? messageForStatus(status, loaded),
+        : sizeFailureMessage ?? degradedMessage ?? messageForStatus(status, loaded),
       durationMs: null,
       itemCount: loaded,
     };

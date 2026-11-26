@@ -174,6 +174,14 @@ const codeCopy: Record<string, UserError> = {
 /** Translate any thrown value into copy that is safe to render in the UI. */
 export function describeError(error: unknown, context: UserErrorContext): UserError {
   const code = error instanceof ApiError ? error.code : undefined;
+  // A transform detail cannot be split into inventory batches; offering the
+  // inventory "continue" action there would do nothing.
+  if (code === 'RESPONSE_TOO_LARGE' && context === 'transform') {
+    return {
+      message: 'That transform is too large to display in one view.',
+      hint: 'Refresh the inventory, then open the transform again.',
+    };
+  }
   return (code ? codeCopy[code] : undefined) ?? contextCopy[context];
 }
 

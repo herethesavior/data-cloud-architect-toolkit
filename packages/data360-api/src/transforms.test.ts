@@ -14,6 +14,7 @@ import type { RestClient } from './discover.ts';
 import {
   fetchTransformBundle,
   createUnsupportedTransformBundle,
+  MAX_TRANSFORM_METADATA_BYTES,
   MAX_TRANSFORM_RUN_PAGES,
 } from './transforms.ts';
 
@@ -96,6 +97,26 @@ describe('lazy transform bundle retrieval', () => {
     expect(bundle.schedule).toMatchObject({ cadence: 'Daily', timezone: 'UTC', enabled: true });
     expect(bundle.schedule?.provenance.sourceEndpoint).toBe(schedulePath);
     expect(client.calls).toEqual([detailPath, runPath, schedulePath]);
+    expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
+  });
+
+  it('omits an oversized transform definition instead of producing an unrelayable bundle', async () => {
+    const detail = JSON.parse(transformDetailJson) as { result: Record<string, unknown> };
+    detail.result.transformDefinition = 'x'.repeat(MAX_TRANSFORM_METADATA_BYTES + 1);
+    detail.result.notes = 'y'.repeat(MAX_TRANSFORM_METADATA_BYTES + 1);
+    const client = fakeClient({
+      [detailPath]: JSON.stringify(detail),
+      [runPath]: transformRunHistoryJson,
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.sections.detail).toBe('partial');
+    expect(bundle.messages.detail).toMatch(/metadata was omitted/i);
+    expect(bundle.transform?.definition).toMatch(/omitted/i);
+    expect(JSON.stringify(bundle.transform?.raw)).toMatch(/omitted/i);
+    expect(new TextEncoder().encode(JSON.stringify(bundle)).byteLength).toBeLessThan(MAX_TRANSFORM_METADATA_BYTES);
     expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
   });
 
