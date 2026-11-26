@@ -28,10 +28,14 @@
   --shadow-popover: 0 16px 40px #10182826;
   --shadow-deck: 0 24px 60px #1018281f;
 
-  /* One easing curve and two short durations keep motion consistent. */
+  /* Enter decelerates into place; exit accelerates away. Both stay at or under 200ms. */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --duration-fast: 150ms;
   --duration-normal: 200ms;
+
+  --drawer-comfortable-width: 48rem;
 
   /* Global type scale; appearance settings override this on the root element. */
   --app-font-scale: 1;
@@ -99,21 +103,19 @@ html[data-theme='dark'][data-palette='midnight'] {
   --shadow-deck: 0 24px 60px #00000052;
 }
 
-/* Motion: transform/opacity only, short durations, one shared easing curve.
-   The reduced-motion rule in @layer base neutralizes all of it. */
 @keyframes dcat-fade-in {
   from { opacity: 0; transform: translate3d(0, 4px, 0); }
   to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
-@keyframes dcat-panel-in {
-  from { opacity: 0; transform: translate3d(12px, 0, 0); }
+@keyframes dcat-drawer-in {
+  from { opacity: 0; transform: translate3d(24px, 0, 0); }
   to { opacity: 1; transform: translate3d(0, 0, 0); }
 }
 
-@keyframes dcat-panel-out {
+@keyframes dcat-drawer-out {
   from { opacity: 1; transform: translate3d(0, 0, 0); }
-  to { opacity: 0; transform: translate3d(12px, 0, 0); }
+  to { opacity: 0; transform: translate3d(24px, 0, 0); }
 }
 
 @keyframes dcat-panel-in-left {
@@ -216,11 +218,23 @@ html[data-theme='dark'][data-palette='midnight'] {
 }
 
 .drawer-panel {
-  animation: dcat-panel-in var(--duration-normal) var(--ease-standard) both;
+  width: var(--drawer-comfortable-width);
+  max-width: 100%;
+  transition: width var(--duration-normal) var(--ease-standard);
+  animation: dcat-drawer-in var(--duration-normal) var(--ease-enter) both;
+}
+
+.drawer-panel[data-width='full'] {
+  width: 100%;
+}
+
+/* Written metadata stays near a readable measure even when the panel is full width. */
+.drawer-panel p {
+  max-width: 70ch;
 }
 
 [data-state='closing'] .drawer-panel {
-  animation: dcat-panel-out var(--duration-fast) var(--ease-standard) both;
+  animation: dcat-drawer-out var(--duration-fast) var(--ease-exit) both;
 }
 
 .mode-toast {
@@ -478,6 +492,42 @@ html[data-theme='dark'] .dcat-mark {
 
   .panel-pad {
     @apply p-5 sm:p-6;
+  }
+
+  /* Growing from 0fr to 1fr reaches the panel's intrinsic height without
+     measuring it in JS. */
+  .disclosure-content {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--duration-normal) var(--ease-enter);
+  }
+
+  .disclosure-content[data-open='false'] {
+    transition-timing-function: var(--ease-exit);
+  }
+
+  .disclosure-content[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+
+  .disclosure-content > * {
+    min-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-exit);
+  }
+
+  .disclosure-content[data-open='true'] > * {
+    opacity: 1;
+    transition: opacity var(--duration-normal) var(--ease-enter);
+  }
+
+  .disclosure-chevron {
+    transition: transform var(--duration-normal) var(--ease-standard);
+  }
+
+  .disclosure-trigger[aria-expanded='true'] .disclosure-chevron {
+    transform: rotate(180deg);
   }
 
   .btn {

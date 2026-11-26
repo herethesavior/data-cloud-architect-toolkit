@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { trapDialogFocus } from '../../lib/focusTrap.ts';
+import { getDrawerFullWidth, setDrawerFullWidth } from '../../lib/preferences.ts';
 import { Icon } from '../Icon.tsx';
 
 interface DetailDrawerProps {
@@ -53,6 +54,13 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const { rendered, closing } = useDrawerPresence(open);
+  const [fullWidth, setFullWidth] = useState(getDrawerFullWidth);
+
+  function toggleWidth() {
+    const next = !fullWidth;
+    setFullWidth(next);
+    setDrawerFullWidth(next);
+  }
 
   useEffect(() => {
     // Keep the trap while the closing drawer is still visible; focus is restored
@@ -89,7 +97,7 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50"
+      className="fixed inset-0 z-50 overflow-hidden"
       data-testid="drawer-overlay"
       data-state={closing ? 'closing' : 'open'}
     >
@@ -109,7 +117,8 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="drawer-panel absolute inset-y-0 right-0 flex w-full max-w-[40rem] flex-col border-l border-line bg-surface shadow-popover"
+        data-width={fullWidth ? 'full' : 'comfortable'}
+        className="drawer-panel absolute inset-y-0 right-0 flex flex-col border-l border-line bg-surface shadow-popover"
       >
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
@@ -120,15 +129,28 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
             {subtitle ? <p title={subtitle} className="mono mt-1 truncate text-ink-soft">{subtitle}</p> : null}
             {headerActions ? <div className="mt-2 flex flex-wrap gap-1">{headerActions}</div> : null}
           </div>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            aria-label="Close details"
-            className="grid size-9 shrink-0 place-items-center rounded-lg text-ink-soft hover:bg-surface-alt hover:text-ink"
-          >
-            <Icon name="close" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              data-testid="drawer-width-toggle"
+              aria-label="Full width"
+              aria-pressed={fullWidth}
+              title={fullWidth ? 'Return to comfortable width' : 'Use the full window width'}
+              onClick={toggleWidth}
+              className="btn-quiet hidden px-2 text-xs lg:inline-flex"
+            >
+              Full width
+            </button>
+            <button
+              ref={closeRef}
+              type="button"
+              onClick={onClose}
+              aria-label="Close details"
+              className="grid size-9 shrink-0 place-items-center rounded-lg text-ink-soft hover:bg-surface-alt hover:text-ink"
+            >
+              <Icon name="close" />
+            </button>
+          </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">{children}</div>
       </aside>

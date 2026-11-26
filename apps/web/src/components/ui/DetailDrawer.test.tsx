@@ -35,6 +35,26 @@ describe('DetailDrawer', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    window.localStorage.removeItem('dcat.drawerFullWidth');
+  });
+
+  it('toggles and remembers the full-width layout', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open detail' }));
+
+    const panel = screen.getByTestId('drawer-panel');
+    const toggle = screen.getByRole('button', { name: 'Full width' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(panel).toHaveAttribute('data-width', 'comfortable');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(panel).toHaveAttribute('data-width', 'full');
+    expect(window.localStorage.getItem('dcat.drawerFullWidth')).toBe('true');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(panel).toHaveAttribute('data-width', 'comfortable');
   });
 
   it('restores focus only after the exit animation removes the dialog', () => {

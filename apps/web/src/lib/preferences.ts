@@ -8,6 +8,7 @@ const THEME_PALETTE_KEY = 'dcat.themePalette';
 const FONT_SIZE_KEY = 'dcat.fontSize';
 const DENSITY_KEY = 'dcat.density';
 const SIDEBAR_KEY = 'dcat.sidebarCollapsed';
+const DRAWER_FULL_WIDTH_KEY = 'dcat.drawerFullWidth';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 const ORG_ALIAS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
 const MAX_HIDDEN_ORGS = 200;
@@ -82,6 +83,15 @@ export function getSidebarCollapsed(): boolean {
 export function setSidebarCollapsed(collapsed: boolean): void {
   if (collapsed) getStorage()?.setItem(SIDEBAR_KEY, 'true');
   else getStorage()?.removeItem(SIDEBAR_KEY);
+}
+
+export function getDrawerFullWidth(): boolean {
+  return getStorage()?.getItem(DRAWER_FULL_WIDTH_KEY) === 'true';
+}
+
+export function setDrawerFullWidth(fullWidth: boolean): void {
+  if (fullWidth) getStorage()?.setItem(DRAWER_FULL_WIDTH_KEY, 'true');
+  else getStorage()?.removeItem(DRAWER_FULL_WIDTH_KEY);
 }
 
 export function getThemePreference(): ThemePreference {

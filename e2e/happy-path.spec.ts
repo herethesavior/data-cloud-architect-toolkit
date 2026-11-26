@@ -493,7 +493,18 @@ test('compatibility settings save a curated version and reuse the inventory refr
   await page.getByRole('button', { name: 'Switch to live mode' }).click();
   await expect(apiVersionFact).toContainText('v67.0');
 
+  const disclosure = page.locator('.disclosure-content');
+  expect((await disclosure.boundingBox())?.height).toBe(0);
+
   await page.getByText('Change API version').click();
+  await expect(disclosure).toHaveAttribute('data-open', 'true');
+  const motion = await disclosure.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { property: style.transitionProperty, duration: style.transitionDuration };
+  });
+  expect(motion.property).toContain('grid-template-rows');
+  expect(motion.duration).toBe('0.2s');
+
   await page.locator('input[name="api-version-choice"]').nth(2).check();
   await page.getByLabel('Specific API version').selectOption('68.0');
   const inventoryBefore = calls.inventory;
@@ -890,9 +901,9 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
     Promise.allSettled(element.getAnimations({ subtree: true }).map((animation) => animation.finished)),
   );
 
-  const width = (await page.getByTestId('drawer-panel').boundingBox())?.width ?? 0;
-  expect(width).toBeGreaterThan(0);
-  expect(width).toBeLessThanOrEqual(640);
+  const width = Math.round((await page.getByTestId('drawer-panel').boundingBox())?.width ?? 0);
+  expect(width).toBeGreaterThan(640);
+  expect(width).toBeLessThanOrEqual(768);
 
   const geometry = await page.evaluate(() => {
     const overlay = document.querySelector<HTMLElement>('[data-testid="drawer-overlay"]')!;
@@ -921,6 +932,31 @@ test('inventory refresh is contextual and detail drawers stay unobstructed', asy
   });
   expect(['transparent', 'rgba(0, 0, 0, 0)']).toContain(catcherStyle.background);
   expect(catcherStyle.backdrop).toBe('none');
+});
+
+test('detail drawer can switch to full width and remembers the choice', async ({ page }) => {
+  await openDemo(page);
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
+  const rows = page.getByRole('table', { name: 'DLO Explorer results' });
+  await rows.getByRole('button', { name: 'Details', exact: true }).first().click();
+
+  const panel = page.getByTestId('drawer-panel');
+  const toggle = panel.getByRole('button', { name: 'Full width' });
+  const panelWidth = async () => Math.round((await panel.boundingBox())?.width ?? 0);
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(await panelWidth()).toBeLessThanOrEqual(768);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(panelWidth).toBe(page.viewportSize()!.width);
+
+  await page.getByRole('button', { name: 'Close details' }).last().click();
+  await rows.getByRole('button', { name: 'Details', exact: true }).nth(1).click();
+  await expect(panel.getByRole('button', { name: 'Full width' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(panelWidth).toBe(page.viewportSize()!.width);
+
+  await panel.getByRole('button', { name: 'Full width' }).click();
+  await expect.poll(panelWidth).toBeLessThanOrEqual(768);
 });
 
 test('a slow refresh can be cancelled instead of leaving a permanent spinner', async ({ page }) => {
@@ -1719,6 +1755,26 @@ test('reduced motion disables transitions and entrance animations', async ({ pag
   };
   expect(toMilliseconds(durations.sidebar)).toBeLessThan(1);
   expect(toMilliseconds(durations.page)).toBeLessThan(1);
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+  const disclosure = page.locator('.disclosure-content').first();
+  await expect(disclosure).toHaveCount(1);
+  const disclosureDuration = await disclosure.evaluate((element) => getComputedStyle(element).transitionDuration);
+  expect(toMilliseconds(disclosureDuration)).toBeLessThan(1);
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
+  await page.getByRole('table', { name: 'DLO Explorer results' })
+    .getByRole('button', { name: 'Details', exact: true })
+    .first()
+    .click();
+  const drawer = page.getByTestId('drawer-panel');
+  await expect(drawer).toBeVisible();
+  const drawerDurations = await drawer.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { animation: style.animationDuration, width: style.transitionDuration };
+  });
+  expect(toMilliseconds(drawerDurations.animation)).toBeLessThan(1);
+  expect(toMilliseconds(drawerDurations.width)).toBeLessThan(1);
 });
 
 test('layout has no horizontal overflow at laptop, tablet, and phone widths', async ({ page }) => {

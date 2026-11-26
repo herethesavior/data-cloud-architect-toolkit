@@ -8,12 +8,14 @@ import {
   clearThemePalette,
   clearThemePreference,
   getDensityPreference,
+  getDrawerFullWidth,
   getFontSizePreference,
   getHiddenOrgs,
   getThemePalette,
   getThemePreference,
   resolveTheme,
   setDensityPreference,
+  setDrawerFullWidth,
   setFontSizePreference,
   setHiddenOrgs,
   setThemePalette,
@@ -101,6 +103,17 @@ describe('theme preferences', () => {
   it('ignores malformed hidden org storage', () => {
     window.localStorage.setItem('dcat.hiddenOrgs', '{"alias":"prod-org"}');
     expect(getHiddenOrgs()).toEqual([]);
+  });
+
+  it('remembers the detail drawer width preference', () => {
+    expect(getDrawerFullWidth()).toBe(false);
+    setDrawerFullWidth(true);
+    expect(getDrawerFullWidth()).toBe(true);
+    expect(window.localStorage.getItem('dcat.drawerFullWidth')).toBe('true');
+
+    setDrawerFullWidth(false);
+    expect(getDrawerFullWidth()).toBe(false);
+    expect(window.localStorage.getItem('dcat.drawerFullWidth')).toBeNull();
   });
 
   it('stores appearance preferences and falls back to safe defaults', () => {
