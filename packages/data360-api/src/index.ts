@@ -6,4 +6,5 @@ export * from './normalize.ts';
 export * from './pagination.ts';
 export * from './progressive.ts';
 export * from './transforms.ts';
+export * from './transformVisual.ts';
 export * from './versions.ts';

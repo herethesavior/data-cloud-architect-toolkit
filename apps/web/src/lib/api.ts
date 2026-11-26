@@ -267,7 +267,8 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal, onC
     const createRequest = () => relayRequest<{ id: string }>('/api/relay/requests', {
       method: 'POST',
       body: operation,
-      signal,
+      // Do not abort the create POST itself: if the worker already queued the
+      // request, the caller needs its id to send an explicit cancellation.
       timeoutMs: RELAY_POLL_TIMEOUT_MS,
     });
 

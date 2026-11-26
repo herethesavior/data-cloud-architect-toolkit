@@ -10,6 +10,7 @@ import type {
   ResourceProvenance,
 } from '@dcat/core';
 import { CliError } from '@dcat/salesforce-cli';
+import { parseTransformVisualDefinition } from './transformVisual.ts';
 
 export interface NormalizeContext {
   orgId: string;
@@ -588,6 +589,7 @@ export function normalizeDataTransforms(raw: unknown, context: NormalizeContext)
       definition: toDefinitionText(
         entry.definition ?? entry.transformDefinition ?? entry.sql ?? entry.sqlExpression ?? entry.pipeline ?? entry.pipelineDefinition,
       ),
+      visualDefinition: parseTransformVisualDefinition(entry),
       dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace']),
       createdAt: firstString(entry, ['createdAt', 'createdDate', 'createdOn', 'CreatedDate']),
       modifiedAt: firstString(entry, ['modifiedAt', 'lastModifiedAt', 'modifiedDate', 'LastModifiedDate']),

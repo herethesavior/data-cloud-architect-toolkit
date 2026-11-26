@@ -37,12 +37,14 @@ function InventoryProgressBanner({
   isResuming,
   resumable = false,
   interrupted = false,
+  refreshing = false,
 }: {
   progress: DiscoveryProgressData;
   onResume?: () => void;
   isResuming: boolean;
   resumable?: boolean;
   interrupted?: boolean;
+  refreshing?: boolean;
 }) {
   const stalled = resumable || progress.state === 'failed';
   const degraded = progress.state === 'partial' || progress.families.some((family) =>
@@ -90,7 +92,7 @@ function InventoryProgressBanner({
             <p className="mt-0.5 text-xs text-ink-soft">{detail}</p>
           </div>
         </div>
-        {stalled && onResume ? (
+        {stalled && onResume && !refreshing ? (
           <button
             type="button"
             onClick={onResume}
@@ -305,6 +307,7 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           isResuming={Boolean(actions?.isResumingDiscovery)}
           resumable={stalledFamilies(inventory)}
           interrupted={Boolean(loadError)}
+          refreshing={Boolean(actions?.isRefreshingInventory)}
         />
       ) : null}
       <ResourceStatusNotice inventory={inventory} />

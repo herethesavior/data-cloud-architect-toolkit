@@ -202,6 +202,42 @@ export const dataStreamSchema = z.object({
 
 export type DataStream = z.infer<typeof dataStreamSchema>;
 
+export const transformVisualNodeSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  type: z.string().nullish(),
+  action: z.string().nullish(),
+  description: z.string().nullish(),
+  top: z.number(),
+  left: z.number(),
+  fieldCount: z.number().nullish(),
+  sourceCount: z.number().nullish(),
+  summary: z.array(z.string()),
+});
+
+export type TransformVisualNode = z.infer<typeof transformVisualNodeSchema>;
+
+export const transformVisualEdgeSchema = z.object({
+  id: z.string(),
+  source: z.string(),
+  target: z.string(),
+  label: z.string().nullish(),
+});
+
+export type TransformVisualEdge = z.infer<typeof transformVisualEdgeSchema>;
+
+export const transformVisualDefinitionSchema = z.object({
+  name: z.string().nullish(),
+  label: z.string().nullish(),
+  version: z.string().nullish(),
+  layout: z.enum(['source', 'generated']),
+  nodes: z.array(transformVisualNodeSchema),
+  edges: z.array(transformVisualEdgeSchema),
+  truncated: z.boolean(),
+});
+
+export type TransformVisualDefinition = z.infer<typeof transformVisualDefinitionSchema>;
+
 export const dataTransformSchema = z.object({
   apiName: z.string(),
   label: z.string().nullish(),
@@ -215,6 +251,8 @@ export const dataTransformSchema = z.object({
   lastRunAt: z.string().nullish(),
   schedule: z.string().nullish(),
   definition: z.string().nullish(),
+  /** Read-only canvas model extracted from Salesforce's own UI metadata when present. */
+  visualDefinition: transformVisualDefinitionSchema.nullish(),
   dataSpace: z.string().nullish(),
   createdAt: z.string().nullish(),
   modifiedAt: z.string().nullish(),

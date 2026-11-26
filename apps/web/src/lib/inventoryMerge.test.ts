@@ -270,7 +270,7 @@ describe('mergeInventorySnapshot', () => {
     expect(mergeInventorySnapshot(previous, terminal).relationships).toEqual([]);
   });
 
-  it('unions relay chunks even when the final chunk reports a complete pass', () => {
+  it('unions non-final relay chunks, then lets the final complete chunk reconcile deletions', () => {
     const complete = progress('complete', {
       dlos: { status: 'complete', loaded: 4, pagesFetched: 1 },
     });
@@ -287,6 +287,11 @@ describe('mergeInventorySnapshot', () => {
     ]);
     const second = snapshot({ dlos: all.slice(2) }, complete, [chunkWarning]);
 
-    expect(mergeInventorySnapshot(mergeInventorySnapshot(first, second), second).dlos).toHaveLength(4);
+    const previous = snapshot({ dlos: all });
+    const partial = mergeInventorySnapshot(previous, first);
+    expect(partial.dlos).toHaveLength(4);
+
+    const final = mergeInventorySnapshot(partial, second);
+    expect(final.dlos.map((row) => row.apiName)).toEqual(['DLO_2', 'DLO_3']);
   });
 });

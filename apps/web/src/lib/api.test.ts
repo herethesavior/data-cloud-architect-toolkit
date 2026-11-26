@@ -243,6 +243,41 @@ describe('web API session handling', () => {
     expect(relayPosts).toBe(2);
   });
 
+  it('still cancels the queued request when abort lands during relay creation', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_HOSTED', 'true');
+    let releaseCreate!: (value: ReturnType<typeof jsonResponse>) => void;
+    const createResponse = new Promise<ReturnType<typeof jsonResponse>>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const fetchMock = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/api/session') return jsonResponse({ ...session, mode: 'live' });
+      if (path === '/api/relay/requests' && options?.method === 'POST') return createResponse;
+      if (path === '/api/relay/cancel') return jsonResponse({ cancelled: true });
+      return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const controller = new AbortController();
+    const pending = api.inventory('prod-org', { force: true, signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' });
+
+    // The create POST resolves after the caller has already given up; the worker
+    // still needs its id so the abandoned operation can be cancelled.
+    releaseCreate(jsonResponse({ id: 'req-slow' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const createCall = fetchMock.mock.calls.find(([path, options]) =>
+      path === '/api/relay/requests' && options?.method === 'POST');
+    // The create POST keeps its own timeout signal; aborting the caller must not
+    // reject the POST before the worker id is known.
+    expect(createCall?.[1]?.signal).not.toBe(controller.signal);
+    const cancelCall = fetchMock.mock.calls.find(([path]) => path === '/api/relay/cancel');
+    expect(JSON.parse(String(cancelCall?.[1]?.body))).toEqual({ requestId: 'req-slow' });
+  });
+
   it('cancels a relay request with the refreshed CSRF token', async () => {
     vi.useFakeTimers();
     vi.stubEnv('VITE_HOSTED', 'true');

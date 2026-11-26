@@ -6,6 +6,8 @@ export const RESPONSE_CHUNKED_WARNING = 'RESPONSE_CHUNKED';
 export const MORE_ITEMS_AVAILABLE_WARNING = 'MORE_ITEMS_AVAILABLE';
 /** A single oversized row was compacted so the rest of the inventory can render. */
 export const ITEM_DETAILS_OMITTED_WARNING = 'ITEM_DETAILS_OMITTED';
+/** Small row batches keep every explorer responsive while progressive rows land. */
+export const MAX_CHUNK_ROWS = 5;
 
 type ArrayField =
   | 'dataSpaces'
@@ -116,25 +118,30 @@ function finalizeChunk(pending: PendingChunk, hasMore: boolean): InventorySnapsh
  * order and every chunk carries the same progress envelope, so the browser can
  * union them without mistaking a partial page for a complete replacement.
  */
-export function chunkInventorySnapshot(snapshot: InventorySnapshot, maxBytes: number): InventorySnapshot[] {
+export function chunkInventorySnapshot(
+  snapshot: InventorySnapshot,
+  maxBytes: number,
+  maxRows = MAX_CHUNK_ROWS,
+): InventorySnapshot[] {
   const chunks: PendingChunk[] = [];
+  const rowLimit = Math.max(1, Math.floor(maxRows));
   let current = emptySnapshot(snapshot);
   let omitted = new Set<string>();
-  let bytes = byteLength(JSON.stringify(current));
+  let bytes = byteLength(current);
   let rowsInChunk = 0;
 
   for (const field of ARRAY_FIELDS) {
     const rows = snapshot[field] as readonly unknown[];
     for (const original of rows) {
-      const oversized = byteLength(JSON.stringify(original)) > Math.max(64 * 1024, Math.floor(maxBytes / 2));
+      const oversized = byteLength(original) > Math.max(64 * 1024, Math.floor(maxBytes / 2));
       const row = oversized ? compactRow(field, original) : original;
       if (oversized) omitted.add(FAMILY_BY_FIELD[field]);
-      const addition = byteLength(JSON.stringify(row)) + 1;
-      if (rowsInChunk > 0 && bytes + addition > maxBytes) {
+      const addition = byteLength(row) + 1;
+      if (rowsInChunk > 0 && (rowsInChunk >= rowLimit || bytes + addition > maxBytes)) {
         chunks.push({ snapshot: current, omitted });
         current = emptySnapshot(snapshot);
         omitted = new Set<string>();
-        bytes = byteLength(JSON.stringify(current));
+        bytes = byteLength(current);
         rowsInChunk = 0;
       }
       (current[field] as unknown[]).push(row);

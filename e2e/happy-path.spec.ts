@@ -1056,7 +1056,8 @@ test('data transform explorer shows grounded detail, lineage, and run states', a
   await expect(drawer.getByText('Data Transform Explorer / Normalize Contacts')).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Overview' })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Flow & Lineage' })).toBeVisible();
-  await expect(drawer.getByRole('tab', { name: 'Definition' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Visual Definition' })).toBeVisible();
+  await expect(drawer.getByRole('tab', { name: 'Definition', exact: true })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Run History (2)' })).toBeVisible();
   await expect(drawer.getByRole('tab', { name: 'Raw Metadata' })).toBeVisible();
 
@@ -1067,6 +1068,12 @@ test('data transform explorer shows grounded detail, lineage, and run states', a
   await drawer.getByRole('tab', { name: 'Flow & Lineage' }).click();
   await expect(drawer.getByText('Account_DLO__dll')).toBeVisible();
   await expect(drawer.getByText('Known in inventory').first()).toBeVisible();
+
+  await drawer.getByRole('tab', { name: 'Visual Definition' }).click();
+  await expect(drawer.getByRole('region', { name: 'Data transform definition canvas' })).toBeVisible();
+  await expect(drawer.locator('.react-flow__node-transformStep')).toHaveCount(3);
+  await expect(drawer.locator('.react-flow__edge')).toHaveCount(2);
+  await expect(drawer.getByText('Read-only Salesforce canvas')).toBeVisible();
 
   await drawer.getByRole('tab', { name: 'Run History (2)' }).click();
   await expect(drawer.getByRole('table', { name: 'Transform run history' })).toBeVisible();

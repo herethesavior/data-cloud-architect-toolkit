@@ -5,6 +5,7 @@ import type {
   OrgSummary,
   ResourceProvenance,
   TransformBundle,
+  TransformVisualDefinition,
 } from '@dcat/core';
 
 export const DEMO_ORG_ALIAS = 'demo-uat';
@@ -60,6 +61,53 @@ export const DEMO_TRANSFORM_IDS = {
 
 const transformEndpoint = (id: string) => `services/data/${DEMO_API_VERSION}/ssot/data-transforms/${id}`;
 
+export const demoVisualDefinition: TransformVisualDefinition = {
+  name: 'Normalize_Contacts',
+  label: 'Normalize Contacts',
+  version: '1',
+  layout: 'source',
+  truncated: false,
+  nodes: [
+    {
+      id: 'LOAD_ACCOUNTS',
+      label: 'Account_DLO__dll',
+      type: 'LOAD_DATASET',
+      action: 'load',
+      top: 72,
+      left: 72,
+      fieldCount: 12,
+      sourceCount: 0,
+      summary: ['Input: Account_DLO__dll', '12 fields'],
+    },
+    {
+      id: 'CLEAN_NAMES',
+      label: 'Clean Names',
+      type: 'TRANSFORM',
+      action: 'transform',
+      top: 72,
+      left: 316,
+      fieldCount: 4,
+      sourceCount: 1,
+      summary: ['4 mapped fields', '1 upstream source'],
+    },
+    {
+      id: 'OUTPUT',
+      label: 'Contact_DMO__dlm',
+      type: 'OUTPUT',
+      action: 'output',
+      top: 72,
+      left: 560,
+      fieldCount: 8,
+      sourceCount: 1,
+      summary: ['Output: Contact_DMO__dlm', '1 upstream source'],
+    },
+  ],
+  edges: [
+    { id: 'LOAD_ACCOUNTS->CLEAN_NAMES', source: 'LOAD_ACCOUNTS', target: 'CLEAN_NAMES', label: null },
+    { id: 'CLEAN_NAMES->OUTPUT', source: 'CLEAN_NAMES', target: 'OUTPUT', label: null },
+  ],
+};
+
 export const demoTransforms: DataTransform[] = [
   {
     apiName: 'Normalize_Contacts',
@@ -74,6 +122,7 @@ export const demoTransforms: DataTransform[] = [
     lastRunAt: '2026-11-17T01:30:00.000Z',
     schedule: 'Daily at 02:00 UTC',
     definition: '{"nodes":[{"name":"Clean Names","type":"transform"}]}',
+    visualDefinition: demoVisualDefinition,
     dataSpace: 'default',
     createdAt: '2026-09-01T09:00:00.000Z',
     modifiedAt: '2026-11-16T14:20:00.000Z',

@@ -55,8 +55,10 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
   const { rendered, closing } = useDrawerPresence(open);
 
   useEffect(() => {
-    if (!open || !rendered) return;
-    if (!previousFocusRef.current && document.activeElement instanceof HTMLElement) {
+    // Keep the trap while the closing drawer is still visible; focus is restored
+    // only after the portal unmounts.
+    if (!rendered) return;
+    if (open && !previousFocusRef.current && document.activeElement instanceof HTMLElement) {
       previousFocusRef.current = document.activeElement;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -64,7 +66,7 @@ export function DetailDrawer({ open, title, subtitle, breadcrumbs, headerActions
       trapDialogFocus(event, dialogRef.current);
     };
     document.addEventListener('keydown', handleKeyDown);
-    closeRef.current?.focus();
+    if (open) closeRef.current?.focus();
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [open, rendered]);
 

@@ -38,7 +38,7 @@ import {
 const org = demoOrgs[0]!;
 const base = 'services/data/v65.0/ssot';
 const dloPath = `${base}/data-lake-objects`;
-const dmoPath = `${base}/data-model-objects?limit=100&offset=0`;
+const dmoPath = `${base}/data-model-objects?limit=10&offset=0`;
 const transformPath = buildFamilyPath('data-transforms', '65.0');
 const dmoNames = ['Account_DMO__dlm', 'Contact_DMO__dlm', 'Order_DMO__dlm'];
 const dmoSpaces: Record<string, string> = {
@@ -451,7 +451,7 @@ describe('progressive discovery', () => {
         fields: [],
       })),
     });
-    const nextPath = `${base}/data-model-objects?limit=100&offset=100`;
+    const nextPath = `${base}/data-model-objects?limit=10&offset=100`;
     const cli = fakeCli({
       [dmoPath]: fullPage,
       [nextPath]: dmosOffsetPage2Json,
@@ -483,7 +483,7 @@ describe('progressive discovery', () => {
         })),
       ],
     });
-    const nextPath = `${base}/data-model-objects?limit=100&offset=100`;
+    const nextPath = `${base}/data-model-objects?limit=10&offset=100`;
     const secondPage = JSON.stringify({
       dataModelObject: Array.from({ length: 100 }, (_, index) => ({
         name: `Later_${index}__dlm`,

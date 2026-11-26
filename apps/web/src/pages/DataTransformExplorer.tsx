@@ -8,6 +8,7 @@ import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
+import { TransformDefinitionViewer } from '../components/transform/TransformDefinitionViewer.tsx';
 import { Badge, Button, CopyButton, DataTable, DetailDrawer, PaginatedList, SearchField, Tabs } from '../components/ui/index.ts';
 import type { DataTableColumn, TabItem } from '../components/ui/index.ts';
 import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.ts';
@@ -248,6 +249,22 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
       ),
     },
     {
+      id: 'visual-definition',
+      label: 'Visual Definition',
+      content: detail.visualDefinition ? (
+        <div className="space-y-3">
+          <TransformDefinitionViewer definition={detail.visualDefinition} />
+          {sections.detail === 'partial' ? (
+            <p className="text-xs text-ink-soft">Some definition details were omitted to keep this view responsive. The raw metadata tab shows what was returned.</p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-sm text-ink-soft">
+          This org did not return Salesforce canvas coordinates for this transform. The Definition tab still shows the source definition when available.
+        </p>
+      ),
+    },
+    {
       id: 'definition',
       label: 'Definition',
       content: shown(detail.definition, '') ? (
@@ -451,7 +468,7 @@ export function DataTransformExplorer({ context, focusObject, onFocusHandled }: 
             <ExportNotice mode={context?.mode ?? 'demo'} />
             <PageIntro
               title="Data Transform Explorer"
-              description="Inspect batch and streaming transforms, their inputs and outputs, definitions, and available run history."
+              description="Inspect batch and streaming transforms, their visual definitions, inputs and outputs, and available run history."
               actions={
                 <>
                   <div className="w-full sm:w-64">

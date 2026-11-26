@@ -527,25 +527,23 @@ describe('hosted bridge relay', () => {
     // A bridge status read must not consume the browser's queued chunks.
     await app.request('/api/relay/status', { headers: session.headers }, env);
 
-    const firstResponse = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
-    const first = await firstResponse.json() as {
+    type RelayRead = {
       status: string;
       chunked?: boolean;
       hasMore?: boolean;
       result?: { snapshot?: { dlos: unknown[] } };
     };
-    expect(first).toMatchObject({ status: 'running', chunked: true, hasMore: true });
-    expect(first.result?.snapshot?.dlos.length).toBeGreaterThan(0);
-
-    const secondResponse = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
-    const second = await secondResponse.json() as {
-      status: string;
-      chunked?: boolean;
-      hasMore?: boolean;
-      result?: { snapshot?: { dlos: unknown[] } };
-    };
-    expect(second).toMatchObject({ status: 'completed', chunked: true, hasMore: false });
-    expect((first.result?.snapshot?.dlos.length ?? 0) + (second.result?.snapshot?.dlos.length ?? 0)).toBe(60);
+    let last: RelayRead | undefined;
+    let delivered = 0;
+    // Five rows per chunk means this 60-row snapshot needs twelve reads.
+    for (let poll = 0; poll < 20; poll += 1) {
+      const response = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
+      last = await response.json() as RelayRead;
+      delivered += last.result?.snapshot?.dlos.length ?? 0;
+      if (last.status === 'completed') break;
+    }
+    expect(last).toMatchObject({ status: 'completed', chunked: true, hasMore: false });
+    expect(delivered).toBe(60);
   });
 
   it('invalidates an unused pairing code when the browser unpairs', async () => {

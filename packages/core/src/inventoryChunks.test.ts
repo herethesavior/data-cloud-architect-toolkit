@@ -3,6 +3,7 @@ import type { InventorySnapshot } from './domain.ts';
 import {
   chunkInventorySnapshot,
   chunkRelayResult,
+  MAX_CHUNK_ROWS,
   MORE_ITEMS_AVAILABLE_WARNING,
   RESPONSE_CHUNKED_WARNING,
 } from './inventoryChunks.ts';
@@ -74,6 +75,16 @@ describe('inventory relay chunks', () => {
     expect(chunks.at(-1)!.warnings.some((warning) => warning.code === MORE_ITEMS_AVAILABLE_WARNING)).toBe(false);
     expect(chunks[0]!.progress?.state).toBe('running');
     expect(chunks.at(-1)!.progress?.state).toBe('complete');
+  });
+
+  it('caps each chunk at a few rows even when the byte budget is generous', () => {
+    const inventory = inventoryWithRows(12);
+    const chunks = chunkInventorySnapshot(inventory, 5 * 1024 * 1024);
+
+    expect(MAX_CHUNK_ROWS).toBe(5);
+    expect(chunks).toHaveLength(3);
+    expect(chunks.map((chunk) => chunk.dlos.length)).toEqual([5, 5, 2]);
+    expect(chunks.reduce((total, chunk) => total + chunk.dlos.length, 0)).toBe(12);
   });
 
   it('keeps the session envelope on progressive result chunks', () => {
