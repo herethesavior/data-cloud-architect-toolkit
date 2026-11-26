@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { PaginationControls, paginate, usePagination } from './Pagination.tsx';
 
 export interface DataTableColumn<T> {
   key: string;
@@ -15,6 +16,8 @@ interface DataTableProps<T> {
   getRowKey: (row: T) => string;
   ariaLabel: string;
   emptyMessage?: string;
+  /** Opt-in client-side paging for large inventories. */
+  pageSize?: number;
 }
 
 const hiddenClasses: Record<NonNullable<DataTableColumn<unknown>['hideBelow']>, string> = {
@@ -23,7 +26,16 @@ const hiddenClasses: Record<NonNullable<DataTableColumn<unknown>['hideBelow']>, 
   lg: 'hidden lg:table-cell',
 };
 
-export function DataTable<T>({ columns, rows, getRowKey, ariaLabel, emptyMessage = 'No matching records.' }: DataTableProps<T>) {
+export function DataTable<T>({
+  columns,
+  rows,
+  getRowKey,
+  ariaLabel,
+  emptyMessage = 'No matching records.',
+  pageSize,
+}: DataTableProps<T>) {
+  const { page, totalPages, goPrevious, goNext } = usePagination(rows.length, pageSize);
+
   if (rows.length === 0) {
     return (
       <div
@@ -36,35 +48,43 @@ export function DataTable<T>({ columns, rows, getRowKey, ariaLabel, emptyMessage
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table aria-label={ariaLabel} className="data-table min-w-[680px]">
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th
-                key={column.key}
-                className={`relative ${column.align === 'end' ? 'text-right tabular-nums' : 'text-left'} ${column.hideBelow ? hiddenClasses[column.hideBelow] : ''}`}
-              >
-                {column.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={getRowKey(row)}>
+    <>
+      <div className="overflow-x-auto">
+        <table aria-label={ariaLabel} className="data-table min-w-[680px]">
+          <thead>
+            <tr>
               {columns.map((column) => (
-                <td
+                <th
                   key={column.key}
-                  className={`${column.align === 'end' ? 'text-right tabular-nums' : 'text-left'} ${column.hideBelow ? hiddenClasses[column.hideBelow] : ''} ${column.cellClassName ?? ''}`}
+                  className={`relative ${column.align === 'end' ? 'text-right tabular-nums' : 'text-left'} ${column.hideBelow ? hiddenClasses[column.hideBelow] : ''}`}
                 >
-                  {column.render(row)}
-                </td>
+                  {column.header}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {paginate(rows, page, pageSize).map((row) => (
+              <tr key={getRowKey(row)}>
+                {columns.map((column) => (
+                  <td
+                    key={column.key}
+                    className={`${column.align === 'end' ? 'text-right tabular-nums' : 'text-left'} ${column.hideBelow ? hiddenClasses[column.hideBelow] : ''} ${column.cellClassName ?? ''}`}
+                  >
+                    {column.render(row)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <PaginationControls
+        page={page}
+        totalPages={totalPages}
+        goPrevious={goPrevious}
+        goNext={goNext}
+      />
+    </>
   );
 }

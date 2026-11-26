@@ -62,7 +62,8 @@ export class FakeSqlStorage implements SqlStorageLike {
       return rows([]);
     }
     if (sql.startsWith('DELETE FROM relay_meta')) {
-      this.meta.clear();
+      if (sql.includes('WHERE') && bindings.length > 0) this.meta.delete(String(bindings[0]));
+      else this.meta.clear();
       return rows([]);
     }
     if (sql.includes('FROM current_request') && sql.startsWith('SELECT')) {

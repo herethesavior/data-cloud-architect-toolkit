@@ -64,6 +64,17 @@ describe('Data Stream Explorer', () => {
     expect(within(table).queryByText('Accounts Stream')).not.toBeInTheDocument();
   });
 
+  it('shows an inactive stream status with the warning tone', async () => {
+    const inventory = structuredClone(demoInventory);
+    inventory.dataStreams[0]!.status = 'INACTIVE';
+    renderExplorer(inventory);
+
+    const table = await screen.findByRole('table', { name: 'Data Stream Explorer results' });
+    const badge = within(table).getByText('INACTIVE');
+    expect(badge).toHaveClass('bg-warning-soft');
+    expect(badge).not.toHaveClass('bg-success-soft');
+  });
+
   it('opens the reusable drawer with grounded target and raw metadata tabs', async () => {
     renderExplorer();
     const table = await screen.findByRole('table', { name: 'Data Stream Explorer results' });

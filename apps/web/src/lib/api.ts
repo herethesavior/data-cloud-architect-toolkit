@@ -206,7 +206,7 @@ async function hostedUsesFixtures(): Promise<boolean> {
 }
 
 /** Send one typed operation to the paired local bridge and wait for its result. */
-async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Promise<T> {
+async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal, onChunk?: (value: T) => void): Promise<T> {
   if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
   const session = await getSession();
   let token = session.token;
@@ -308,6 +308,12 @@ async function relayCall<T>(operation: RelayOperation, signal?: AbortSignal): Pr
       }
       if (signal?.aborted) throw new ApiError('ABORTED', 'Request cancelled.');
       if (state.status === 'completed') return state.result as T;
+      // The Worker can split an oversized inventory into consecutive polls.
+      // Emit each partial result immediately; the final poll completes normally.
+      if (state.chunked && state.result !== null && state.result !== undefined) {
+        onChunk?.(state.result as T);
+        continue;
+      }
       if (state.status === 'failed' || state.status === 'expired') {
         throw new ApiError(state.error?.code ?? 'RELAY_FAILED', 'The local bridge request failed.');
       }
@@ -342,7 +348,9 @@ async function startInventorySession(
     sessionId: options.sessionId,
     refresh: options.force,
   };
-  if (hostedLive) return relayCall<InventorySessionResult>(operation, options.signal);
+  if (hostedLive) {
+    return relayCall<InventorySessionResult>(operation, options.signal, (chunk) => options.onSnapshot?.(chunk.snapshot));
+  }
   return requestWithToken<InventorySessionResult>(`/api/orgs/${encodeURIComponent(alias)}/inventory/session`, {
     method: 'POST',
     body: { sessionId: options.sessionId, refresh: options.force },
@@ -364,7 +372,9 @@ async function readInventorySession(
     resume: options.resume,
     family: options.family,
   };
-  if (hostedLive) return relayCall<InventorySessionResult>(operation, options.signal);
+  if (hostedLive) {
+    return relayCall<InventorySessionResult>(operation, options.signal, (chunk) => options.onSnapshot?.(chunk.snapshot));
+  }
   return requestWithToken<InventorySessionResult>(
     `/api/orgs/${encodeURIComponent(alias)}/inventory/session/${encodeURIComponent(sessionId)}`,
     {
@@ -382,7 +392,11 @@ async function legacyInventory(
   hostedLive: boolean,
 ): Promise<InventorySnapshot> {
   if (hostedLive) {
-    return relayCall<InventorySnapshot>({ operation: 'inventory.get', alias, refresh: options.force }, options.signal);
+    return relayCall<InventorySnapshot>(
+      { operation: 'inventory.get', alias, refresh: options.force },
+      options.signal,
+      (chunk) => options.onSnapshot?.(chunk),
+    );
   }
   const path = `/api/orgs/${encodeURIComponent(alias)}/inventory`;
   return options.force
@@ -501,6 +515,11 @@ export const api = {
             force: attempt > 0 ? true : requestOptions.force,
           };
           return run(attempt + 1, recovered);
+        }
+        // A relay that still rejects a result gets one fresh, forced session;
+        // replaying the same terminal session can never produce new rows.
+        if (error instanceof ApiError && error.code === 'RESPONSE_TOO_LARGE' && attempt < 1) {
+          return run(attempt + 1, { ...requestOptions, sessionId: undefined, force: true });
         }
         // An older local bridge or connector may not expose the progressive
         // operations yet. Preserve the previous all-at-once behavior only for

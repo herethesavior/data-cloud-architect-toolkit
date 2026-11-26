@@ -4,6 +4,9 @@ import {
   type InventorySnapshot,
   type ResourceFamily,
   type RetrievalWarning,
+  ITEM_DETAILS_OMITTED_WARNING,
+  MORE_ITEMS_AVAILABLE_WARNING,
+  RESPONSE_CHUNKED_WARNING,
 } from '@dcat/core';
 import { streamRowKey } from './streamDetail.ts';
 
@@ -32,6 +35,9 @@ const GAP_WARNING_CODES = new Set([
   'DISCOVERY_INTERRUPTED',
   'EXPECTED_COUNT_MISMATCH',
   'ITEMS_SKIPPED',
+  ITEM_DETAILS_OMITTED_WARNING,
+  MORE_ITEMS_AVAILABLE_WARNING,
+  RESPONSE_CHUNKED_WARNING,
   'MAPPING_QUERY_FAILED',
   'MAPPING_QUERY_LIMIT',
   'PAGINATION_LIMIT',
@@ -96,7 +102,13 @@ function familyProgress(progress: DiscoveryProgress | undefined, family: Resourc
 }
 
 function hasGap(warnings: readonly RetrievalWarning[], family: ResourceFamily): boolean {
-  return warnings.some((warning) => warning.family === family && GAP_WARNING_CODES.has(warning.code));
+  return warnings.some((warning) => {
+    if (!GAP_WARNING_CODES.has(warning.code)) return false;
+    if (warning.family === family) return true;
+    return warning.family === 'inventory'
+      && (warning.code === RESPONSE_CHUNKED_WARNING
+        || warning.code === MORE_ITEMS_AVAILABLE_WARNING);
+  });
 }
 
 /**
@@ -120,7 +132,7 @@ function isAuthoritative(
  * the new snapshot actually changed them, so one updated row does not rerender
  * every row in a thousand-item inventory.
  */
-function unionRows<T>(family: MergeFamily, previous: readonly T[], incoming: readonly T[]): T[] {
+function unionRows<T>(family: MergeFamily, previous: readonly T[], incoming: readonly T[], preserveRich: boolean): T[] {
   const merged = [...previous];
   const indexByKey = new Map<string, number>();
   for (let index = 0; index < merged.length; index += 1) {
@@ -134,7 +146,8 @@ function unionRows<T>(family: MergeFamily, previous: readonly T[], incoming: rea
       indexByKey.set(key, merged.length);
       merged.push(row);
     } else if (fingerprint(merged[index]!) !== fingerprint(row)) {
-      merged[index] = row;
+      // A compacted chunk must never erase details already loaded for the same row.
+      if (!preserveRich) merged[index] = row;
     }
   }
   return merged;
@@ -148,14 +161,18 @@ function mergeRows<T>(
   warnings: readonly RetrievalWarning[],
 ): T[] {
   const old = previous ?? [];
+  const preserveRich = warnings.some((warning) =>
+    warning.code === ITEM_DETAILS_OMITTED_WARNING && warning.family === family);
   // An empty page from an unfinished family is not evidence of deletion. Keep
   // the same array reference so unchanged families do not rerender.
   if (incoming.length === 0) {
     if (isAuthoritative(progress, warnings, family === 'relationships' ? 'dmos' : family)) return [];
     return old as T[];
   }
-  if (isAuthoritative(progress, warnings, family === 'relationships' ? 'dmos' : family)) return [...incoming];
-  return unionRows(family, old, incoming);
+  if (isAuthoritative(progress, warnings, family === 'relationships' ? 'dmos' : family) && !preserveRich) {
+    return [...incoming];
+  }
+  return unionRows(family, old, incoming, preserveRich);
 }
 
 /**

@@ -144,6 +144,9 @@ export const relayRequestStateSchema = z.object({
   status: z.enum(['pending', 'running', 'completed', 'failed', 'expired']),
   result: z.unknown().nullable(),
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /** The Worker is handing a large inventory to the browser in several polls. */
+  chunked: z.boolean().optional(),
+  hasMore: z.boolean().optional(),
 });
 
 export type RelayRequestState = z.infer<typeof relayRequestStateSchema>;

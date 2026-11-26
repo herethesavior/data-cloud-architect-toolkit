@@ -41,7 +41,7 @@ import type { ExportMenuItem } from '../components/ExportMenu.tsx';
 import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
-import { Badge, Panel, SectionHeading } from '../components/ui/index.ts';
+import { Badge, DataTable, PaginatedList, Panel, SectionHeading } from '../components/ui/index.ts';
 import type { BadgeTone } from '../components/ui/index.ts';
 import {
   applyLineagePositions,
@@ -140,7 +140,6 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
   const [message, setMessage] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [showAllGaps, setShowAllGaps] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const canvasRef = useRef<HTMLElement | null>(null);
@@ -340,7 +339,6 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
     setSearch('');
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
-    setShowAllGaps(false);
     setNodes(resetFlow.nodes);
     setEdges(resetFlow.edges);
     layoutKeyRef.current = 'LR';
@@ -433,7 +431,6 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
   const selectedPage = selectedGraphNode ? explorerFor(selectedGraphNode) : null;
   const gaps = visibleGraph.gaps;
   const warningGaps = gaps.filter((gap) => gap.severity === 'warning').length;
-  const visibleGaps = showAllGaps ? gaps : gaps.slice(0, 8);
 
   return (
     <>
@@ -673,10 +670,16 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
             title="Flow links"
             description="Every link is derived from a metadata reference in this snapshot. Select one to inspect its detail."
           />
-          <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-            {edges.map((edge) => (
+          <PaginatedList
+            items={edges}
+            pageSize={25}
+            getKey={(edge) => edge.id}
+            container={(children) => (
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">{children}</div>
+            )}
+            emptyMessage="No links match this filter."
+            render={(edge) => (
               <button
-                key={edge.id}
                 type="button"
                 onClick={() => focusEdge(edge.id)}
                 className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
@@ -695,9 +698,8 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
                 </p>
                 <p className="mt-0.5 text-xs text-ink-soft">Link: {edge.data?.label}</p>
               </button>
-            ))}
-            {edges.length === 0 ? <p className="text-sm text-ink-soft">No links match this filter.</p> : null}
-          </div>
+            )}
+          />
         </Panel>
 
         <div className="min-w-0 space-y-4">
@@ -776,19 +778,18 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
                   </p>
                 ) : null}
                 {selectedGraphEdge.fieldLinks.length > 0 ? (
-                  <div className="max-h-56 overflow-auto rounded-lg border border-line">
-                    <table className="data-table" aria-label={`Field mappings for ${selectedGraphEdge.label}`}>
-                      <thead><tr><th>Source field</th><th>Target field</th><th>Transform</th></tr></thead>
-                      <tbody>
-                        {selectedGraphEdge.fieldLinks.map((field) => (
-                          <tr key={`${field.sourceField}:${field.targetField}`}>
-                            <td className="mono text-ink">{field.sourceField}</td>
-                            <td className="mono text-ink">{field.targetField}</td>
-                            <td className="text-xs text-ink-soft">{field.transformation ?? '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="rounded-lg border border-line">
+                    <DataTable
+                      columns={[
+                        { key: 'source', header: 'Source field', render: (field) => <span className="mono text-ink">{field.sourceField}</span> },
+                        { key: 'target', header: 'Target field', render: (field) => <span className="mono text-ink">{field.targetField}</span> },
+                        { key: 'transform', header: 'Transform', render: (field) => <span className="text-xs text-ink-soft">{field.transformation ?? '—'}</span> },
+                      ]}
+                      rows={selectedGraphEdge.fieldLinks}
+                      getRowKey={(field) => `${field.sourceField}:${field.targetField}`}
+                      ariaLabel={`Field mappings for ${selectedGraphEdge.label}`}
+                      pageSize={50}
+                    />
                   </div>
                 ) : null}
                 {selectedGraphEdge.provenance ? (
@@ -809,10 +810,14 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
               title="Integrity gaps"
               description="Unresolved references and unconnected objects are shown here instead of being silently dropped."
             />
-            <div className="space-y-2">
-              {visibleGaps.map((gap) => (
+            <PaginatedList
+              items={gaps}
+              pageSize={20}
+              getKey={(gap) => gap.id}
+              container={(children) => <div className="space-y-2">{children}</div>}
+              emptyMessage="No unresolved references or unconnected objects in the visible graph."
+              render={(gap) => (
                 <button
-                  key={gap.id}
                   type="button"
                   onClick={() => {
                     if (gap.focusNodeId) focusNode(gap.focusNodeId);
@@ -825,16 +830,8 @@ function DataLineageExplorerView({ context, inventory, freshness, onNavigate }: 
                   </div>
                   <p className="mt-1 text-[11px] text-ink-soft">{gap.detail}</p>
                 </button>
-              ))}
-              {gaps.length === 0 ? (
-                <p className="text-sm text-ink-soft">No unresolved references or unconnected objects in the visible graph.</p>
-              ) : null}
-              {gaps.length > 8 ? (
-                <button type="button" className="btn-quiet px-2 py-1 text-xs" onClick={() => setShowAllGaps(!showAllGaps)}>
-                  {showAllGaps ? 'Show fewer gaps' : `Show all ${gaps.length} gaps`}
-                </button>
-              ) : null}
-            </div>
+              )}
+            />
           </Panel>
         </div>
       </div>

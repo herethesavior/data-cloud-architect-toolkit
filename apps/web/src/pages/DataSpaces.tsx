@@ -13,7 +13,7 @@ import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
-import { Badge, Panel, SearchField, SectionHeading } from '../components/ui/index.ts';
+import { Badge, PaginatedList, Panel, SearchField, SectionHeading } from '../components/ui/index.ts';
 import { useInventory } from '../lib/useInventory.ts';
 import type { WorkspaceContext } from '../lib/workspace.ts';
 
@@ -108,8 +108,12 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
                   : 'No data spaces match that search.'}
               </Panel>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {spaces.map((space) => {
+              <PaginatedList
+                items={spaces}
+                pageSize={24}
+                getKey={(space) => space.apiName}
+                container={(children) => <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{children}</div>}
+                render={(space) => {
                   const counts = countsFor(space.apiName);
                   const linkedObjects = [
                     ...inventory.dlos.filter((object) => sameName(object.dataSpace, space.apiName)).map((object) => object.label ?? object.apiName),
@@ -150,19 +154,23 @@ export function DataSpaces({ context }: { context: WorkspaceContext | null }) {
                         {linkedObjects.length === 0 ? (
                           <p className="text-sm text-ink-soft">No objects are assigned to this space.</p>
                         ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            {linkedObjects.map((object) => (
-                              <span key={object} className="rounded-md border border-line bg-surface-alt px-2 py-1 text-xs text-ink-soft">
+                          <PaginatedList
+                            items={linkedObjects}
+                            pageSize={20}
+                            getKey={(object) => object}
+                            container={(children) => <div className="flex flex-wrap gap-1.5">{children}</div>}
+                            render={(object) => (
+                              <span className="rounded-md border border-line bg-surface-alt px-2 py-1 text-xs text-ink-soft">
                                 {object}
                               </span>
-                            ))}
-                          </div>
+                            )}
+                          />
                         )}
                       </div>
                     </Panel>
                   );
-                })}
-              </div>
+                }}
+              />
             )}
           </>
         );

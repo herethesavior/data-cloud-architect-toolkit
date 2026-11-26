@@ -176,6 +176,7 @@ export function DataDictionary({ context, onNavigate }: { context: WorkspaceCont
                 rows={rows}
                 getRowKey={(row) => row.key}
                 ariaLabel="Data dictionary fields"
+                pageSize={100}
                 emptyMessage={isFamilyLoading(inventory, 'dlos') || isFamilyLoading(inventory, 'dmos')
                   ? 'Fields are still loading; this result is not final yet.'
                   : 'No fields match the current filters.'}

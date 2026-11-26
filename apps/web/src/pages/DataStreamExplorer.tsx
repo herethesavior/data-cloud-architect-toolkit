@@ -8,7 +8,7 @@ import { ExportNotice } from '../components/ExportNotice.tsx';
 import { InventoryBoundary } from '../components/InventoryBoundary.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { PageIntro } from '../components/PageIntro.tsx';
-import { Badge, Button, CopyButton, DataTable, DetailDrawer, SearchField, Tabs } from '../components/ui/index.ts';
+import { Badge, Button, CopyButton, DataTable, DetailDrawer, PaginatedList, SearchField, Tabs } from '../components/ui/index.ts';
 import type { DataTableColumn, TabItem } from '../components/ui/index.ts';
 import { isFamilyLoading, shownFamilyCountLabel } from '../lib/inventoryDisplay.ts';
 import { filterByQuery, sameName } from '../lib/inventory.ts';
@@ -164,16 +164,20 @@ function StreamDetail({ stream, inventory, onClose }: {
             {mappings.length === 0 ? (
               <p className="mt-2 text-sm text-ink-soft">No mappings in this snapshot name that object.</p>
             ) : (
-              <ul className="mt-2 space-y-2">
-                {mappings.map((mapping, index) => (
-                  <li key={`${mapping.apiName}-${index}`} className="min-w-0 rounded-lg border border-line bg-surface-alt px-3 py-2.5">
+              <PaginatedList
+                items={mappings}
+                pageSize={25}
+                getKey={(mapping, index) => `${mapping.apiName}-${index}`}
+                container={(children) => <ul className="mt-2 space-y-2">{children}</ul>}
+                render={(mapping) => (
+                  <li className="min-w-0 rounded-lg border border-line bg-surface-alt px-3 py-2.5">
                     <p className="mono break-all text-sm text-ink">{mapping.apiName}</p>
                     <p className="mt-1 break-all text-xs text-ink-soft">
                       {streamValue(mapping.sourceObject, 'Unknown source')} → {streamValue(mapping.targetObject, 'Unknown target')}
                     </p>
                   </li>
-                ))}
-              </ul>
+                )}
+              />
             )}
           </div>
 
@@ -412,10 +416,13 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
               />
             ) : (
               <>
-                <div className="grid gap-2 md:hidden">
-                  {streams.map((stream) => (
+                <PaginatedList
+                  items={streams}
+                  pageSize={100}
+                  getKey={streamRowKey}
+                  container={(children) => <div className="grid gap-2 md:hidden">{children}</div>}
+                  render={(stream) => (
                     <button
-                      key={streamRowKey(stream)}
                       type="button"
                       onClick={() => setSelectedKey(streamRowKey(stream))}
                       className="panel w-full p-4 text-left"
@@ -433,14 +440,15 @@ export function DataStreamExplorer({ context, focusObject, onFocusHandled }: Dat
                         <span className="min-w-0 break-all">{streamValue(stream.targetDlo, 'No target')}</span>
                       </div>
                     </button>
-                  ))}
-                </div>
+                  )}
+                />
                 <div className="panel hidden overflow-hidden md:block">
                   <DataTable
                     columns={columns}
                     rows={streams}
                     getRowKey={streamRowKey}
                     ariaLabel="Data Stream Explorer results"
+                    pageSize={100}
                   />
                 </div>
               </>

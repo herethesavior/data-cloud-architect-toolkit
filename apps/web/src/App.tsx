@@ -430,6 +430,7 @@ export function App() {
     onToggleMode,
     isTogglingMode,
     refreshInventory: onRefreshInventory,
+    continueInventory: onRefreshInventory,
     cancelRefresh: onCancelRefresh,
     isRefreshingInventory: refreshInventory.isPending,
     refreshError: !refreshInventory.error || refreshInventory.error instanceof ApiError && refreshInventory.error.code === 'ABORTED'
