@@ -470,6 +470,42 @@ describe('progressive discovery', () => {
     expect(snapshot.warnings.every((warning) => warning.severity !== 'error')).toBe(true);
   });
 
+  it('starts mapping lookups before every DMO page has arrived', async () => {
+    const eligibleName = 'Enabled_DMO__dlm';
+    const fullPage = JSON.stringify({
+      dataModelObject: [
+        { name: eligibleName, dataSpaceName: 'default', isEnabled: true, fields: [] },
+        ...Array.from({ length: 99 }, (_, index) => ({
+          name: `Standard_${index}__dlm`,
+          dataSpaceName: 'default',
+          isEnabled: false,
+          fields: [],
+        })),
+      ],
+    });
+    const nextPath = `${base}/data-model-objects?limit=100&offset=100`;
+    const secondPage = JSON.stringify({
+      dataModelObject: Array.from({ length: 100 }, (_, index) => ({
+        name: `Later_${index}__dlm`,
+        dataSpaceName: 'default',
+        isEnabled: false,
+        fields: [],
+      })),
+    });
+    const mappingPath = buildMappingPath(eligibleName, '65.0', 'default');
+    const cli = fakeCli({
+      [dmoPath]: fullPage,
+      [nextPath]: secondPage,
+      [mappingPath]: mappingsJson,
+    });
+    const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
+
+    expect(cli.calls).toContain(mappingPath);
+    expect(cli.calls).not.toContain(buildDmoRelationshipsPath(eligibleName, '65.0', 'default'));
+    expect(progressiveSnapshot(state).mappings).toHaveLength(2);
+    expect(state.families.dmos.done).toBe(false);
+  });
+
   it('follows nextPageUrl for live stream responses', async () => {
     const streamPage1 = JSON.stringify({
       currentPageUrl: '/services/data/v65.0/ssot/data-streams?limit=10&offset=1',
