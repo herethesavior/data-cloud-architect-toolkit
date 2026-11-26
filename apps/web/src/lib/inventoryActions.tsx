@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import type { ResourceFamily } from '@dcat/core';
+import type { RefreshScope } from './refreshScope.ts';
 import type { WorkspaceContext } from './workspace.ts';
 import type { ErrorRecovery } from './userError.ts';
 
@@ -16,7 +17,10 @@ export interface InventoryActions {
   onGoToOrgs: () => void;
   onToggleMode: () => void;
   isTogglingMode: boolean;
+  /** Refreshes the current page's inventory scope. */
   refreshInventory: () => void;
+  /** What the page-level refresh button will actually update. Defaults to full. */
+  refreshScope?: RefreshScope;
   /** Starts a fresh session after a terminal delivery failure. */
   continueInventory?: () => void;
   cancelRefresh: () => void;

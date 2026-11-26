@@ -72,6 +72,7 @@ interface MockConnectorOptions {
   modeDelayMs?: number;
   modeCalls?: string[];
   calls?: { orgs: number; inventory: number };
+  sessionStartBodies?: Array<Record<string, unknown>>;
 }
 
 /** Mock connector: no CLI, no real org, deterministic and mode-aware fixtures. */
@@ -124,6 +125,7 @@ async function mockConnector(page: Page, state: ConnectorState, options: MockCon
       if (options.calls) options.calls.inventory += 1;
       const inventory = state.mode === 'demo' ? demoInventory : state.inventories[alias] ?? demoInventory;
       if (segments[4] === 'session') {
+        options.sessionStartBodies?.push(route.request().postDataJSON() as Record<string, unknown>);
         const sessionId = segments[5] ?? 'e2e-session';
         return route.fulfill({ json: { sessionId, snapshot: inventory } });
       }
@@ -957,6 +959,24 @@ test('detail drawer can switch to full width and remembers the choice', async ({
 
   await panel.getByRole('button', { name: 'Full width' }).click();
   await expect.poll(panelWidth).toBeLessThanOrEqual(768);
+});
+
+test('page-level refresh sends its family scope while Dashboard sends all families', async ({ page }) => {
+  const sessionStarts: Array<Record<string, unknown>> = [];
+  await mockConnector(page, createConnectorState(), { sessionStartBodies: sessionStarts });
+  await page.goto('/');
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'DLO Explorer' }).click();
+  await page.getByRole('main').getByRole('button', { name: 'Refresh inventory' }).click();
+  await expect.poll(() => sessionStarts.filter((body) => body.refresh === true).length).toBeGreaterThan(0);
+  const dloRefresh = sessionStarts.filter((body) => body.refresh === true).at(-1);
+  expect(dloRefresh?.families).toEqual(['dlos', 'mappings', 'data-streams']);
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Dashboard' }).click();
+  await page.getByRole('main').getByRole('button', { name: 'Refresh inventory' }).click();
+  await expect.poll(() => sessionStarts.filter((body) => body.refresh === true).length).toBeGreaterThan(1);
+  const dashboardRefresh = sessionStarts.filter((body) => body.refresh === true).at(-1);
+  expect(dashboardRefresh?.families).toEqual(RESOURCE_FAMILIES);
 });
 
 test('a slow refresh can be cancelled instead of leaving a permanent spinner', async ({ page }) => {

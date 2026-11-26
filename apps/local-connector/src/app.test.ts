@@ -315,6 +315,30 @@ describe('local connector API', () => {
     await app.close();
   });
 
+  it('validates scoped discovery families on the local session route', async () => {
+    const config = testConfig('live');
+    const app = await buildApp({ config, runner: liveCliRunner() });
+    const headers = { ...localHeaders, 'x-dcat-token': 'phase1-test-token' };
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/orgs/demo-uat/inventory/session',
+      payload: { refresh: true, families: ['dlos', 'not-a-family'] },
+      headers,
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error.code).toBe('INVALID_ARGUMENT');
+
+    const valid = await app.inject({
+      method: 'POST',
+      url: '/api/orgs/demo-uat/inventory/session',
+      payload: { refresh: true, families: ['mappings'] },
+      headers,
+    });
+    expect(valid.statusCode).toBe(200);
+    await app.close();
+  });
+
   it('clears live discovery sessions when the mode changes directly', async () => {
     const config = testConfig('live');
     const app = await buildApp({ config, runner: liveCliRunner() });

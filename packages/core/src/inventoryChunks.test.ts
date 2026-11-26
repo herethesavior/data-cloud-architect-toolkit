@@ -3,6 +3,7 @@ import type { InventorySnapshot } from './domain.ts';
 import {
   chunkInventorySnapshot,
   chunkRelayResult,
+  ITEM_DETAILS_OMITTED_WARNING,
   MAX_CHUNK_COUNT,
   MAX_CHUNK_ROWS,
   MORE_ITEMS_AVAILABLE_WARNING,
@@ -113,6 +114,35 @@ describe('inventory relay chunks', () => {
       warning.code === 'EXPECTED_COUNT_MISMATCH'))).toBe(true);
     expect(chunks.map((chunk) => chunk.progress?.loaded)).toEqual([5, 10, 12]);
     expect(chunks.map((chunk) => chunk.progress?.families[0]?.loaded)).toEqual([5, 10, 12]);
+  });
+
+  it('compacts oversized mapping rows and reports the omitted field detail', () => {
+    const inventory = inventoryWithRows(1);
+    inventory.mappings = [{
+      apiName: 'Account_Map',
+      sourceObject: 'Account_DLO__dll',
+      targetObject: 'Account_DMO__dlm',
+      provenance: {
+        orgId: '00D',
+        orgAlias: 'test',
+        sourceEndpoint: '/ssot/data-model-object-mappings',
+        apiVersion: '67.0',
+        retrievedAt: '2026-01-01T00:00:00.000Z',
+        confidence: 'source' as const,
+      },
+      fieldMappings: Array.from({ length: 100 }, (_, index) => ({
+        sourceField: `source_${String(index).padStart(3, '0')}_${'x'.repeat(1_200)}`,
+        targetField: `target_${index}`,
+      })),
+    }];
+
+    const chunks = chunkInventorySnapshot(inventory, 200_000, 1);
+    const mapping = chunks.flatMap((chunk) => chunk.mappings)[0]!;
+
+    expect(chunks).toHaveLength(2);
+    expect(mapping.fieldMappings).toHaveLength(12);
+    expect(chunks.some((chunk) => chunk.warnings.some((warning) =>
+      warning.code === ITEM_DETAILS_OMITTED_WARNING && warning.family === 'mappings'))).toBe(true);
   });
 
   it('bounds the number of polls for very large inventories', () => {

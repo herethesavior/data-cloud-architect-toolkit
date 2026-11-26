@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { RESOURCE_FAMILIES } from '@dcat/core';
+import { RESOURCE_FAMILIES, refreshFamiliesSchema } from '@dcat/core';
 import type { InventorySnapshot, OrgSummary } from '@dcat/core';
 import { discoverInventory } from '@dcat/data360-api';
 import { validateAlias } from '@dcat/salesforce-cli';
@@ -29,6 +29,7 @@ function clientAbortSignal(request: FastifyRequest): AbortSignal {
 const discoveryStartSchema = z.object({
   sessionId: sessionIdSchema.optional(),
   refresh: z.boolean().optional(),
+  families: refreshFamiliesSchema.optional(),
 });
 const discoveryStatusSchema = z.object({
   resume: z.boolean().optional(),

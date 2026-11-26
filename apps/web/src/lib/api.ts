@@ -15,6 +15,7 @@ import type {
   TransformBundle,
 } from '@dcat/core';
 import { isHosted } from './hosted.ts';
+import { isFullRefresh, scopeInventorySnapshot } from './refreshScope.ts';
 
 export class ApiError extends Error {
   readonly code: string;
@@ -191,6 +192,8 @@ export interface InventoryRequestOptions {
   sessionId?: string;
   resume?: boolean;
   family?: ResourceFamily;
+  /** Families to refresh when this is a scoped page refresh. */
+  families?: readonly ResourceFamily[];
   /** Called for every partial snapshot so the UI can render rows immediately. */
   onSnapshot?: (snapshot: InventorySnapshot) => void;
 }
@@ -373,13 +376,18 @@ async function startInventorySession(
     alias,
     sessionId: options.sessionId,
     refresh: options.force,
+    families: options.families ? [...options.families] : undefined,
   };
   if (hostedLive) {
     return relayCall<InventorySessionResult>(operation, options.signal, (chunk) => options.onSnapshot?.(chunk.snapshot));
   }
   return requestWithToken<InventorySessionResult>(`/api/orgs/${encodeURIComponent(alias)}/inventory/session`, {
     method: 'POST',
-    body: { sessionId: options.sessionId, refresh: options.force },
+    body: {
+      sessionId: options.sessionId,
+      refresh: options.force,
+      ...(options.families ? { families: [...options.families] } : {}),
+    },
     signal: options.signal,
     timeoutMs: RELAY_OPERATION_TIMEOUT_MS['inventory.start'],
   });
@@ -418,6 +426,8 @@ async function legacyInventory(
   hostedLive: boolean,
 ): Promise<InventorySnapshot> {
   if (hostedLive) {
+    // The legacy all-at-once operation has no family filter. Scope is enforced
+    // by the web wrapper, which keeps unrelated cached rows out of the merge.
     return relayCall<InventorySnapshot>(
       { operation: 'inventory.get', alias, refresh: options.force },
       options.signal,
@@ -527,6 +537,15 @@ export const api = {
   },
   inventory: async (alias: string, options: InventoryRequestOptions = {}): Promise<InventorySnapshot> => {
     const hostedLive = isHosted() && !await hostedUsesFixtures();
+    // A scoped refresh still receives a complete connector snapshot, but only
+    // the requested families are allowed to replace cached rows in the UI.
+    const scopeFamilies = options.families && !isFullRefresh(options.families) ? options.families : undefined;
+    const requestOptions: InventoryRequestOptions = scopeFamilies
+      ? {
+          ...options,
+          onSnapshot: (snapshot) => options.onSnapshot?.(scopeInventorySnapshot(snapshot, scopeFamilies)),
+        }
+      : options;
     // Two bounded recoveries: drop a stale session id, then force a brand new
     // session. A connector that keeps reporting expiry must surface the error
     // rather than sending the caller into an endless retry loop.
@@ -556,7 +575,8 @@ export const api = {
         return snapshot;
       }
     };
-    return run(0, options);
+    const snapshot = await run(0, requestOptions);
+    return scopeFamilies ? scopeInventorySnapshot(snapshot, scopeFamilies) : snapshot;
   },
   transformBundle: async (alias: string, id: string, options: { signal?: AbortSignal } = {}): Promise<TransformBundle> => {
     if (isHosted() && !await hostedUsesFixtures()) {

@@ -157,7 +157,11 @@ export async function executeRelayOperation(
     }
     case 'inventory.start': {
       const org = await findOrg(state, task.alias);
-      return startDiscoverySession(state, org, { sessionId: task.sessionId, refresh: task.refresh });
+      return startDiscoverySession(state, org, {
+        sessionId: task.sessionId,
+        refresh: task.refresh,
+        families: task.families,
+      });
     }
     case 'inventory.status': {
       const org = await findOrg(state, task.alias);

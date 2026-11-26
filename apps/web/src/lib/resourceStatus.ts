@@ -115,6 +115,12 @@ export function resourceStatusMessage(capability: ApiCapability): string {
   if (capability.status === 'partial') {
     const count = capability.itemCount ?? 0;
     const detail = sanitizeDetail(capability.message, 'Check Discovery health on the Dashboard for details.');
+    // Discovery may already explain a degraded family with its own count and
+    // reason. Prefixing another generic sentence produced "…some results may
+    // be missing. 18 item(s) loaded; some results may be missing."
+    if (/^\d+ item\(s\)? loaded\b/i.test(detail) || /some results may be missing/i.test(detail)) {
+      return detail;
+    }
     return `${count} ${count === 1 ? 'item' : 'items'} loaded; some results may be missing. ${detail}`.trim();
   }
   if (capability.status === 'not-started') return sanitizeDetail(capability.message, 'Not started.');

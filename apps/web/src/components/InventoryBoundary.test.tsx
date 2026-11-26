@@ -11,6 +11,7 @@ import { api, ApiError } from '../lib/api.ts';
 import { InventoryBoundary } from './InventoryBoundary.tsx';
 import { InventoryActionsProvider } from '../lib/inventoryActions.tsx';
 import type { InventoryActions } from '../lib/inventoryActions.tsx';
+import { refreshScopeForPage } from '../lib/refreshScope.ts';
 import { createWorkspaceContext } from '../lib/workspace.ts';
 import { DloExplorer } from './ObjectExplorer.tsx';
 
@@ -151,6 +152,50 @@ describe('InventoryBoundary progressive state', () => {
     expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
     expect(screen.getByRole('img', { name: 'Inventory loading' })).toBeInTheDocument();
     expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
+  });
+
+  it('explains which families the page-level refresh updates', async () => {
+    renderExplorer(snapshotFor('complete'), vi.fn(), true, { refreshScope: refreshScopeForPage('dlos') });
+
+    const button = await screen.findByRole('button', { name: 'Refresh inventory' });
+    expect(button).toHaveAttribute('title', expect.stringContaining('DLOs, mappings, and data streams'));
+    expect(button.getAttribute('aria-describedby')).toBeTruthy();
+    expect(document.getElementById(button.getAttribute('aria-describedby')!))
+      .toHaveTextContent('Refresh updates DLOs, mappings, and data streams.');
+  });
+
+  it('names the refreshed families in the first-load refresh skeleton', () => {
+    const query = {
+      data: undefined,
+      isPending: false,
+      isFetching: true,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as UseQueryResult<InventorySnapshot, Error>;
+
+    render(
+      <InventoryActionsProvider value={{
+        context,
+        mode: 'live',
+        orgList: { status: 'idle' },
+        onGoToOrgs: vi.fn(),
+        onToggleMode: vi.fn(),
+        isTogglingMode: false,
+        refreshInventory: vi.fn(),
+        refreshScope: refreshScopeForPage('data-streams'),
+        cancelRefresh: vi.fn(),
+        isRefreshingInventory: true,
+        refreshError: '',
+      }}>
+        <InventoryBoundary query={query} context={context}>
+          {() => <div>Loaded rows</div>}
+        </InventoryBoundary>
+      </InventoryActionsProvider>,
+    );
+
+    expect(screen.getByTestId('inventory-refresh-skeleton'))
+      .toHaveTextContent('Updating data streams and DLOs...');
   });
 
   it('does not show an exhausted page total as complete while discovery continues', async () => {
