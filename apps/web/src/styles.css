@@ -502,6 +502,10 @@ html[data-theme='dark'] .dcat-mark {
     transition: grid-template-rows var(--duration-normal) var(--ease-enter);
   }
 
+  .disclosure-content[data-open='false'] {
+    transition-timing-function: var(--ease-exit);
+  }
+
   .disclosure-content[data-open='true'] {
     grid-template-rows: 1fr;
   }
