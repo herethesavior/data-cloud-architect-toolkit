@@ -162,6 +162,25 @@ describe('Settings bridge diagnostics', () => {
     expect(screen.getByText(/Demo mode always uses the sample API version/)).toBeInTheDocument();
   });
 
+  it('expands the API version disclosure and returns focus when cancelled', async () => {
+    renderSettings();
+    const trigger = await screen.findByRole('button', { name: 'Change API version' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    const panel = document.getElementById(trigger.getAttribute('aria-controls')!)!;
+    expect(panel).toHaveAttribute('data-open', 'false');
+    expect(panel).toHaveAttribute('aria-hidden', 'true');
+
+    await userEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(panel).toHaveAttribute('data-open', 'true');
+    expect(panel).toHaveAttribute('aria-hidden', 'false');
+
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    await userEvent.click(cancel);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveFocus();
+  });
+
   it('saves a constrained selection and reuses the inventory refresh', async () => {
     const setCompatibility = vi.spyOn(api, 'setCompatibility').mockResolvedValue({
       ...health.compatibility!,
