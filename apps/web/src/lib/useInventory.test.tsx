@@ -86,7 +86,7 @@ describe('useInventory', () => {
     expect(inventory).not.toHaveBeenCalled();
   });
 
-  it('revalidates an incomplete cached snapshot while keeping its rows visible', async () => {
+  it('does not revalidate an incomplete cached snapshot just because a new page mounted', async () => {
     const inventory = vi.spyOn(api, 'inventory').mockResolvedValue(runningSnapshot());
     const client = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
     client.setQueryData(['inventory', context.contextId], runningSnapshot());
@@ -94,6 +94,32 @@ describe('useInventory', () => {
     const { result } = renderHook(() => useInventory(context), { wrapper: wrapperWith(client) });
 
     expect(result.current.data).toBeDefined();
-    await waitFor(() => expect(inventory).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(inventory).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-refresh a terminal partial snapshot with failed families', async () => {
+    const partial = {
+      ...runningSnapshot(),
+      progress: {
+        ...runningSnapshot().progress!,
+        state: 'partial' as const,
+        families: runningSnapshot().progress!.families.map((family) => ({
+          ...family,
+          status: 'failed' as const,
+          hasMore: false,
+          error: 'Query failed.',
+        })),
+      },
+    };
+    const inventory = vi.spyOn(api, 'inventory').mockResolvedValue(partial);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
+    client.setQueryData(['inventory', context.contextId], partial);
+
+    const { result } = renderHook(() => useInventory(context), { wrapper: wrapperWith(client) });
+
+    expect(result.current.data).toBeDefined();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(inventory).not.toHaveBeenCalled();
   });
 });
