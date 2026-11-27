@@ -852,6 +852,49 @@ describe('runBridge', () => {
     expect(info.mock.calls.filter(([message]) => String(message).includes('inventory loading finished'))).toHaveLength(2);
   });
 
+  it('bounds abandoned generations without changing later terminal logs', () => {
+    const info = vi.fn();
+    const logger = { info, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const report = createInventoryProgressReporter(logger, () => 1_000);
+    const progressFor = (generation: string, state: DiscoveryProgress['state']): DiscoveryProgress => ({
+      sessionId: 'session-1',
+      generation,
+      state,
+      loaded: 2,
+      total: null,
+      families: RESOURCE_FAMILIES.map((family) => ({
+        family,
+        status: family === 'dmos' ? state === 'complete' ? 'complete' : 'partial' : 'complete',
+        loaded: family === 'dmos' ? 2 : 0,
+        total: null,
+        pagesFetched: 1,
+        hasMore: family === 'dmos' && state === 'running',
+        activity: family === 'dmos' && state === 'running'
+          ? {
+            phase: 'relationship-lookups',
+            completed: 1,
+            pending: 1,
+            failed: 0,
+            total: 2,
+            startedAt: '1970-01-01T00:00:31.000Z',
+          } satisfies DiscoveryActivity
+          : null,
+        error: null,
+      })),
+      message: '',
+    });
+    const result = (progress: DiscoveryProgress) => ({ snapshot: { progress } });
+
+    for (let generation = 0; generation < 65; generation += 1) {
+      report(`task-${generation}`, result(progressFor(`gen-${generation}`, 'running')), 1_000);
+    }
+    report('task-terminal', result(progressFor('gen-0', 'complete')), 1_000);
+
+    const finished = info.mock.calls.filter(([message]) => String(message).includes('inventory loading finished'));
+    expect(finished).toHaveLength(1);
+    expect(finished[0]![1]).not.toHaveProperty('lastPhase');
+  });
+
   it('keeps frequent progress polls out of default logs but shows them in verbose mode', async () => {
     const controller = new AbortController();
     const http = new FakeRelayHttp([progressTask()], controller);

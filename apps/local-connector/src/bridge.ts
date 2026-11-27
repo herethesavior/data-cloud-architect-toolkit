@@ -210,7 +210,7 @@ function resultCount(result: unknown): number | undefined {
 }
 
 export const INVENTORY_HEARTBEAT_MS = 60_000;
-const MAX_FINISHED_INVENTORY_GENERATIONS = 64;
+const MAX_TRACKED_INVENTORY_GENERATIONS = 64;
 
 interface InventoryPhase {
   activeKey: string;
@@ -255,6 +255,14 @@ export function createInventoryProgressReporter(
 ): (request: string, result: unknown, startedAt: number) => void {
   const phases = new Map<string, InventoryPhase>();
   const finished = new Set<string>();
+  const rememberPhase = (key: string, value: InventoryPhase) => {
+    phases.delete(key);
+    if (phases.size >= MAX_TRACKED_INVENTORY_GENERATIONS) {
+      const oldest = phases.keys().next().value;
+      if (oldest !== undefined) phases.delete(oldest);
+    }
+    phases.set(key, value);
+  };
 
   return (request, result, startedAt) => {
     const progress = inventoryProgress(result);
@@ -272,15 +280,13 @@ export function createInventoryProgressReporter(
     if (progress.state === 'running') {
       finished.delete(key);
       const firstObservation = !phase;
-      if (!phase) {
-        phases.set(key, {
-          activeKey,
-          startedAt,
-          lastHeartbeatAt: time,
-          lastActivity: null,
-          lastActivityAt: time,
-        });
-      }
+      rememberPhase(key, phase ?? {
+        activeKey,
+        startedAt,
+        lastHeartbeatAt: time,
+        lastActivity: null,
+        lastActivityAt: time,
+      });
       const current = phases.get(key)!;
       if (activity) {
         current.lastActivity = activity;
@@ -317,7 +323,7 @@ export function createInventoryProgressReporter(
       duration: formatDuration(time - (phase?.startedAt ?? startedAt)),
       ...phaseDurationFields(phase?.lastActivity ?? null, phase?.lastActivityAt ?? time),
     });
-    if (finished.size >= MAX_FINISHED_INVENTORY_GENERATIONS) {
+    if (finished.size >= MAX_TRACKED_INVENTORY_GENERATIONS) {
       const oldest = finished.values().next().value;
       if (oldest !== undefined) finished.delete(oldest);
     }
