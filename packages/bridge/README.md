@@ -31,17 +31,25 @@ The bridge stores only the relay origin, agent token, and its own version in `~/
 Every line is one event with an ISO timestamp, level, source, a short message, and `key=value` context:
 
 ```text
-2026-11-27T15:04:05.123Z INFO  bridge    ready; press Ctrl+C to stop version=0.2.0 cli=2.116.6
+2026-11-27T15:04:05.123Z INFO  bridge    ready; press Ctrl+C to stop version=0.2.1 cli=2.116.6
 2026-11-27T15:04:05.456Z INFO  bridge    cli.status started request=task-1
 2026-11-27T15:04:05.498Z INFO  bridge    cli.status finished request=task-1 duration=42ms
+2026-11-27T15:04:06.120Z INFO  bridge    org list started request=task-2
+2026-11-27T15:04:06.244Z INFO  bridge    org list finished request=task-2 count=3 duration=124ms
+2026-11-27T15:04:06.610Z INFO  bridge    org connect started request=task-3 alias=prod-org
+2026-11-27T15:04:06.930Z INFO  bridge    org connect finished request=task-3 alias=prod-org duration=320ms
+2026-11-27T15:04:07.010Z INFO  bridge    inventory loading started request=task-4 alias=prod-org families=all
+2026-11-27T15:04:07.512Z INFO  bridge    inventory loading family=dlos request=task-4 session=7f3c9a1b loaded=12
+2026-11-27T15:04:12.880Z INFO  bridge    inventory loading finished state=complete request=task-5 session=7f3c9a1b loaded=58 duration=5.87s
 ```
 
 Levels are `DEBUG`, `INFO`, `WARN`, and `ERROR`. Sources are `bridge`, `installer`, and `updater`. Context fields identify the operation, short request id, duration, retry delay, or repeat count without breaking the sentence. Normal output is bounded so the bridge can run for days without filling a terminal or log file:
 
 - Startup and pairing name the relay, installed bridge version, and Salesforce CLI version.
 - One line marks each request as started and another as finished, with a short request id and human-readable duration.
+- Hosted actions are named in plain language: `org list` reports how many orgs were found, `org connect` names the alias, and `inventory loading` reports the alias, family scope, active family transitions, and the final state.
 - Recoverable failures are `WARN` lines with the retry delay; terminal failures, pairing loss, and undeliverable results are `ERROR` lines that say what to do next.
-- Progress polls (`inventory.status`) are `DEBUG` lines; they run about once per second during a load.
+- The `inventory.status` request itself is `DEBUG`; it runs about once per second, so only family changes and the terminal result appear at normal verbosity.
 - Repeated failures are summarized at most every five minutes. A quiet gap starts a new failure episode, and recovery is announced once from the next successful request.
 - Cancelled requests and updates are reported at normal verbosity with their request id or next step; `--quiet` hides these INFO lines.
 

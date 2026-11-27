@@ -1,12 +1,17 @@
 import { expect, test } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
 import type {
+  ApiCapability,
   CliStatus,
+  DiscoveryProgress,
+  FamilyProgress,
   InventorySnapshot,
   OrgSummary,
   RelayOperation,
   RelayRequestState,
+  ResourceFamily,
 } from '@dcat/core';
+import { RESOURCE_FAMILIES } from '@dcat/core';
 import { demoInventory, demoOrgs, demoTransformBundles } from '@dcat/test-fixtures';
 
 declare global {
@@ -41,6 +46,9 @@ interface HostedState {
   request: RequestRecord | null;
   orgs: OrgSummary[];
   inventories: Record<string, InventorySnapshot>;
+  /** Optional scripted progressive load; each status poll returns the next snapshot. */
+  inventorySequence?: InventorySnapshot[];
+  inventoryStep: number;
   operations: RelayOperation[];
   operationBodies: RelayOperation[];
   pairCalls: number;
@@ -55,6 +63,15 @@ interface HostedState {
 const token = 'e2e-session-token';
 const agentToken = 'agent-token-1234567890';
 
+const FAMILY_FIELDS = {
+  'data-spaces': 'dataSpaces',
+  dlos: 'dlos',
+  dmos: 'dmos',
+  mappings: 'mappings',
+  'data-streams': 'dataStreams',
+  'data-transforms': 'dataTransforms',
+} as const satisfies Record<ResourceFamily, keyof InventorySnapshot>;
+
 function liveInventory(org: OrgSummary, label: string): InventorySnapshot {
   return {
     ...structuredClone(demoInventory),
@@ -64,8 +81,67 @@ function liveInventory(org: OrgSummary, label: string): InventorySnapshot {
   };
 }
 
-function createState(mode: Mode): HostedState {
-  const prodOrg: OrgSummary = {
+/** Six cumulative snapshots so a hosted load must poll until every family settles. */
+function progressiveInventorySnapshots(org: OrgSummary, label: string): InventorySnapshot[] {
+  const complete = liveInventory(org, label);
+  const counts = new Map<ResourceFamily, number>(
+    RESOURCE_FAMILIES.map((family) => [family, (complete[FAMILY_FIELDS[family]] as readonly unknown[]).length]),
+  );
+  const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  return RESOURCE_FAMILIES.map((family, index) => {
+    const loadedFamilies = RESOURCE_FAMILIES.slice(0, index + 1);
+    const final = index === RESOURCE_FAMILIES.length - 1;
+    const snapshot = structuredClone(complete);
+    snapshot.generatedAt = new Date(Date.parse(complete.generatedAt) + index * 1_000).toISOString();
+    for (const entry of RESOURCE_FAMILIES) {
+      if (!loadedFamilies.includes(entry)) {
+        (snapshot[FAMILY_FIELDS[entry]] as unknown[]).length = 0;
+      }
+    }
+    snapshot.capabilities = RESOURCE_FAMILIES.map((entry): ApiCapability => {
+      const loaded = counts.get(entry) ?? 0;
+      const base = complete.capabilities.find((capability) => capability.family === entry)!;
+      const started = loadedFamilies.includes(entry);
+      return {
+        ...base,
+        status: started ? 'available' : 'not-started',
+        message: started ? base.message : 'Not started.',
+        itemCount: started ? loaded : 0,
+        durationMs: started ? base.durationMs : null,
+      };
+    });
+    const families: FamilyProgress[] = RESOURCE_FAMILIES.map((entry, position) => {
+      const count = counts.get(entry) ?? 0;
+      const loaded = final || position <= index;
+      const active = !final && position === index;
+      return {
+        family: entry,
+        status: active ? 'running' : loaded ? 'complete' : 'not-started',
+        loaded: loaded ? count : 0,
+        total: count,
+        expectedTotal: count,
+        expectedTotalSource: 'preflight',
+        pagesFetched: loaded ? 1 : 0,
+        hasMore: active,
+        error: null,
+        errorStatus: null,
+      };
+    });
+    snapshot.progress = {
+      sessionId: `e2e-${org.alias}`,
+      generation: 'e2e-generation',
+      state: final ? 'complete' : 'running',
+      loaded: families.reduce((sum, entry) => sum + entry.loaded, 0),
+      total,
+      families,
+      message: final ? 'Discovery complete.' : 'Loading metadata in small batches.',
+    };
+    return snapshot;
+  });
+}
+
+function prodOrgFixture(): OrgSummary {
+  return {
     ...demoOrgs[0]!,
     alias: 'prod-org',
     username: 'architect@prod.example.invalid',
@@ -74,6 +150,10 @@ function createState(mode: Mode): HostedState {
     environment: 'production',
     source: 'salesforce-cli',
   };
+}
+
+function createState(mode: Mode): HostedState {
+  const prodOrg = prodOrgFixture();
   return {
     mode,
     paired: false,
@@ -90,6 +170,7 @@ function createState(mode: Mode): HostedState {
     inventories: {
       'prod-org': liveInventory(prodOrg, 'Production Account'),
     },
+    inventoryStep: 0,
     operations: [],
     operationBodies: [],
     pairCalls: 0,
@@ -213,16 +294,26 @@ function resultFor(state: HostedState, operation: RelayOperation): unknown {
     }
     case 'inventory.get':
       return state.inventories[operation.alias] ?? liveInventory(demoOrgs[0]!, 'Live Account DLO');
-    case 'inventory.start':
+    case 'inventory.start': {
+      const scripted = state.inventorySequence?.[0];
+      const snapshot = scripted ?? state.inventories[operation.alias] ?? liveInventory(demoOrgs[0]!, 'Live Account DLO');
+      state.inventories[operation.alias] = snapshot;
       return {
-        sessionId: `e2e-${operation.alias}`,
-        snapshot: state.inventories[operation.alias] ?? liveInventory(demoOrgs[0]!, 'Live Account DLO'),
+        sessionId: scripted?.progress?.sessionId ?? `e2e-${operation.alias}`,
+        snapshot,
       };
-    case 'inventory.status':
+    }
+    case 'inventory.status': {
+      const lastIndex = (state.inventorySequence?.length ?? 1) - 1;
+      state.inventoryStep = Math.min(state.inventoryStep + 1, lastIndex);
+      const scripted = state.inventorySequence?.[state.inventoryStep];
+      const snapshot = scripted ?? state.inventories[operation.alias] ?? liveInventory(demoOrgs[0]!, 'Live Account DLO');
+      state.inventories[operation.alias] = snapshot;
       return {
-        sessionId: operation.sessionId,
-        snapshot: state.inventories[operation.alias] ?? liveInventory(demoOrgs[0]!, 'Live Account DLO'),
+        sessionId: operation.sessionId ?? snapshot.progress?.sessionId ?? `e2e-${operation.alias}`,
+        snapshot,
       };
+    }
     case 'transform.get': {
       const bundle = demoTransformBundles[operation.id];
       if (!bundle) throw new Error(`Unknown transform fixture: ${operation.id}`);
@@ -437,6 +528,12 @@ async function seedPreference(page: Page, mode: Mode): Promise<void> {
   }, mode);
 }
 
+function watchPageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  return errors;
+}
+
 /** Stand-in for the installed agent: pair once, then poll and answer typed tasks. */
 async function startFakeBridge(page: Page, pairingCode: string): Promise<void> {
   await page.evaluate(async (code) => {
@@ -490,8 +587,10 @@ async function startFakeBridge(page: Page, pairingCode: string): Promise<void> {
   }, pairingCode);
 }
 
-test('hosted bridge pairs, connects an org, and loads its inventory', async ({ page }) => {
+test('hosted bridge pairs, connects an org, waits for every inventory family, and ends cleanly', async ({ page }) => {
   const state = createState('live');
+  state.inventorySequence = progressiveInventorySnapshots(prodOrgFixture(), 'Production Account');
+  const pageErrors = watchPageErrors(page);
   await seedPreference(page, 'live');
   await mockHostedWorker(page, state);
   await page.goto('/');
@@ -515,7 +614,13 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   await page.getByRole('button', { name: 'Connect org' }).click();
 
   await expect(page.locator('h1')).toHaveText('Dashboard');
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Dashboard' }).click();
   await expect(page.getByText('Live org metadata')).toBeVisible();
+  await expect(page.getByTestId('inventory-progress')).toContainText('Loading inventory in batches');
+  await expect(page.getByTestId('inventory-progress')).toContainText('Inventory complete', { timeout: 20_000 });
+  await expect(page.getByRole('img', { name: 'Inventory still loading' })).toHaveCount(0);
+  await expect(page.getByTestId('inventory-progress')).not.toContainText('more to load');
+  await expect(page.getByTestId('inventory-progress')).not.toContainText('stopped');
   await expect(page.locator('#main-content').getByTestId('inventory-freshness')).toBeVisible();
 
   expect(state.pairCalls).toBe(1);
@@ -535,10 +640,37 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   expect(connectIndex, `operations: ${operationNames}`).toBeGreaterThanOrEqual(0);
   expect(inventoryIndex, `operations: ${operationNames}`).toBe(connectIndex + 1);
   expect(state.operations.slice(connectIndex + 1).some((operation) => operation.operation === 'org.list')).toBe(false);
+
+  // Every status poll must stay on the connected alias and the session it started.
+  const inventoryOperations = state.operations.filter(
+    (operation): operation is Extract<RelayOperation, { operation: 'inventory.start' | 'inventory.status' }> =>
+      operation.operation === 'inventory.start' || operation.operation === 'inventory.status',
+  );
+  const statusOperations = inventoryOperations.filter((operation) => operation.operation === 'inventory.status');
+  expect(statusOperations.length).toBeGreaterThan(0);
+  expect(inventoryOperations.every((operation) => operation.alias === 'prod-org')).toBe(true);
+  expect(statusOperations.every((operation) => operation.sessionId === 'e2e-prod-org')).toBe(true);
+  expect(state.operationBodies).toContainEqual({
+    operation: 'inventory.status',
+    alias: 'prod-org',
+    sessionId: 'e2e-prod-org',
+    resume: false,
+  });
+  expect(state.request?.status).toBe('completed');
+  expect(state.request?.error).toBeNull();
+  const finalResult = state.request?.result as { sessionId?: string; snapshot?: InventorySnapshot } | null | undefined;
+  expect(finalResult?.sessionId).toBe('e2e-prod-org');
+  expect(finalResult?.snapshot?.org.alias).toBe('prod-org');
+  expect(finalResult?.snapshot?.progress?.state).toBe('complete');
+  expect(finalResult?.snapshot?.progress?.families.every((family) =>
+    family.status === 'complete' && !family.hasMore && family.error === null)).toBe(true);
+
   expect(state.csrf['/api/relay/pairing']).toBeGreaterThan(0);
   expect(state.csrf['/api/relay/requests']).toBeGreaterThan(0);
   expect(state.csrf['/api/relay/requests/:id']).toBeGreaterThan(0);
   expect(state.authCalls).toEqual([]);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
 
   await page.evaluate(() => {
     (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;
@@ -556,6 +688,9 @@ test('hosted refresh status reports a long operation without queuing relay work'
   await startFakeBridge(page, 'PAIR12345678');
   await page.getByRole('button', { name: 'Refresh status' }).click();
   await expect(page.getByText('Bridge connected')).toBeVisible();
+  // Pairing can trigger one setup check. Let it drain before queueing the
+  // long operation so BRIDGE_BUSY is not mistaken for a refresh-status bug.
+  await expect.poll(() => state.request?.status).toBe('completed');
 
   await page.evaluate(() => {
     window.__dcatBridgeHold = true;
