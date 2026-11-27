@@ -130,7 +130,7 @@ The Worker checks npm for the latest bridge release and caches that answer for o
 
 1. **Choose an API version.** DCAT offers the recommended version, the latest available version, or a curated specific version. The version setting belongs to the bridge/local connector, not the browser; demo mode stays on its fixed fixture version.
 2. **Discover families independently.** Data Spaces, DLOs, DMOs, streams, and transforms are probed in parallel at the adapter level; mapping lookups are limited to DMOs the source marks enabled, custom, or externally mapped.
-3. **Stream partial results.** `onSnapshot` callbacks publish each batch to the browser. `apps/web/src/lib/inventoryMerge.ts` unions rows by identity so a later chunk cannot replace already-loaded rows.
+3. **Stream partial results.** `onSnapshot` callbacks publish each batch to the browser. `apps/web/src/lib/inventoryMerge.ts` unions rows by identity so a later chunk cannot replace already-loaded rows. Discovery stays active while any page or per-DMO lookup is pending: small 10-row DMO and 25-row relationship pages may take longer, but an elapsed wall-clock window no longer turns unfinished work into a permanent gap.
 4. **Label gaps.** Capabilities, warnings, and progress appear in `InventoryBoundary`, Discovery Health, and Needs attention. Partial data stays visible and is explicitly marked incomplete.
 5. **Retry or resume deliberately.** Transient failures get one retry; forbidden and unsupported families are never retried. A stopped inventory exposes **Resume loading**, while a terminal oversized result exposes **Continue loading**.
 6. **Cache locally.** Loaded org lists and inventories are persisted in IndexedDB for up to seven days. A reload reads the snapshot; only the explicit refresh action starts a new retrieval with a token-protected request.
@@ -139,7 +139,7 @@ The Worker checks npm for the latest bridge release and caches that answer for o
 
 Large orgs can exceed the relay's 5 MiB response cap. The fix is split between the relay and the browser; the published bridge does not need to change.
 
-1. `chunkInventorySnapshot` in `packages/core/src/inventoryChunks.ts` splits an inventory snapshot into ordered, relay-sized chunks. Oversized single rows are compacted and reported with an omission warning.
+1. `chunkInventorySnapshot` in `packages/core/src/inventoryChunks.ts` splits an inventory snapshot into ordered, relay-sized chunks. Oversized single rows are compacted in stages until they fit, and reported with an omission warning.
 2. Every chunk carries `RESPONSE_CHUNKED`; all but the last also carry `MORE_ITEMS_AVAILABLE`. The Durable Object stores chunks and advances the cursor only when the browser polls for that same request.
 3. The browser receives each chunk as a normal snapshot through `onSnapshot`, merges it by identity, and keeps loaded rows on screen. The final chunk arrives through the normal completed-snapshot path.
 4. Non-inventory results still surface `RESPONSE_TOO_LARGE`. **Continue loading** starts a fresh forced inventory session rather than replaying a terminal request.

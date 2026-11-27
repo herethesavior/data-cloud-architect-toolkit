@@ -18,6 +18,8 @@ import { constantTimeEquals, tokenFingerprint } from './crypto.ts';
 export const RELAY_LONG_POLL_MS = 20_000;
 /** Browser request-state polls are held until this request finishes or the window elapses. */
 export const RELAY_REQUEST_LONG_POLL_MS = 8_000;
+/** An explicit status check waits this long for a woken bridge to poll again. */
+export const RELAY_PROBE_WAIT_MS = 2_500;
 const SEEN_THROTTLE_MS = 20_000;
 const STALE_AFTER_MS = 60_000;
 /** One result is retained per session; this caps a hostile or accidental giant payload. */
@@ -94,8 +96,12 @@ function parseCompatibility(value: unknown): ApiVersionStatus | null {
 export class RelayDurableObjectCore {
   private readonly waiters = new Set<() => void>();
   private readonly requestWaiters = new Map<string, Set<() => void>>();
+  private readonly pollObservers = new Set<() => void>();
 
-  constructor(private readonly sql: SqlStorageLike) {
+  constructor(
+    private readonly sql: SqlStorageLike,
+    private readonly probeWaitMs: number = RELAY_PROBE_WAIT_MS,
+  ) {
     this.ensureSchema();
   }
 
@@ -316,6 +322,12 @@ export class RelayDurableObjectCore {
     for (const wake of waiters) wake();
   }
 
+  private wakePollObservers(): void {
+    const observers = [...this.pollObservers];
+    this.pollObservers.clear();
+    for (const observer of observers) observer();
+  }
+
   private agentSnapshot(): RelayAgentSnapshot {
     const request = this.readRequest();
     const working = request !== null && this.requestState(request, Date.now()).status === 'running';
@@ -415,6 +427,45 @@ export class RelayDurableObjectCore {
     return json({ paired: true, ...this.agentSnapshot() });
   }
 
+  /**
+   * Explicit browser status check. Waking the held idle poll makes a live agent
+   * check in immediately; no new poll within the window proves it is gone,
+   * without waiting for the passive heartbeat timeout.
+   */
+  async probe(body: Record<string, unknown>): Promise<Response> {
+    const sessionId = await this.authorized(body);
+    if (!sessionId || sessionId !== body.sessionId || this.getMeta('revoked') === '1') {
+      return error('INVALID_AGENT_TOKEN', 'The bridge pairing is no longer active.', 401);
+    }
+    const snapshot = this.agentSnapshot();
+    // A claimed operation keeps the bridge busy without an open poll. Its
+    // forced heartbeat on respond is sufficient proof that it is alive.
+    if (snapshot.working) return json({ paired: true, alive: true, ...snapshot });
+
+    for (const wake of [...this.waiters]) wake();
+    const alive = await new Promise<boolean>((resolve) => {
+      const observer = () => {
+        clearTimeout(timer);
+        this.pollObservers.delete(observer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        this.pollObservers.delete(observer);
+        resolve(false);
+      }, this.probeWaitMs);
+      this.pollObservers.add(observer);
+    });
+    if (alive) {
+      this.markSeen(Date.now(), true);
+    } else {
+      // Record the failed probe so ordinary status reads stay offline too;
+      // otherwise the next periodic read would flip back to "connected" using
+      // the still-recent pre-probe heartbeat. The next agent poll clears it.
+      this.setMeta('last_seen_at', String(Date.now() - STALE_AFTER_MS - 1000));
+    }
+    return json({ paired: true, alive, ...this.agentSnapshot() });
+  }
+
   async poll(body: Record<string, unknown>): Promise<Response> {
     const sessionId = await this.authorized(body);
     if (!sessionId) {
@@ -422,6 +473,7 @@ export class RelayDurableObjectCore {
     }
     const now = Date.now();
     this.updateAgent(body, now);
+    this.wakePollObservers();
     const immediate = this.claimPending(now);
     if (immediate || body.wait !== true) {
       return json({ status: 'ok', tasks: immediate ? [immediate] : [] });
@@ -650,6 +702,7 @@ export class RelayDurableObjectCore {
     switch (pathname) {
       case '/init': return this.init(body);
       case '/state': return this.state(body);
+      case '/probe': return this.probe(body);
       case '/poll': return this.poll(body);
       case '/respond': return this.respond(body);
       case '/queue': return this.queue(body);

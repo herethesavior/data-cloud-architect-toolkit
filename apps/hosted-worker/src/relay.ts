@@ -227,7 +227,11 @@ export async function getBridgeUpdateStatus(
   override: StatusOverride = {},
 ): Promise<BridgeStatus> {
   const status = getBridgeStatus(session, origin, override);
-  if (!status.paired || !status.agentVersion) return status;
+  // An offline bridge reports a frozen version. An update notice based on it
+  // cannot be resolved by installing npm's latest, so show only the recovery step.
+  if (!status.paired || !status.agentVersion || (status.relay !== 'connected' && status.relay !== 'working')) {
+    return status;
+  }
   const latestVersion = await latestBridgeVersion();
   return {
     ...status,
@@ -239,6 +243,8 @@ export async function getBridgeUpdateStatus(
 
 type AgentStateBody = RelayAgentSnapshot & {
   paired?: boolean;
+  /** Present only for an explicit probe: false means no bridge answered. */
+  alive?: boolean;
   error?: { code?: string; message?: string };
 };
 
@@ -264,11 +270,15 @@ async function revokeAgentToken(env: Env, session: SessionRecord): Promise<void>
   }
 }
 
-async function agentState(env: Env, session: SessionRecord): Promise<{ status: number; body: AgentStateBody | null }> {
+async function agentState(
+  env: Env,
+  session: SessionRecord,
+  probe = false,
+): Promise<{ status: number; body: AgentStateBody | null }> {
   const token = session.relay.agentToken;
   if (!token) return { status: 401, body: null };
   try {
-    const { response, body } = await relayJson<AgentStateBody>(env, token, '/state', {
+    const { response, body } = await relayJson<AgentStateBody>(env, token, probe ? '/probe' : '/state', {
       agentToken: token,
       sessionId: session.id,
     });
@@ -283,11 +293,12 @@ export async function bridgeStatusForSession(
   session: SessionRecord,
   origin: string,
   context?: Context,
+  probe = false,
 ): Promise<BridgeStatus> {
   const agentToken = session.relay.agentToken;
   if (!agentToken) return getBridgeUpdateStatus(session, origin);
 
-  const { status, body } = await agentState(env, session);
+  const { status, body } = await agentState(env, session, probe);
   if (isInvalidAgentToken(body, status) || isExplicitlyUnpaired(body, status)) {
     await revokeAgentToken(env, session);
     resetSessionRelay(session);
@@ -301,6 +312,7 @@ export async function bridgeStatusForSession(
     // last known pairing and show a retryable degraded state instead.
     return getBridgeUpdateStatus(session, origin, { relay: 'unavailable', working: false });
   }
+  const missedProbe = probe && body.alive === false;
   return getBridgeUpdateStatus({
     ...session,
     relay: {
@@ -309,9 +321,9 @@ export async function bridgeStatusForSession(
       agentVersion: body.agentVersion,
       cli: body.cli,
       compatibility: body.compatibility ?? session.relay.compatibility,
-      working: body.working === true,
+      working: body.working === true && !missedProbe,
     },
-  }, origin);
+  }, origin, missedProbe ? { relay: 'stale', working: false } : {});
 }
 
 async function pairingState(env: Env, session: SessionRecord): Promise<PairingState> {
@@ -342,7 +354,14 @@ export function relayRoutes() {
   app.get('/api/relay/status', async (context) => {
     try {
       const session = await resolveSession(context, context.env);
-      return context.json(await bridgeStatusForSession(context.env, session, originOf(context.req.url), context));
+      const probe = context.req.query('probe') === '1';
+      return context.json(await bridgeStatusForSession(
+        context.env,
+        session,
+        originOf(context.req.url),
+        context,
+        probe,
+      ));
     } catch (error) {
       return sendRouteError(context, error);
     }

@@ -19,6 +19,7 @@ import {
   buildConnectorCatalogPath,
   buildConnectorConnectionsPath,
   buildDataTransformPath,
+  buildDmoPath,
   buildDmoRelationshipsPath,
   buildExpectedCountPath,
   buildFamilyPath,
@@ -187,6 +188,54 @@ describe('progressive discovery', () => {
       itemCount: 200,
     });
     expect(cli.calls.filter((path) => path === dloPath || path.startsWith(`${dloPath}?pageToken`))).toHaveLength(20);
+  });
+
+  it('finishes a 350-DMO org and all of its mappings in small batches', async () => {
+    const total = 350;
+    const names = Array.from({ length: total }, (_, index) => `Dmo_${String(index).padStart(3, '0')}__dlm`);
+    const dmoPages: Record<string, string> = {};
+    for (let offset = 0; offset < total; offset += 10) {
+      const records = names.slice(offset, offset + 10).map((apiName) => ({
+        apiName,
+        label: apiName,
+        isCustom: true,
+        dataSpace: 'default',
+      }));
+      dmoPages[buildDmoPath('65.0', offset)] = JSON.stringify({ records, totalSize: total });
+    }
+    dmoPages[buildDmoPath('65.0', total)] = JSON.stringify({
+      records: [],
+      totalSize: total,
+      hasMore: false,
+    });
+    const mappingPages = Object.fromEntries(names.map((name, index) => [
+      buildMappingPath(name, '65.0', 'default'),
+      JSON.stringify({
+        records: [{
+          apiName: `Map_${String(index).padStart(3, '0')}`,
+          sourceObject: `Dlo_${String(index).padStart(3, '0')}__dll`,
+          targetObject: name,
+          fieldMappings: [{ sourceField: 'Id', targetField: 'Id' }],
+        }],
+      }),
+    ]));
+    const cli = fakeCli({ ...dmoPages, ...mappingPages });
+
+    const state = await createProgressiveDiscovery({
+      cli,
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+    });
+    await drain(state);
+
+    const snapshot = progressiveSnapshot(state);
+    expect(snapshot.progress?.state).toBe('complete');
+    expect(snapshot.dmos).toHaveLength(total);
+    expect(snapshot.mappings).toHaveLength(total);
+    expect(snapshot.warnings.some((warning) => warning.code === 'DISCOVERY_DEADLINE')).toBe(false);
+    expect(state.mappings.tasks.every((task) => task.done && !task.failed)).toBe(true);
   });
 
   it('reads final expected counts from first-page response envelopes without delaying rows', async () => {
@@ -640,7 +689,7 @@ describe('progressive discovery', () => {
     expect(loadedCounts.at(-1)).toBeGreaterThan(loadedCounts[0]!);
   });
 
-  it('ends visibly when the discovery deadline is reached', async () => {
+  it('keeps loading past an exhausted window instead of terminalising unfinished pages', async () => {
     const state = await createProgressiveDiscovery({
       cli: fakeCli(),
       alias: org.alias,
@@ -649,30 +698,41 @@ describe('progressive discovery', () => {
       apiVersionSelection: { mode: 'latest' },
       maxDurationMs: 0,
     });
-    const snapshot = progressiveSnapshot(state);
 
-    expect(isProgressiveDiscoveryActive(state)).toBe(false);
-    expect(snapshot.progress?.state).toBe('complete');
-    expect(snapshot.warnings).toEqual(expect.arrayContaining([
+    expect(isProgressiveDiscoveryActive(state)).toBe(true);
+    expect(progressiveSnapshot(state).progress?.state).toBe('running');
+    expect(progressiveSnapshot(state).warnings).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'DISCOVERY_DEADLINE' }),
     ]));
+
+    await drain(state);
+    const complete = progressiveSnapshot(state);
+    expect(complete.progress?.state).toBe('complete');
+    expect(complete.dlos).toHaveLength(200);
   });
 
-  it('resumes a deadline-stopped session with a fresh window and its loaded rows', async () => {
-    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
-    state.deadlineAt = Date.now() - 1;
-    await advanceProgressiveDiscovery(state);
-    expect(progressiveSnapshot(state).progress?.state).toBe('complete');
+  it('clears legacy deadline gaps when an older session is resumed', async () => {
+    const state = await createProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
+    await drain(state);
+    state.warnings.push({
+      family: 'dlos',
+      code: 'DISCOVERY_DEADLINE',
+      message: 'Discovery stopped after an earlier window.',
+      severity: 'warning',
+    });
+    state.timedOut = true;
+    expect(isProgressiveDiscoveryActive(state)).toBe(false);
 
     resumeProgressiveDiscovery(state);
+
     expect(isProgressiveDiscoveryActive(state)).toBe(true);
+    expect(state.timedOut).toBe(false);
     expect(progressiveSnapshot(state).warnings).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'DISCOVERY_DEADLINE' }),
     ]));
 
     await drain(state);
     expect(progressiveSnapshot(state).progress?.state).toBe('complete');
-    expect(progressiveSnapshot(state).dlos.length).toBeGreaterThan(10);
   });
 
   it('resumes a background interruption without discarding earlier pages', async () => {
@@ -755,7 +815,7 @@ describe('progressive discovery', () => {
       warning.code === 'DISCOVERY_INTERRUPTED' && warning.family === 'data-spaces')).toBe(false);
   });
 
-  it('treats the mapping query limit as a resume checkpoint instead of a permanent gap', async () => {
+  it('queues every eligible DMO in small batches without a permanent mapping gap', async () => {
     const cli = fakeCli({
       [dmoPath]: JSON.stringify({
         records: dmoNames.map((apiName) => ({
@@ -774,35 +834,36 @@ describe('progressive discovery', () => {
       apiVersionSelection: { mode: 'latest' },
       maxMappingQueries: 1,
     });
-    await drain(state);
 
+    // One task per advance keeps each CLI batch small, but the remaining DMOs
+    // stay pending work instead of becoming a terminal gap that needs a resume.
     expect(state.mappings.tasks.map((task) => task.dmoName)).toEqual([dmoNames[0]]);
-    expect(state.mappings.limitHit).toBe(true);
-    expect(state.capabilities.find((entry) => entry.family === 'mappings')?.message)
-      .toContain('resume loading to check the rest');
+    expect(isProgressiveDiscoveryActive(state)).toBe(true);
 
-    resumeProgressiveDiscovery(state);
-
-    expect(state.mappings.limitHit).toBe(false);
-    expect(state.mappings.tasks.map((task) => task.dmoName)).toEqual(expect.arrayContaining([dmoNames[1]]));
-    expect(state.mappings.tasks.map((task) => task.dmoName)).not.toContain(dmoNames[0]);
     await drain(state);
+
+    expect(state.mappings.tasks.map((task) => task.dmoName)).toEqual(expect.arrayContaining(dmoNames));
+    expect(state.mappings.limitHit).toBe(false);
     expect(state.mappings.tasks.every((task) => task.done && !task.failed)).toBe(true);
+    expect(state.warnings.some((warning) => warning.code === 'MAPPING_QUERY_LIMIT')).toBe(false);
+    expect(progressiveSnapshot(state).progress?.state).toBe('complete');
   });
 
-  it('does not keep polling a deadline-stopped family with an unmet expected count', async () => {
-    const state = await initializeProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
+  it('settles a mismatched expected count after bounded repair passes', async () => {
+    const state = await createProgressiveDiscovery({ cli: fakeCli(), alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
+    await drain(state);
     const dlos = state.families.dlos;
     dlos.expectedTotal = 999;
     dlos.expectedTotalSource = 'response';
-    dlos.pageIndex = 1;
-    state.deadlineAt = Date.now() - 1;
+    dlos.countRetries = 2;
 
     const result = await advanceProgressiveDiscovery(state);
 
     expect(result.active).toBe(false);
     expect(isProgressiveDiscoveryActive(state)).toBe(false);
     expect(progressiveSnapshot(state).progress?.state).toBe('complete');
+    expect(progressiveSnapshot(state).progress?.message).toContain('gaps');
+    expect(state.warnings.some((warning) => warning.code === 'EXPECTED_COUNT_MISMATCH')).toBe(true);
   });
 
   it('terminalizes active cursors after a background interruption', async () => {

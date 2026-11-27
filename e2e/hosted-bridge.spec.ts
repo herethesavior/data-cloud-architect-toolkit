@@ -45,6 +45,7 @@ interface HostedState {
   pairCalls: number;
   pollCalls: number;
   respondCalls: number;
+  statusProbes: number;
   authCalls: string[];
   csrf: Record<string, number>;
   requestCounter: number;
@@ -93,6 +94,7 @@ function createState(mode: Mode): HostedState {
     pairCalls: 0,
     pollCalls: 0,
     respondCalls: 0,
+    statusProbes: 0,
     authCalls: [],
     csrf: {},
     requestCounter: 0,
@@ -274,6 +276,7 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
     noteCsrf(state, route);
 
     if (path === '/api/relay/status' && method === 'GET') {
+      if (new URL(url).searchParams.get('probe') === '1') state.statusProbes += 1;
       return json(route, bridgeStatus(state, new URL(url).origin));
     }
 
@@ -499,6 +502,7 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   await startFakeBridge(page, 'PAIR12345678');
   await page.getByRole('button', { name: 'Refresh status' }).click();
   await expect(page.getByText('Bridge connected')).toBeVisible();
+  expect(state.statusProbes).toBeGreaterThan(0);
 
   await page.getByLabel('Org alias').fill('prod-org');
   await page.getByRole('button', { name: 'Connect org' }).click();
@@ -623,6 +627,26 @@ test('hosted bridge update guidance offers a copyable command without queuing a 
   await page.evaluate(() => {
     (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;
   });
+});
+
+test('hosted offline bridge shows one recovery step instead of competing update guidance', async ({ page }) => {
+  const state = createState('live');
+  state.paired = true;
+  state.agentToken = agentToken;
+  state.cli = { installed: true, version: '2.116.6', error: null };
+  state.agentVersion = '0.1.4';
+  state.latestVersion = '0.1.5';
+  state.lastSeenAt = Date.now() - 3 * 60_000;
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  await page.goto('/');
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
+
+  await expect(page.getByText('The bridge stopped responding.')).toBeVisible();
+  await expect(page.getByText(/Bridge update available/)).toHaveCount(0);
+  await expect(page.getByText('npm install -g @dcat-toolkit/bridge@latest')).toHaveCount(0);
+  await expect(page.getByText('npx -y @dcat-toolkit/bridge@latest start')).toBeVisible();
 });
 
 test('hosted demo stays fixture-backed, labelled, and gap-free', async ({ page }) => {

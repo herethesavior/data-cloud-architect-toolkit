@@ -73,17 +73,6 @@ function Step({ number, title, description, badge, action, children }: StepProps
   );
 }
 
-function BridgeStartCommand() {
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      <code className="mono min-w-0 flex-1 overflow-x-auto rounded border border-line bg-surface-alt px-2 py-1.5 text-xs text-ink">
-        {bridgeStartCommand}
-      </code>
-      <CopyButton value={bridgeStartCommand} label="Copy start command" />
-    </div>
-  );
-}
-
 function setupLabel(status: BridgeStatus | undefined, hosted: boolean, installed: boolean | null): string {
   if (status === undefined) return 'Checking...';
   if (installed === false || status.cli.installed === false) return 'SF CLI missing';
@@ -94,6 +83,69 @@ function setupLabel(status: BridgeStatus | undefined, hosted: boolean, installed
   if (status.relay === 'working') return 'Bridge working';
   if (status.relay === 'waiting') return 'Waiting for bridge';
   return 'Bridge connected';
+}
+
+interface SetupNotice {
+  tone: 'warning' | 'brand';
+  title: string;
+  lines: string[];
+  command?: string;
+  copyLabel?: string;
+  repair?: boolean;
+}
+
+/** One state-appropriate card: never stack competing update and recovery steps. */
+function setupNotice(status: BridgeStatus, hosted: boolean): SetupNotice | null {
+  if (!hosted || !status.paired) return null;
+  if (status.relay === 'unavailable') {
+    return {
+      tone: 'warning',
+      title: 'Bridge status is temporarily unavailable.',
+      lines: ['Refresh status to retry. If it stays unavailable, create a fresh pairing code and rerun setup. Creating a code resets the current pairing.'],
+      repair: true,
+    };
+  }
+  if (status.relay === 'working') {
+    return {
+      tone: 'brand',
+      title: 'The bridge is running a long operation.',
+      lines: ['It will check in again as soon as the operation finishes. Keep the bridge running.'],
+    };
+  }
+  if (status.relay === 'stale') {
+    return {
+      tone: 'warning',
+      title: 'The bridge stopped responding.',
+      lines: [status.canRepairPairing
+        ? 'Restart it on this computer with the command below. If it still does not reconnect, create a fresh pairing code.'
+        : 'Restart it on this computer with the command below.'],
+      command: bridgeStartCommand,
+      copyLabel: 'Copy start command',
+      repair: status.canRepairPairing,
+    };
+  }
+  if (status.relay === 'waiting') {
+    return {
+      tone: 'warning',
+      title: 'Bridge paired. Waiting for its first check-in.',
+      lines: ['Keep this command running on this computer:'],
+      command: bridgeStartCommand,
+      copyLabel: 'Copy start command',
+      repair: status.canRepairPairing,
+    };
+  }
+  if (status.updateAvailable) {
+    return {
+      tone: 'warning',
+      title: `Bridge update available${status.latestVersion ? ` · ${status.latestVersion}` : ''}`,
+      lines: [
+        `Running ${status.agentVersion ?? 'an older version'}. Run the command below, then restart the bridge. If you already installed it, just restart the bridge.`,
+      ],
+      command: manualUpdateCommand,
+      copyLabel: 'Copy command',
+    };
+  }
+  return null;
 }
 
 export function OrgConnections({
@@ -148,11 +200,19 @@ export function OrgConnections({
 
   const invalidateSetup = () => invalidateBridgeState(queryClient);
 
-  const refreshCli = useMutation({
-    mutationFn: api.refreshCli,
-    onSuccess: () => {
+  const refreshStatus = useMutation({
+    mutationFn: async () => {
+      // Hosted status is a live relay probe; local status re-runs the CLI probe.
+      if (hosted) return api.refreshBridgeStatus();
+      await api.refreshCli();
+      return api.bridgeStatus();
+    },
+    onSuccess: (next) => {
+      // Set the probed status directly. Invalidating `bridge-status` here would
+      // immediately refetch the cached heartbeat and undo an offline result.
+      queryClient.setQueryData<BridgeStatus>(['bridge-status'], next);
       setSetupError('');
-      invalidateDiagnosticsState(queryClient);
+      if (!hosted) invalidateDiagnosticsState(queryClient);
     },
     onError: (error: Error) => {
       const described = describeError(error, 'setup');
@@ -260,11 +320,13 @@ export function OrgConnections({
     ? Boolean(status?.paired && (status.relay === 'connected' || status.relay === 'working') && status.cli.installed)
     : Boolean(status?.cli.installed);
   const setupState = setupLabel(status, hosted, cliInstalled);
+  const bridgeOffline = hosted && Boolean(status?.paired)
+    && (status?.relay === 'stale' || status?.relay === 'unavailable' || status?.relay === 'waiting');
+  const notice = status && !demo ? setupNotice(status, hosted) : null;
   // The session mode is authoritative; a cached bridge payload can briefly
   // describe the previous mode after a switch.
   const liveMode = hosted && mode === 'live';
-  // Hosted "Re-check CLI" reads cached relay status rather than probing the
-  // CLI, so name the action for what it actually does.
+  // Hosted refresh probes the relay; local refresh re-runs the installed CLI.
   const statusRefreshLabel = !demo && hosted ? 'Refresh status' : 'Re-check CLI';
   // The shared cache can briefly contain fixtures from a prior mode switch.
   const candidateOrgs = (orgsQuery.data ?? []).filter(
@@ -436,8 +498,9 @@ export function OrgConnections({
                 {!demo && ((hosted && status?.agentVersion) || status?.cli.version) ? (
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-soft">
                     {hosted && status?.agentVersion ? (
-                      <span title="Installed DCAT bridge version">
+                      <span title={bridgeOffline ? 'Last reported bridge version' : 'Installed DCAT bridge version'}>
                         Bridge <span className="mono text-ink">v{status.agentVersion}</span>
+                        {bridgeOffline ? <span className="ml-1 text-ink-soft">(last reported)</span> : null}
                       </span>
                     ) : null}
                     {status?.cli.version ? (
@@ -451,12 +514,12 @@ export function OrgConnections({
           action={
             <Button
               variant="secondary"
-              onClick={() => refreshCli.mutate()}
-              disabled={demo || refreshCli.isPending}
+              onClick={() => refreshStatus.mutate()}
+              disabled={demo || refreshStatus.isPending}
               title={demo ? 'Not needed in demo mode' : undefined}
               icon={<Icon name="refresh" size={15} />}
             >
-              {refreshCli.isPending ? 'Checking...' : statusRefreshLabel}
+              {refreshStatus.isPending ? 'Checking...' : statusRefreshLabel}
             </Button>
           }
         >
@@ -474,23 +537,6 @@ export function OrgConnections({
               onRetry={() => void bridgeStatusQuery.refetch()}
               retryLabel="Refresh status"
             />
-          ) : null}
-
-          {!demo && status && hosted && status.paired && status.updateAvailable ? (
-            <div className="mb-3 rounded-lg border border-warning/20 bg-warning-soft px-3 py-2.5">
-              <p className="text-sm font-medium text-ink">
-                Bridge update available{status.latestVersion ? ` · ${status.latestVersion}` : ''}
-              </p>
-              <p className="mt-1 text-xs text-ink-soft">
-                Running {status.agentVersion ?? 'an older version'}. Run the command below on this computer, then restart the bridge.
-              </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <code className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink">
-                  {manualUpdateCommand}
-                </code>
-                <CopyButton value={manualUpdateCommand} label="Copy command" />
-              </div>
-            </div>
           ) : null}
 
           {!demo && status && hosted && !status.paired && status.pairing ? (
@@ -518,45 +564,24 @@ export function OrgConnections({
             </div>
           ) : null}
 
-          {!demo && status && hosted && status.paired && status.relay === 'working' ? (
-            <div className="rounded-lg border border-brand/20 bg-brand-soft px-4 py-3 text-sm text-brand" role="status">
-              <p className="font-medium">The bridge is running a long operation.</p>
-              <p>It will check in again as soon as the operation finishes. Keep the bridge running.</p>
-            </div>
-          ) : null}
-
-          {!demo && status && hosted && status.paired && status.relay === 'unavailable' ? (
-            <div className="space-y-2 rounded-lg border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning" role="alert">
-              <p className="font-medium">Bridge status is temporarily unavailable.</p>
-              <p>
-                The site could not confirm this pairing. Refresh status to retry, or create a fresh pairing code
-                and rerun setup on this computer. Creating a code resets the current pairing.
-              </p>
-              <Button
-                variant="secondary"
-                onClick={() => createPairing.mutate()}
-                disabled={createPairing.isPending}
-              >
-                {createPairing.isPending ? 'Creating code...' : 'Create new pairing code'}
-              </Button>
-            </div>
-          ) : null}
-
-          {!demo && status && hosted && status.paired && (status.relay === 'waiting' || status.relay === 'stale') ? (
-            <div className="space-y-2 rounded-lg border border-warning/20 bg-warning-soft px-4 py-3 text-sm text-warning">
-              <p className="font-medium">
-                {status.relay === 'stale' ? 'The bridge stopped responding.' : 'Bridge paired. Waiting for its first check-in.'}
-              </p>
-              <p>
-                {status.relay === 'stale'
-                  ? 'Check its network connection or sleep state, then restart it with:'
-                  : 'Keep the installer running with:'}
-              </p>
-              <BridgeStartCommand />
-              {status.canRepairPairing ? (
-                <p>If it does not reconnect, create a fresh pairing code.</p>
+          {notice ? (
+            <div
+              className={`space-y-2 rounded-lg border px-4 py-3 text-sm ${notice.tone === 'brand'
+                ? 'border-brand/20 bg-brand-soft text-brand'
+                : 'border-warning/20 bg-warning-soft text-warning'}`}
+              role={notice.tone === 'brand' ? 'status' : 'alert'}
+            >
+              <p className="font-medium">{notice.title}</p>
+              {notice.lines.map((line) => <p key={line}>{line}</p>)}
+              {notice.command ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <code className="mono min-w-0 flex-1 overflow-x-auto rounded border border-line bg-surface-alt px-2 py-1.5 text-xs text-ink">
+                    {notice.command}
+                  </code>
+                  <CopyButton value={notice.command} label={notice.copyLabel ?? 'Copy command'} />
+                </div>
               ) : null}
-              {status.canRepairPairing ? (
+              {notice.repair ? (
                 <Button
                   variant="secondary"
                   onClick={() => createPairing.mutate()}

@@ -116,6 +116,28 @@ describe('web API session handling', () => {
     expect((options?.headers as Record<string, string>)['x-dcat-token']).toBeUndefined();
   });
 
+  it('probes the hosted relay on an explicit status refresh', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const status = {
+      paired: true,
+      mode: 'live',
+      version: '0.1.0',
+      cli: { installed: true, version: '2.116.6', error: null },
+      lastSeenAt: new Date().toISOString(),
+      relay: 'stale',
+      working: false,
+      canRepairPairing: false,
+      pairing: null,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(status));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.refreshBridgeStatus()).resolves.toEqual(status);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/relay/status?probe=1');
+  });
+
   it('uses the current time for hosted health checks', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     const lastSeenAt = new Date(Date.now() - 60 * 60_000).toISOString();
