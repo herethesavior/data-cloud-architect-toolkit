@@ -124,6 +124,7 @@ class FakeRelayHttp implements RelayHttp {
   constructor(
     private readonly tasks: RelayTask[],
     private readonly controller: AbortController,
+    private respondFailures = 0,
   ) {}
 
   async post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -132,6 +133,11 @@ class FakeRelayHttp implements RelayHttp {
     if (path === '/api/relay/cancelled') return { cancelled: false } as T;
     if (path === '/api/relay/poll') return { status: 'ok', tasks: this.tasks.splice(0) } as T;
     if (path === '/api/relay/respond') {
+      if (this.respondFailures > 0) {
+        this.respondFailures -= 1;
+        if (this.respondFailures === 0) this.controller.abort();
+        throw new Error('respond failed');
+      }
       this.controller.abort();
       return { ok: true } as T;
     }
@@ -358,7 +364,8 @@ describe('executeRelayOperation', () => {
 
   it('runs a bridge update only through the injected CLI hook', async () => {
     const state = createState();
-    const onUpdate = vi.fn(async () => ({ updated: true, restarting: true, message: 'Bridge updated and restarting.' }));
+    const handoff = { result: { updated: true, restarting: true }, complete: vi.fn() };
+    const onUpdate = vi.fn(async () => handoff);
 
     await expect(executeRelayOperation(state, { operation: 'bridge.update' }))
       .rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
@@ -530,7 +537,8 @@ describe('runBridge', () => {
     const http = new FakeRelayHttp([task({ operation: 'bridge.update' })], controller);
     const state = createState();
     const logger = vi.fn();
-    const onUpdate = vi.fn(async () => ({ updated: true, restarting: true, message: 'Bridge updated and restarting.' }));
+    const complete = vi.fn();
+    const onUpdate = vi.fn(async () => ({ result: { updated: true, restarting: true }, complete }));
 
     await runBridge({
       relayUrl: 'https://dcat.example',
@@ -545,8 +553,52 @@ describe('runBridge', () => {
 
     expect(onUpdate).toHaveBeenCalledOnce();
     expect(respondBody(http).response).toMatchObject({ ok: true, result: { restarting: true } });
+    expect(complete).toHaveBeenCalledOnce();
     expect(logger).toHaveBeenCalledWith(expect.stringContaining('update installed; stopping this bridge process'));
     expect(http.calls.filter((call) => call.path === '/api/relay/respond')).toHaveLength(1);
+  });
+
+  it('does not start the replacement when the update response cannot be delivered', async () => {
+    const controller = new AbortController();
+    const http = new FakeRelayHttp([task({ operation: 'bridge.update' })], controller, 3);
+    const complete = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      onUpdate: async () => ({ result: { updated: true, restarting: true }, complete }),
+    });
+
+    expect(complete).not.toHaveBeenCalled();
+    expect(http.calls.filter((call) => call.path === '/api/relay/respond')).toHaveLength(3);
+  });
+
+  it('keeps serving when the replacement cannot start', async () => {
+    const controller = new AbortController();
+    const http = new FakeRelayHttp([task({ operation: 'bridge.update' })], controller);
+    const logger = vi.fn();
+    const complete = vi.fn(async () => {
+      throw new Error('spawn failed');
+    });
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+      onUpdate: async () => ({ result: { updated: true, restarting: true }, complete }),
+    });
+
+    expect(complete).toHaveBeenCalledOnce();
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('could not start the updated bridge'));
+    expect(logger).not.toHaveBeenCalledWith(expect.stringContaining('update installed; stopping this bridge process'));
   });
 
   it('posts a redacted failure when an allowlisted command fails with credential-shaped output', async () => {

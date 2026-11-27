@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BridgeStatus, InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
+import { bridgeStatusPollIntervalMs } from './lib/bridgeStatus.ts';
 import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
 import { ALL_REFRESH_FAMILIES, refreshScopeForPage } from './lib/refreshScope.ts';
 import { settleInterruptedInventory } from './lib/inventorySettlement.ts';
@@ -88,12 +89,7 @@ export function App() {
     enabled: hosted && sessionReady && mode === 'live',
     // Pairing can finish while the user is on another page. Keep polling here so
     // the root org gate notices without requiring a return to bridge setup.
-    refetchInterval: (query) => {
-      const status = query.state.data;
-      if (!status?.paired || status.relay === 'working') return 5_000;
-      if (status.cli.installed && status.relay === 'connected') return 60_000;
-      return 10_000;
-    },
+    refetchInterval: (query) => bridgeStatusPollIntervalMs(query.state.data),
   });
   const orgsQuery = useQuery({
     queryKey: orgsQueryKey(mode),

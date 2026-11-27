@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BridgeStatus, OrgSummary, SessionInfo } from '@dcat/core';
 import { api, ApiError } from '../lib/api.ts';
+import { bridgeLastSeenText, bridgeLastSeenTitle, bridgeStatusPollIntervalMs } from '../lib/bridgeStatus.ts';
 import { isHosted } from '../lib/hosted.ts';
 import { orgsQueryOptions } from '../lib/queryPersistence.ts';
 import { describeError, sanitizeDetail } from '../lib/userError.ts';
@@ -179,12 +180,10 @@ export function OrgConnections({
   const bridgeStatusQuery = useQuery({
     queryKey: ['bridge-status'],
     queryFn: api.bridgeStatus,
-    refetchInterval: (query) => {
-      const status = query.state.data;
-      if (status?.paired && status.relay === 'connected' && status.cli.installed) return 60_000;
-      if (status?.paired && status.relay === 'working') return 5_000;
-      return 10_000;
-    },
+    // In hosted live mode the App root is the single passive poller. A second
+    // observer here would add overlapping requests and could overwrite an
+    // explicit Refresh status with a result that started before the click.
+    refetchInterval: hosted ? false : (query) => bridgeStatusPollIntervalMs(query.state.data),
   });
   // The App root also observes the mode-scoped org list. In hosted live mode,
   // only start this observer once a bridge is paired so a second org.list cannot
@@ -510,6 +509,11 @@ export function OrgConnections({
                         SF CLI <span className="mono text-ink">v{status.cli.version}</span>
                       </span>
                     ) : null}
+                  </span>
+                ) : null}
+                {bridgeLastSeenText(status) ? (
+                  <span className="text-xs text-ink-soft" title={bridgeLastSeenTitle(status)}>
+                    {bridgeLastSeenText(status)}
                   </span>
                 ) : null}
               </>}

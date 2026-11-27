@@ -8,7 +8,7 @@ import { loadConfig } from '../../../apps/local-connector/src/config.ts';
 import { createAppState } from '../../../apps/local-connector/src/state.ts';
 import { normalizeRelayUrl, parseStoredBridge, validatePairingCode, type StoredBridge } from './config.ts';
 import { ensureSalesforceCli } from './install.ts';
-import { updateBridge } from './update.ts';
+import { prepareBridgeUpdate } from './update.ts';
 import { BRIDGE_VERSION } from './version.ts';
 
 const HELP = `DCAT Bridge
@@ -71,7 +71,13 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
 
   const config = { ...loadConfig(process.env, argv), mode: 'live' as const, version: BRIDGE_VERSION };
   const logArgs = argv.filter((arg) => arg === '--verbose' || arg === '--quiet');
-  const onUpdate = () => updateBridge({ logger: updaterLogger.info, env: process.env, logArgs });
+  const onUpdate = async () => {
+    const update = await prepareBridgeUpdate({ logger: updaterLogger.info, env: process.env, logArgs });
+    return {
+      result: { updated: true, restarting: true, version: update.version, message: `Bridge ${update.version} installed and restarting.` },
+      complete: update.complete,
+    };
+  };
   const state = createAppState(config);
 
   if (command === 'setup') {

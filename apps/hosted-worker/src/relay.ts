@@ -1,6 +1,8 @@
 import { Hono, type Context } from 'hono';
 import {
   apiVersionStatusSchema,
+  BRIDGE_REPAIR_GRACE_MS,
+  BRIDGE_STALE_AFTER_MS,
   cliStatusSchema,
   RELAY_OPERATION_TIMEOUT_MS,
   relayAgentCancelRequestSchema,
@@ -18,7 +20,7 @@ import {
 import { randomToken, tokenFingerprint } from './crypto.ts';
 import { sendError, sendRouteError } from './errors.ts';
 import type { RelayAgentSnapshot } from './relay-do.ts';
-import { hasValidCsrf, loadSession, persistSession, resolveSession, saveSession, sessionTtl } from './session.ts';
+import { hasValidCsrf, loadSession, resolveSession, saveSession, sessionTtl } from './session.ts';
 import type { Env, SessionRecord } from './types.ts';
 
 export const RELAY_VERSION = '0.1.0';
@@ -92,9 +94,6 @@ function supportsSelfUpdate(current: string | null): boolean {
 }
 
 const PAIRING_TTL_SECONDS = 10 * 60;
-const STALE_AFTER_MS = 60_000;
-/** A bridge that has just paired needs a moment to check in before we suggest re-pairing. */
-const REPAIR_GRACE_MS = 2 * 60_000;
 
 const RELAY_DO_ORIGIN = 'https://relay.invalid';
 
@@ -114,6 +113,29 @@ function resetSessionRelay(session: SessionRecord): void {
     pairingCode: null,
     pairingExpiresAt: null,
     request: null,
+  };
+}
+
+/**
+ * A status read reports a DO-confirmed reset without rewriting KV. Only explicit
+ * unpair or pairing routes own session mutation, so a passive check cannot race
+ * a concurrent pair, unpair, or mode change.
+ */
+function unpairedStatusView(session: SessionRecord): SessionRecord {
+  return {
+    ...session,
+    relay: {
+      agentToken: null,
+      pairedAt: null,
+      lastSeenAt: null,
+      working: false,
+      agentVersion: null,
+      cli: session.relay.cli,
+      compatibility: session.relay.compatibility,
+      pairingCode: null,
+      pairingExpiresAt: null,
+      request: null,
+    },
   };
 }
 
@@ -183,10 +205,10 @@ interface StatusOverride {
 export function getBridgeStatus(session: SessionRecord, origin: string, override: StatusOverride = {}): BridgeStatus {
   const { agentToken, lastSeenAt, agentVersion, pairedAt } = session.relay;
   const now = Date.now();
-  const stale = lastSeenAt !== null && now - lastSeenAt > STALE_AFTER_MS;
+  const stale = lastSeenAt !== null && now - lastSeenAt > BRIDGE_STALE_AFTER_MS;
   // A bridge that paired but never checked in is only "waiting" during the
   // grace window. Past that, it needs the same repair affordance as a stale one.
-  const neverCheckedIn = lastSeenAt === null && pairedAt !== null && now - pairedAt > REPAIR_GRACE_MS;
+  const neverCheckedIn = lastSeenAt === null && pairedAt !== null && now - pairedAt > BRIDGE_REPAIR_GRACE_MS;
   const offline = stale || neverCheckedIn;
   // An unreadable relay DO cannot confirm the pairing at all, so the user must
   // be able to replace it immediately instead of waiting out the offline grace.
@@ -194,8 +216,8 @@ export function getBridgeStatus(session: SessionRecord, origin: string, override
   // Once a bridge has checked in, grace runs from that check-in. Pairing days
   // ago must not turn the first stale status into a destructive re-pair prompt.
   const graceElapsed = lastSeenAt === null
-    ? pairedAt !== null && now - pairedAt > REPAIR_GRACE_MS
-    : now - lastSeenAt > REPAIR_GRACE_MS;
+    ? pairedAt !== null && now - pairedAt > BRIDGE_REPAIR_GRACE_MS
+    : now - lastSeenAt > BRIDGE_REPAIR_GRACE_MS;
   const working = override.working === false ? false : Boolean(agentToken && session.relay.working);
   const relay = override.relay ?? (
     working ? 'working'
@@ -289,19 +311,13 @@ export async function bridgeStatusForSession(
   env: Env,
   session: SessionRecord,
   origin: string,
-  context?: Context,
 ): Promise<BridgeStatus> {
   const agentToken = session.relay.agentToken;
   if (!agentToken) return getBridgeUpdateStatus(session, origin);
 
   const { status, body } = await agentState(env, session);
   if (isInvalidAgentToken(body, status) || isExplicitlyUnpaired(body, status)) {
-    await revokeAgentToken(env, session);
-    resetSessionRelay(session);
-    // Persist the reset so status and pairing routes agree immediately.
-    if (context) await saveSession(context, env, session);
-    else await persistSession(env, session);
-    return getBridgeUpdateStatus(session, origin);
+    return getBridgeUpdateStatus(unpairedStatusView(session), origin);
   }
   if (status !== 200 || !body?.paired) {
     // A network blip or 5xx is not evidence of an unpaired bridge. Keep the
@@ -353,7 +369,6 @@ export function relayRoutes() {
         context.env,
         session,
         originOf(context.req.url),
-        context,
       ));
     } catch (error) {
       return sendRouteError(context, error);
@@ -363,9 +378,9 @@ export function relayRoutes() {
   app.get('/api/relay/status', statusResponse);
 
   // Dedicated read-only check for the UI's Refresh status action. It shares the
-  // passive path on purpose: no Durable Object probe, no woken poll, no relay
-  // task, and no mutation of the recorded heartbeat. A busy bridge is reported
-  // from the relay's current operation state instead of being probed.
+  // passive path on purpose: a /state read does not wake a held poll, queue a
+  // task, or mutate the heartbeat. A busy bridge is reported from the relay's
+  // current operation state instead of being probed.
   app.get('/api/relay/status/check', statusResponse);
 
   app.post('/api/relay/pairing', async (context) => {
