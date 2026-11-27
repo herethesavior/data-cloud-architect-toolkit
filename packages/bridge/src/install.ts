@@ -186,7 +186,7 @@ export async function ensureSalesforceCli(options: EnsureCliOptions = {}): Promi
     }
   }
 
-  logger('Salesforce CLI was not detected. Installing @salesforce/cli globally…');
+  logger('Salesforce CLI was not detected. Installing @salesforce/cli globally.');
   const npm = npmInvocation(env, platform);
   const install = await runner.run(npm.command, [...npm.args, 'install', '-g', '@salesforce/cli'], env);
   if (install.exitCode !== 0) {

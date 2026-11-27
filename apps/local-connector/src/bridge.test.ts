@@ -450,10 +450,10 @@ describe('runBridge', () => {
       logger,
     });
 
-    expect(logger).toHaveBeenCalledWith(
-      'Bridge result rejected for this request: The result is too large to relay in one response. '
-      + 'The browser can start a new load in smaller batches.',
-    );
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining(
+      'could not deliver cli.status result: The result is too large to relay in one response. '
+      + 'The browser can retry in smaller batches.',
+    ));
   });
 
   it('retries a dropped result POST so completed work is not lost', async () => {
@@ -515,7 +515,7 @@ describe('runBridge', () => {
 
     expect(onUpdate).toHaveBeenCalledOnce();
     expect(respondBody(http).response).toMatchObject({ ok: true, result: { restarting: true } });
-    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge updated'));
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('update installed; stopping this bridge process'));
     expect(http.calls.filter((call) => call.path === '/api/relay/respond')).toHaveLength(1);
   });
 
@@ -599,7 +599,7 @@ describe('runBridge', () => {
     });
 
     expect(respond).not.toHaveBeenCalled();
-    expect(logger).toHaveBeenCalledWith(expect.stringContaining('cancelled request'));
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('cli.status skipped request=task-1 reason=cancelled'));
   });
 
   it('stops polling when the relay reports an unpaired bridge', async () => {
@@ -625,7 +625,7 @@ describe('runBridge', () => {
     });
 
     expect(calls).toBe(1);
-    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge stopped'));
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('stopping'));
   });
 
   it('stops polling when the site invalidates the bridge pairing', async () => {
@@ -651,7 +651,7 @@ describe('runBridge', () => {
     });
 
     expect(calls).toBe(1);
-    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge stopped'));
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('stopping'));
     expect(logger).not.toHaveBeenCalledWith(expect.stringContaining('Retrying'));
   });
 
@@ -672,11 +672,11 @@ describe('runBridge', () => {
 
     const messages = logger.mock.calls.map(([message]) => String(message));
     expect(messages).toEqual(expect.arrayContaining([
-      expect.stringContaining('DCAT bridge'),
-      expect.stringContaining('Running cli.status (task-1)…'),
-      expect.stringContaining('cli.status completed in'),
+      expect.stringContaining('ready; press Ctrl+C to stop'),
+      expect.stringContaining('cli.status started request=task-1'),
+      expect.stringContaining('cli.status finished request=task-1 duration='),
     ]));
-    expect(messages.some((message) => message.includes('Polling the relay for work'))).toBe(false);
+    expect(messages.some((message) => message.includes('polling the relay for work'))).toBe(false);
   });
 
   it('keeps frequent progress polls out of default logs but shows them in verbose mode', async () => {
@@ -694,7 +694,7 @@ describe('runBridge', () => {
       logger,
     });
     expect(logger.mock.calls.map(([message]) => String(message)).join('\n'))
-      .not.toContain('Running inventory.status');
+      .not.toContain('inventory.status started');
 
     const verboseController = new AbortController();
     const verboseLogger = vi.fn();
@@ -710,8 +710,8 @@ describe('runBridge', () => {
     });
     const verboseMessages = verboseLogger.mock.calls.map(([message]) => String(message));
     expect(verboseMessages).toEqual(expect.arrayContaining([
-      'Polling the relay for work…',
-      expect.stringContaining('Running inventory.status'),
+      expect.stringContaining('polling the relay for work'),
+      expect.stringContaining('inventory.status started request=task-1'),
     ]));
   });
 

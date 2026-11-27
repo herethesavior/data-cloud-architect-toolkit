@@ -538,6 +538,77 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   });
 });
 
+test('hosted setup before pairing does not report a CLI or org failure', async ({ page }) => {
+  const state = createState('live');
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  // The real Worker rejects org.list before pairing; reproduce that response.
+  await page.route(/\/api\/orgs(?:\/|\?|$)/, (route) =>
+    json(route, { error: { code: 'BRIDGE_NOT_CONNECTED', message: 'Set up SF CLI first.' } }, 409));
+  await page.goto('/orgs');
+
+  await expect(page.getByRole('heading', { name: 'Set up SF CLI' })).toBeVisible();
+  await expect(page.getByText('Bridge not paired')).toBeVisible();
+  await expect(page.getByText('SF CLI missing')).toHaveCount(0);
+  await expect(page.getByText("Couldn't check for Salesforce orgs")).toHaveCount(0);
+  await expect(page.getByText('The bridge is not connected')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Retry org check' })).toHaveCount(0);
+  await expect(page.getByText('Complete steps 1 and 2 first')).toBeVisible();
+});
+
+test('hosted demo to live with an unpaired bridge does not report an org failure', async ({ page }) => {
+  const state = createState('demo');
+  await seedPreference(page, 'demo');
+  await mockHostedWorker(page, state);
+  await page.route(/\/api\/orgs(?:\/|\?|$)/, async (route) => {
+    const segments = new URL(route.request().url()).pathname.split('/').filter(Boolean);
+    if (segments.length === 2 && state.mode === 'live' && !state.paired) {
+      await json(route, { error: { code: 'BRIDGE_NOT_CONNECTED', message: 'Set up SF CLI first.' } }, 409);
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto('/');
+
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toBeVisible();
+  await page.locator('header').getByRole('button', { name: 'Switch to live mode' }).click();
+  await expect(page.locator('header').getByRole('button', { name: 'Switch to demo mode' })).toBeVisible();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Set up SF CLI' })).toBeVisible();
+  await expect(page.getByText('Bridge not paired')).toBeVisible();
+  await expect(page.getByText("Couldn't check for Salesforce orgs")).toHaveCount(0);
+  await expect(page.getByText('The bridge is not connected')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Retry org check' })).toHaveCount(0);
+});
+
+test('hosted pairing outside setup updates the root org gate', async ({ page }) => {
+  const state = createState('live');
+  state.orgs = [{ ...demoOrgs[0]!, alias: 'paired-org', source: 'salesforce-cli' }];
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  await page.route(/\/api\/orgs(?:\/|\?|$)/, async (route) => {
+    const segments = new URL(route.request().url()).pathname.split('/').filter(Boolean);
+    if (segments.length === 2 && !state.paired) {
+      await json(route, { error: { code: 'BRIDGE_NOT_CONNECTED', message: 'Set up SF CLI first.' } }, 409);
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto('/orgs');
+
+  await expect(page.getByRole('heading', { name: 'Set up SF CLI' })).toBeVisible();
+  await page.getByRole('button', { name: 'Create pairing code' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Dashboard' }).click();
+  await startFakeBridge(page, 'PAIR12345678');
+
+  await expect(page.locator('header select option[value="paired-org"]')).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.getByText("Couldn't check for Salesforce orgs")).toHaveCount(0);
+  await page.evaluate(() => {
+    (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;
+  });
+});
+
 test('hosted connect detects a sandbox from its Salesforce instance URL', async ({ page }) => {
   const state = createState('live');
   await seedPreference(page, 'live');

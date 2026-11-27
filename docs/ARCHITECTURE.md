@@ -122,7 +122,7 @@ The browser can only send typed operations: `cli.status`, `org.list`, `org.conne
 
 Pairing is one-time and short-lived. Unpairing invalidates the agent token in both KV and the Durable Object. Bridge storage (`~/.dcat/bridge.json`, mode `600`) contains only the relay origin, agent token, and version—never Salesforce credentials.
 
-The agent is designed to stay up for days. Relay calls have deadlines (45 seconds for an idle long poll), installer and updater processes are bounded, and logs are leveled: normal output records each request with its duration while progress polls stay in `--verbose`. Repeated relay failures are summarized every five minutes instead of printed on every retry, and recovery is announced once. Output is timestamped and redacted.
+The agent is designed to stay up for days. Relay calls have deadlines (45 seconds for an idle long poll), installer and updater processes are bounded, and logs are leveled: normal output records each request start and finish with a short request id and duration while progress polls stay in `--verbose`. Each line carries a timestamp, severity, source, and `key=value` context. Repeated failures are summarized every five minutes instead of printed on every retry, a quiet gap starts a new failure episode, and recovery is announced once. Output is redacted.
 
 The Worker checks npm for the latest bridge release and caches that answer for one hour. Step 1 of the hosted wizard shows a copyable upgrade command when the paired bridge is behind; the wizard itself always installs `@dcat-toolkit/bridge@latest`.
 

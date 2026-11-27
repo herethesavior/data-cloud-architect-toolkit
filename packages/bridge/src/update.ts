@@ -71,6 +71,6 @@ export async function updateBridge(options: UpdateOptions = {}): Promise<BridgeU
     },
   );
   child.unref();
-  logger('Bridge updated. Restarting with the latest version…');
+  logger('Bridge update installed. Starting the replacement bridge.');
   return { updated: true, restarting: true, message: 'Bridge updated and restarting.' };
 }
