@@ -352,6 +352,49 @@ describe('mergeInventorySnapshot', () => {
     expect(capability.message).toMatch(/loaded earlier/i);
   });
 
+  it('does not call retained rows complete when a gap prevents authoritative reconciliation', () => {
+    const previous = snapshot({ mappings: structuredClone(demoInventory.mappings) });
+    previous.capabilities = previous.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'not-started' as const, itemCount: 0, message: 'Not started.' }
+      : capability);
+    const incoming = snapshot(
+      { mappings: [] },
+      progress('complete', { mappings: { status: 'complete', loaded: 0, pagesFetched: 1 } }),
+      [{ family: 'mappings', code: 'OUTPUT_LIMIT', message: 'gap', severity: 'error' }],
+    );
+    incoming.capabilities = incoming.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'not-started' as const, itemCount: 0, message: 'Not started.' }
+      : capability);
+
+    const merged = mergeInventorySnapshot(previous, incoming);
+    const capability = merged.capabilities.find((entry) => entry.family === 'mappings')!;
+
+    expect(merged.mappings).toHaveLength(demoInventory.mappings.length);
+    expect(capability.status).toBe('partial');
+    expect(capability.itemCount).toBe(demoInventory.mappings.length);
+  });
+
+  it('does not turn a skipped family into a fresh access-denied failure', () => {
+    const previous = snapshot({ mappings: structuredClone(demoInventory.mappings) });
+    previous.capabilities = previous.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'forbidden' as const, message: 'Access denied.' }
+      : capability);
+    const incoming = snapshot({ mappings: [] }, progress('running', {
+      mappings: { status: 'not-started', loaded: 0 },
+    }));
+    incoming.capabilities = incoming.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'not-started' as const, itemCount: 0, message: 'Not started.' }
+      : capability);
+
+    const capability = mergeInventorySnapshot(previous, incoming).capabilities
+      .find((entry) => entry.family === 'mappings')!;
+
+    expect(capability.status).toBe('partial');
+    expect(capability.itemCount).toBe(demoInventory.mappings.length);
+    expect(capability.message).toMatch(/not requested in the latest update/i);
+    expect(capability.message).toMatch(/last known status: forbidden/i);
+  });
+
   it('reconciles the same mismatch for every retained resource family', () => {
     for (const family of RESOURCE_FAMILIES) {
       const field = FAMILY_FIELDS[family] as keyof InventorySnapshot;
@@ -386,6 +429,6 @@ describe('mergeInventorySnapshot', () => {
 
     expect(merged.dataTransforms).toHaveLength(demoInventory.dataTransforms.length);
     expect(capability).toMatchObject({ status: 'error', itemCount: demoInventory.dataTransforms.length });
-    expect(capability.message).toMatch(/retained from earlier pages/i);
+    expect(capability.message).toMatch(/in the current view/i);
   });
 });

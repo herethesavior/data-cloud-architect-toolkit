@@ -34,7 +34,9 @@ export async function resolveTransformContext(
   apiVersionHint?: string,
 ): Promise<TransformContext> {
   const cached = state.inventoryCache?.alias === org.alias ? state.inventoryCache.inventory : null;
-  const apiVersion = apiVersionHint ?? cached?.apiVersion ?? state.compatibility.used ?? null;
+  // `compatibility.used` is process-wide, not org-scoped. Falling back to it
+  // could resolve detail for org B at a version discovered for org A.
+  const apiVersion = apiVersionHint ?? cached?.apiVersion ?? null;
   const seed = seedFor(cached, id);
   if (apiVersion) return { apiVersion, seed };
 

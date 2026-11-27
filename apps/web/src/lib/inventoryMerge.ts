@@ -202,16 +202,24 @@ function reconcileCapabilities(
     if (visible === 0) return capability;
     if (capability.status !== 'not-started' && (capability.itemCount ?? 0) >= visible) return capability;
 
-    const previousCapability = previous.capabilities.find((entry) => entry.family === capability.family);
-    const progressState = familyProgress(incoming.progress, capability.family)?.status;
+    const previousStatus = previous.capabilities.find((entry) => entry.family === capability.family)?.status;
+    // A skipped family is not a fresh failure. Inheriting a previous error or
+    // forbidden result would create a new "needs attention" item without a new
+    // retrieval attempt, so keep the rows but mark the retained view partial.
+    const previousFailed = previousStatus === 'error' || previousStatus === 'forbidden';
+    const authoritative = isAuthoritative(incoming.progress, incoming.warnings ?? [], capability.family);
     const status: RetrievalStatus = capability.status === 'not-started'
-      ? previousCapability && previousCapability.status !== 'not-started'
-        ? previousCapability.status
-        : progressState === 'complete' ? 'available' : 'partial'
+      ? previousFailed
+        ? 'partial'
+        : previousStatus && previousStatus !== 'not-started'
+          ? previousStatus
+          : authoritative ? 'available' : 'partial'
       : capability.status;
     const message = capability.status === 'not-started'
-      ? `Showing ${visible} item(s) loaded earlier; this family was not requested in the latest update.`
-      : `${capability.message ?? ''} Showing ${visible} item(s) retained from earlier pages.`.trim();
+      ? `Showing ${visible} item(s) loaded earlier; this family was not requested in the latest update.${
+        previousFailed ? ` Last known status: ${previousStatus}.` : ''
+      }`
+      : `${capability.message ?? ''} Showing ${visible} item(s) in the current view.`.trim();
     return { ...capability, status, itemCount: visible, message };
   });
 }

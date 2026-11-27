@@ -195,6 +195,19 @@ describe('executeRelayOperation', () => {
     expect(inventory.apiVersion).toBe('67.0');
   });
 
+  it('does not reuse a process-wide API version for an org without a cache', async () => {
+    const state = createState();
+    state.compatibility = { ...state.compatibility, used: '68.0' };
+
+    const bundle = await operation<TransformBundle>(state, {
+      operation: 'transform.get',
+      alias: 'demo-uat',
+      id: 'Account_Transform',
+    });
+
+    expect(bundle.transform?.provenance.apiVersion).toBe('67.0');
+  });
+
   it('drops org-scoped caches and sessions when an alias is reconnected', async () => {
     const state = createState();
     state.inventoryCache = {

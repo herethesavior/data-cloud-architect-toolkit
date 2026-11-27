@@ -70,6 +70,7 @@ function createConnectorState(): ConnectorState {
 
 interface MockConnectorOptions {
   modeDelayMs?: number;
+  transformDetailDelayMs?: number;
   modeCalls?: string[];
   calls?: { orgs: number; inventory: number };
   sessionStartBodies?: Array<Record<string, unknown>>;
@@ -106,7 +107,7 @@ async function mockConnector(page: Page, state: ConnectorState, options: MockCon
   await page.route('**/api/cli/refresh', (route: Route) =>
     route.fulfill({ json: health.cli }),
   );
-  await page.route('**/api/orgs**', (route: Route) => {
+  await page.route('**/api/orgs**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
     const segments = path.split('/').filter(Boolean);
     if (segments.length === 2) {
@@ -117,6 +118,9 @@ async function mockConnector(page: Page, state: ConnectorState, options: MockCon
     if (segments[3] === 'data-transforms' && segments[4]) {
       const id = decodeURIComponent(segments[4]);
       const bundle = demoTransformBundles[id];
+      if (options.transformDetailDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.transformDetailDelayMs));
+      }
       return bundle
         ? route.fulfill({ json: bundle })
         : route.fulfill({ status: 404, json: { error: { code: 'TRANSFORM_NOT_FOUND', message: 'Unknown transform' } } });
@@ -1153,6 +1157,31 @@ test('data transform explorer shows grounded detail, lineage, and run states', a
   await expect(legacy.getByText('Paused', { exact: true }).first()).toBeVisible();
   await expect(legacy.getByRole('tab', { name: 'Run History (1)' })).toBeVisible();
   await expect(legacy.getByText('Nightly at 03:00 UTC', { exact: true }).first()).toBeVisible();
+});
+
+test('transform detail shows an inventory summary while live detail is still loading', async ({ page }) => {
+  await mockConnector(page, createConnectorState(), { transformDetailDelayMs: 2500 });
+  await page.goto('/');
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Data Transform Explorer' }).click();
+  const rows = page.getByRole('table', { name: 'Data Transform Explorer results' });
+  await rows.getByRole('button', { name: 'Details', exact: true }).first().click();
+
+  const drawer = page.getByRole('dialog', { name: 'Normalize Contacts' });
+  await expect(drawer.getByText('Loading live detail and run history…')).toBeVisible();
+  await expect(drawer.getByText('Loading schedule from this org…')).toBeVisible();
+  await expect(drawer.getByText('Normalize Contacts', { exact: true }).first()).toBeVisible();
+
+  await drawer.getByRole('tab', { name: 'Flow & Lineage' }).click();
+  await expect(drawer.getByText('Loading live lineage…')).toBeVisible();
+  await drawer.getByRole('tab', { name: 'Definition', exact: true }).click();
+  await expect(drawer.getByText('Loading live definition…')).toBeVisible();
+  await expect(drawer.getByText(/No transform definition was returned/)).toHaveCount(0);
+  await expect(drawer.getByRole('button', { name: 'Copy metadata JSON' })).toHaveCount(0);
+  await drawer.getByRole('tab', { name: 'Run History', exact: true }).click();
+  await expect(drawer.getByText('Loading run history from this org…')).toBeVisible();
+
+  await expect(drawer.getByText('Loading live detail and run history…')).toHaveCount(0, { timeout: 10_000 });
+  await expect(drawer.getByRole('tab', { name: 'Run History (2)' })).toBeVisible();
 });
 
 test('ERD Explorer shows the richer demo model and filters grounded edges', async ({ page }) => {
