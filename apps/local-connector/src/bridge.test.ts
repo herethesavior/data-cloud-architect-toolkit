@@ -13,6 +13,8 @@ import {
   dataSpacesJson,
   dataStreamsJson,
   dataTransformsJson,
+  demoInventory,
+  demoOrgs,
   dlosJson,
   dmosJson,
   mappingsJson,
@@ -33,6 +35,7 @@ import {
 import { loadConfig } from './config.ts';
 import { startDiscoverySession } from './discovery-sessions.ts';
 import { loadApiVersionSelection } from './api-compatibility-store.ts';
+import { resolveInventory } from './routes/orgs.ts';
 import { createAppState, type AppState, type DiscoverySessionRecord } from './state.ts';
 
 const restBodies: Record<string, string> = { '/services/data/': versionsJson };
@@ -168,11 +171,28 @@ describe('executeRelayOperation', () => {
       operation: 'transform.get',
       alias: 'demo-uat',
       id: 'Account_Transform',
+      apiVersion: '65.0',
     });
     expect(bundle.sections).toEqual({ detail: 'available', runHistory: 'available', schedule: 'available' });
+    expect(bundle.transform?.provenance.apiVersion).toBe('65.0');
 
     await expect(operation<{ mode: string }>(state, { operation: 'mode.set', mode: 'demo' })).resolves.toEqual({ mode: 'demo' });
     expect(state.mode).toBe('demo');
+  });
+
+  it('does not serve a partial progressive snapshot as a complete inventory', async () => {
+    const state = createState();
+    const partial = {
+      ...structuredClone(demoInventory),
+      progress: { ...structuredClone(demoInventory.progress!), state: 'running' as const },
+    };
+    state.inventoryCache = { at: Date.now(), alias: 'demo-uat', inventory: partial, partial: true };
+
+    const inventory = await resolveInventory(state, demoOrgs[0]!);
+
+    expect(inventory).not.toBe(partial);
+    expect(inventory.progress?.state).not.toBe('running');
+    expect(inventory.apiVersion).toBe('67.0');
   });
 
   it('drops org-scoped caches and sessions when an alias is reconnected', async () => {

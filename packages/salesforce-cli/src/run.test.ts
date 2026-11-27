@@ -165,6 +165,21 @@ describe('NodeProcessRunner queue', () => {
     await expect(second).resolves.toMatchObject({ exitCode: 0 });
   });
 
+  it('decodes multibyte output split across stream chunks', async () => {
+    const children: FakeChild[] = [];
+    const runner = new NodeProcessRunner('sf', childSpawner(children), localResolver);
+    const pending = runner.run(['unicode']);
+    await tick();
+
+    const child = children[0]!;
+    child.stdout.write(Buffer.from([0xe2]));
+    await tick();
+    child.stdout.write(Buffer.from([0x82, 0xac]));
+    child.emit('close', 0);
+
+    await expect(pending).resolves.toMatchObject({ stdout: '€', stderr: '' });
+  });
+
   it('unwedges the queue when a killed CLI never emits close', async () => {
     const children: FakeChild[] = [];
     const spawner = (() => {

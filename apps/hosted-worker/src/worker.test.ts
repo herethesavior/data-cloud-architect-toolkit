@@ -740,10 +740,18 @@ describe('hosted bridge relay', () => {
     }, env);
     expect(invalid.status).toBe(400);
 
+    const badVersion = await app.request('/api/relay/requests', {
+      method: 'POST',
+      headers: { ...session.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ operation: 'transform.get', alias: 'demo-uat', id: 'Team~Transform', apiVersion: '../68.0' }),
+    }, env);
+    expect(badVersion.status).toBe(400);
+
     const valid = await postJson<{ id: string }>('/api/relay/requests', {
       operation: 'transform.get',
       alias: 'demo-uat',
       id: 'Team~Transform',
+      apiVersion: '68.0',
     }, session.headers, env);
     expect(valid.id).toMatch(/\S/);
   });

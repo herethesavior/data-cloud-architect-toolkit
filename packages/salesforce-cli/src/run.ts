@@ -191,6 +191,8 @@ export class NodeProcessRunner implements ProcessRunner {
         return;
       }
 
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
       let stdout = '';
       let stderr = '';
       let totalBytes = 0;
@@ -224,6 +226,8 @@ export class NodeProcessRunner implements ProcessRunner {
         clearTimeout(timer);
         if (forceTimer) clearTimeout(forceTimer);
         options.signal?.removeEventListener('abort', onAbort);
+        stdout = Buffer.concat(stdoutChunks).toString('utf8');
+        stderr = Buffer.concat(stderrChunks).toString('utf8');
         complete();
       };
 
@@ -253,8 +257,9 @@ export class NodeProcessRunner implements ProcessRunner {
             killAndForceSettle('limit');
             return;
           }
-          if (kind === 'stdout') stdout += chunk.toString('utf8');
-          else stderr += chunk.toString('utf8');
+          // Decode once after close: a stream chunk can split a UTF-8 code point.
+          if (kind === 'stdout') stdoutChunks.push(chunk);
+          else stderrChunks.push(chunk);
         });
       };
 

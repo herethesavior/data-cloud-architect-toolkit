@@ -3,6 +3,7 @@ import { relayOperationSchema } from '@dcat/core';
 import { fetchTransformBundle, validateTransformId } from '@dcat/data360-api';
 import { CliError, safeErrorMessage, validateAlias } from '@dcat/salesforce-cli';
 import { clearDiscoverySessions, getDiscoverySession, startDiscoverySession } from './discovery-sessions.ts';
+import { resolveTransformContext } from './transform-context.ts';
 import { refreshCliStatus, setApiVersionSelection } from './state.ts';
 import type { AppState } from './state.ts';
 import { invalidateOrgState, resolveInventory, resolveOrgs } from './routes/orgs.ts';
@@ -175,12 +176,17 @@ export async function executeRelayOperation(
       const alias = validateAlias(task.alias);
       const id = validateTransformId(task.id);
       const org = await findOrg(state, alias);
-      const inventory = await resolveInventory(state, org);
-      const seed = inventory.dataTransforms.find((transform) => transform.apiName === id || transform.id === id) ?? null;
-      if (!inventory.apiVersion) {
+      const context = await resolveTransformContext(state, org, id, task.apiVersion);
+      if (!context.apiVersion) {
         throw new CliError('UNEXPECTED_RESPONSE', 'No API version is available for this org.');
       }
-      return fetchTransformBundle({ client: state.cli, alias, apiVersion: inventory.apiVersion, id, seed });
+      return fetchTransformBundle({
+        client: state.cli,
+        alias,
+        apiVersion: context.apiVersion,
+        id,
+        seed: context.seed,
+      });
     }
     case 'mode.set':
       state.mode = task.mode;

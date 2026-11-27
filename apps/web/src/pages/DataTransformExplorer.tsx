@@ -139,7 +139,8 @@ interface TransformDetailProps {
 
 function TransformDetail({ context, transform, inventory, onClose }: TransformDetailProps) {
   const id = transformId(transform);
-  const bundleQuery = useTransformBundle(context, id);
+  const bundleQuery = useTransformBundle(context, id, transform, inventory.apiVersion);
+  const preview = bundleQuery.isPlaceholderData;
   const bundle = bundleQuery.data;
   const bundleError = bundleQuery.isError ? describeError(bundleQuery.error, 'transform') : null;
   const detail = bundle?.transform ?? transform;
@@ -202,7 +203,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
               <div className="flex justify-between gap-3"><dt>Next run</dt><dd>{safeDateText(schedule?.nextRunAt)}</dd></div>
               <div className="flex justify-between gap-3"><dt>Last run</dt><dd>{safeDateText(schedule?.lastRunAt)}</dd></div>
             </dl>
-            {sections.schedule === 'unsupported' || sections.schedule === 'forbidden' || sections.schedule === 'error' ? (
+            {!preview && (sections.schedule === 'unsupported' || sections.schedule === 'forbidden' || sections.schedule === 'error') ? (
               <p className="mt-3 text-xs text-ink-soft">
                 <strong>Schedule endpoint:</strong> {sanitizeDetail(messages.schedule, 'No schedule detail was returned.')}
               </p>
@@ -283,8 +284,10 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
     },
     {
       id: 'runs',
-      label: `Run History (${runs.length})`,
-      content: sections.runHistory === 'available' || sections.runHistory === 'partial' ? (
+      label: preview ? 'Run History' : `Run History (${runs.length})`,
+      content: preview ? (
+        <p className="text-sm text-ink-soft">Loading run history from this org…</p>
+      ) : sections.runHistory === 'available' || sections.runHistory === 'partial' ? (
         <div className="overflow-x-auto rounded-lg border border-line">
           <DataTable
             columns={runColumns()}
@@ -330,7 +333,13 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
       }
       onClose={onClose}
     >
-      {bundleQuery.isPending ? <LoadingState label="Loading transform detail..." /> : null}
+      {preview ? (
+        <p role="status" className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
+          <span className="skeleton h-2.5 w-2.5 rounded-full" aria-hidden="true" />
+          Refreshing live detail and run history…
+        </p>
+      ) : null}
+      {bundleQuery.isPending && !preview ? <LoadingState label="Loading transform detail..." /> : null}
       {bundleError ? (
         <ErrorState
           title="Couldn't load transform detail"
@@ -339,7 +348,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
           onRetry={() => void bundleQuery.refetch()}
         />
       ) : null}
-      {bundleQuery.isSuccess ? <Tabs items={tabs} label="Data transform detail sections" /> : null}
+      {!bundleError && bundle ? <Tabs items={tabs} label="Data transform detail sections" /> : null}
     </DetailDrawer>
   );
 }

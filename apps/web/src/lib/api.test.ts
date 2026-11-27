@@ -41,11 +41,14 @@ describe('web API session handling', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ transform: null }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await api.transformBundle('prod org', 'Transform/One', { signal: new AbortController().signal });
+    await api.transformBundle('prod org', 'Transform/One', {
+      signal: new AbortController().signal,
+      apiVersion: '68.0',
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [path, options] = fetchMock.mock.calls[0]! as [string, RequestInit];
-    expect(path).toBe('/api/orgs/prod%20org/data-transforms/Transform%2FOne');
+    expect(path).toBe('/api/orgs/prod%20org/data-transforms/Transform%2FOne?apiVersion=68.0');
     expect(options.method ?? 'GET').toBe('GET');
     expect((options.headers as Record<string, string>)['x-dcat-token']).toBeUndefined();
   });

@@ -441,6 +441,43 @@ describe('local connector API', () => {
     await app.close();
   });
 
+  it('uses a browser-resolved API version without resolving a full inventory first', async () => {
+    const config = testConfig('live');
+    const runner = liveCliRunner();
+    const app = await buildApp({ config, runner });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/orgs/demo-uat/data-transforms/Account_Transform?apiVersion=65.0',
+      headers: localHeaders,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().transform.provenance).toMatchObject({ apiVersion: '65.0' });
+
+    const restPaths = vi.mocked(runner.run).mock.calls
+      .map(([args]) => args[3])
+      .filter((path): path is string => Boolean(path?.startsWith('/services/data/')));
+    expect(restPaths.every((path) => path.includes('/data-transforms/'))).toBe(true);
+    expect(restPaths.some((path) => path.includes('/data-spaces'))).toBe(false);
+    await app.close();
+  });
+
+  it('rejects an invalid transform API version hint before making CLI requests', async () => {
+    const config = testConfig('live');
+    const runner = liveCliRunner();
+    const app = await buildApp({ config, runner });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/orgs/demo-uat/data-transforms/Account_Transform?apiVersion=not-a-version',
+      headers: localHeaders,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('INVALID_ARGUMENT');
+    expect(vi.mocked(runner.run).mock.calls.some(([args]) => args[0] === 'api')).toBe(false);
+    await app.close();
+  });
+
   it('validates alias and transform id before doing any work', async () => {
     const app = await demoApp();
     const badAlias = await app.inject({

@@ -29,7 +29,8 @@ export interface AppState {
   cliStatus: CliStatus;
   compatibility: ApiVersionStatus;
   orgsCache: { at: number; orgs: OrgSummary[] } | null;
-  inventoryCache: { at: number; alias: string; inventory: InventorySnapshot } | null;
+  /** A progressive run may publish partial pages; those are not a full inventory. */
+  inventoryCache: { at: number; alias: string; inventory: InventorySnapshot; partial?: boolean } | null;
   discoverySessions: Map<string, DiscoverySessionRecord>;
   discoveryByAlias: Map<string, string>;
 }

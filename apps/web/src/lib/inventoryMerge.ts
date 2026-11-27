@@ -1,8 +1,10 @@
 import {
+  type ApiCapability,
   type DiscoveryProgress,
   type FamilyProgress,
   type InventorySnapshot,
   type ResourceFamily,
+  type RetrievalStatus,
   type RetrievalWarning,
   ITEM_DETAILS_OMITTED_WARNING,
   MORE_ITEMS_AVAILABLE_WARNING,
@@ -137,6 +139,7 @@ function isAuthoritative(
 function unionRows<T>(family: MergeFamily, previous: readonly T[], incoming: readonly T[], preserveRich: boolean): T[] {
   const merged = [...previous];
   const indexByKey = new Map<string, number>();
+  let changed = false;
   for (let index = 0; index < merged.length; index += 1) {
     const key = rowKey(family, merged[index]);
     if (!indexByKey.has(key)) indexByKey.set(key, index);
@@ -147,12 +150,18 @@ function unionRows<T>(family: MergeFamily, previous: readonly T[], incoming: rea
     if (index === undefined) {
       indexByKey.set(key, merged.length);
       merged.push(row);
+      changed = true;
     } else if (fingerprint(merged[index]!) !== fingerprint(row)) {
       // A compacted chunk must never erase details already loaded for the same row.
-      if (!preserveRich) merged[index] = row;
+      if (!preserveRich) {
+        merged[index] = row;
+        changed = true;
+      }
     }
   }
-  return merged;
+  // Polling re-parses every row, so an unchanged page would otherwise allocate
+  // a new array and invalidate every downstream memo on each progressive poll.
+  return changed ? merged : previous as T[];
 }
 
 function mergeRows<T>(
@@ -178,24 +187,58 @@ function mergeRows<T>(
 }
 
 /**
+ * A family can report "not started" in a new snapshot while the browser still
+ * shows rows from an earlier pass. Reconcile the health metadata with the rows
+ * that are actually visible so a populated family never looks unrequested.
+ */
+function reconcileCapabilities(
+  previous: InventorySnapshot,
+  incoming: InventorySnapshot,
+  visibleCounts: ReadonlyMap<ResourceFamily, number>,
+): ApiCapability[] {
+  return incoming.capabilities.map((capability) => {
+    if (capability.family === 'api-versions') return capability;
+    const visible = visibleCounts.get(capability.family) ?? 0;
+    if (visible === 0) return capability;
+    if (capability.status !== 'not-started' && (capability.itemCount ?? 0) >= visible) return capability;
+
+    const previousCapability = previous.capabilities.find((entry) => entry.family === capability.family);
+    const progressState = familyProgress(incoming.progress, capability.family)?.status;
+    const status: RetrievalStatus = capability.status === 'not-started'
+      ? previousCapability && previousCapability.status !== 'not-started'
+        ? previousCapability.status
+        : progressState === 'complete' ? 'available' : 'partial'
+      : capability.status;
+    const message = capability.status === 'not-started'
+      ? `Showing ${visible} item(s) loaded earlier; this family was not requested in the latest update.`
+      : `${capability.message ?? ''} Showing ${visible} item(s) retained from earlier pages.`.trim();
+    return { ...capability, status, itemCount: visible, message };
+  });
+}
+
+/**
  * Keep everything the user can see while a new discovery runs, reconcile rows
  * by identity as each page arrives, and only trust a clean terminal pass to
- * remove rows. Metadata always comes from the newest snapshot.
+ * remove rows. Metadata always comes from the newest snapshot, except where the
+ * newest capability would contradict rows the browser is still displaying.
  */
 export function mergeInventorySnapshot(previous: InventorySnapshot | undefined, incoming: InventorySnapshot): InventorySnapshot {
   if (!previous) return incoming;
   const warnings = incoming.warnings ?? [];
   const merged: Record<string, unknown> = { ...incoming };
+  const visibleCounts = new Map<ResourceFamily, number>();
 
   for (const family of Object.keys(FAMILY_FIELDS) as ResourceFamily[]) {
     const field = FAMILY_FIELDS[family];
-    merged[field] = mergeRows(
+    const rows = mergeRows(
       family,
       previous[field] as readonly unknown[],
       incoming[field] as readonly unknown[],
       incoming.progress,
       warnings,
     );
+    merged[field] = rows;
+    visibleCounts.set(family, rows.length);
   }
   merged.relationships = mergeRows(
     'relationships',
@@ -204,5 +247,6 @@ export function mergeInventorySnapshot(previous: InventorySnapshot | undefined, 
     incoming.progress,
     warnings,
   );
+  merged.capabilities = reconcileCapabilities(previous, incoming, visibleCounts);
   return merged as unknown as InventorySnapshot;
 }

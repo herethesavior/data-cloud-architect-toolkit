@@ -17,6 +17,7 @@ export const RELAY_OPERATIONS = [
 ] as const;
 
 const aliasSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/);
+const apiVersionSchema = z.string().regex(/^\d{2,3}\.\d{1,2}$/);
 
 export const refreshFamiliesSchema = z.array(z.enum(RESOURCE_FAMILIES)).min(1);
 
@@ -72,6 +73,9 @@ export const relayOperationSchema = z.discriminatedUnion('operation', [
     operation: z.literal('transform.get'),
     alias: aliasSchema,
     id: z.string().refine(isValidTransformId, 'Invalid transform id.'),
+    // The browser already resolved this version while loading inventory. The
+    // bridge still validates it before it becomes a REST path segment.
+    apiVersion: apiVersionSchema.optional(),
   }),
   z.object({
     operation: z.literal('mode.set'),

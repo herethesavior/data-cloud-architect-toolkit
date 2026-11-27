@@ -158,7 +158,12 @@ function publish(
   if (!isCurrent(state, record)) return;
   record.latest = progressiveSnapshot(current);
   record.updatedAt = Date.now();
-  state.inventoryCache = { at: Date.now(), alias: record.alias, inventory: record.latest };
+  state.inventoryCache = {
+    at: Date.now(),
+    alias: record.alias,
+    inventory: record.latest,
+    partial: record.latest.progress?.state !== 'complete',
+  };
 }
 
 async function runSession(state: AppState, record: DiscoverySessionRecord): Promise<void> {
