@@ -4,7 +4,8 @@ import { createUnsupportedTransformBundle, fetchTransformBundle, validateTransfo
 import { validateAlias } from '@dcat/salesforce-cli';
 import { demoTransformBundles } from '@dcat/test-fixtures';
 import type { AppState } from '../state.ts';
-import { resolveInventory, resolveOrgs } from './orgs.ts';
+import { validateApiVersionHint, resolveTransformContext } from '../transform-context.ts';
+import { resolveOrgs } from './orgs.ts';
 import { sendRouteError } from './shared.ts';
 
 export function registerTransformRoutes(app: FastifyInstance, state: AppState): void {
@@ -30,16 +31,23 @@ export function registerTransformRoutes(app: FastifyInstance, state: AppState): 
         return reply.code(404).send({ error: { code: 'ORG_NOT_FOUND', message: 'Org alias is not authenticated.' } });
       }
 
-      const inventory = await resolveInventory(state, org);
-      const seed = inventory.dataTransforms.find((transform) => transform.apiName === id || transform.id === id) ?? null;
-      if (!inventory.apiVersion) {
+      const query = request.query as { apiVersion?: unknown };
+      const apiVersion = validateApiVersionHint(query.apiVersion);
+      const context = await resolveTransformContext(state, org, id, apiVersion);
+      if (!context.apiVersion) {
         return createUnsupportedTransformBundle(
-          seed,
+          context.seed,
           'No API version is available for this org, so transform detail endpoints were not requested.',
         );
       }
 
-      return await fetchTransformBundle({ client: state.cli, alias, apiVersion: inventory.apiVersion, id, seed });
+      return await fetchTransformBundle({
+        client: state.cli,
+        alias,
+        apiVersion: context.apiVersion,
+        id,
+        seed: context.seed,
+      });
     } catch (error) {
       return sendRouteError(reply, error);
     }

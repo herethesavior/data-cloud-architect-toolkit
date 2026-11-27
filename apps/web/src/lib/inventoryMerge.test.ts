@@ -17,6 +17,15 @@ type RowOverrides = Partial<Pick<
   'dataSpaces' | 'dlos' | 'dmos' | 'mappings' | 'dataStreams' | 'dataTransforms' | 'relationships'
 >>;
 
+const FAMILY_FIELDS = {
+  'data-spaces': 'dataSpaces',
+  dlos: 'dlos',
+  dmos: 'dmos',
+  mappings: 'mappings',
+  'data-streams': 'dataStreams',
+  'data-transforms': 'dataTransforms',
+} as const satisfies Record<ResourceFamily, keyof InventorySnapshot>;
+
 function progress(state: DiscoveryProgress['state'], overrides: FamilyOverrides = {}): DiscoveryProgress {
   const families = RESOURCE_FAMILIES.map((family) => ({
     family,
@@ -130,6 +139,19 @@ describe('mergeInventorySnapshot', () => {
     for (const index of [0, 1, 2, 3, 5, 6, 7, 8, 9]) {
       expect(merged.dlos[index]).toBe(previous.dlos[index]);
     }
+  });
+
+  it('keeps the previous array when a re-parsed page contains no changes', () => {
+    const previous = snapshot({}, progress('running', {
+      dlos: { status: 'partial', loaded: 3, pagesFetched: 1, hasMore: true },
+    }));
+    previous.dlos = manyDlos(3);
+    const incoming = snapshot(
+      { dlos: structuredClone(previous.dlos) },
+      progress('running', { dlos: { status: 'partial', loaded: 3, pagesFetched: 1, hasMore: true } }),
+    );
+
+    expect(mergeInventorySnapshot(previous, incoming).dlos).toBe(previous.dlos);
   });
 
   it('keeps a thousand rows visible while merging a new page', () => {
@@ -311,5 +333,102 @@ describe('mergeInventorySnapshot', () => {
 
     const final = mergeInventorySnapshot(partial, second);
     expect(final.dlos.map((row) => row.apiName)).toEqual(all.map((row) => row.apiName));
+  });
+
+  it('does not report retained mappings as Not Started', () => {
+    const previous = snapshot({ mappings: structuredClone(demoInventory.mappings) });
+    const incoming = snapshot({ mappings: [] }, progress('running', {
+      mappings: { status: 'not-started', loaded: 0 },
+    }));
+    incoming.capabilities = incoming.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'not-started' as const, itemCount: 0, message: 'Not started.' }
+      : capability);
+
+    const merged = mergeInventorySnapshot(previous, incoming);
+    const capability = merged.capabilities.find((entry) => entry.family === 'mappings')!;
+
+    expect(merged.mappings).toHaveLength(demoInventory.mappings.length);
+    expect(capability).toMatchObject({ status: 'available', itemCount: demoInventory.mappings.length });
+    expect(capability.message).toMatch(/loaded earlier/i);
+  });
+
+  it('does not call retained rows complete when a gap prevents authoritative reconciliation', () => {
+    const previous = snapshot({ mappings: structuredClone(demoInventory.mappings) });
+    previous.capabilities = previous.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'not-started' as const, itemCount: 0, message: 'Not started.' }
+      : capability);
+    const incoming = snapshot(
+      { mappings: [] },
+      progress('complete', { mappings: { status: 'complete', loaded: 0, pagesFetched: 1 } }),
+      [{ family: 'mappings', code: 'OUTPUT_LIMIT', message: 'gap', severity: 'error' }],
+    );
+    incoming.capabilities = incoming.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'not-started' as const, itemCount: 0, message: 'Not started.' }
+      : capability);
+
+    const merged = mergeInventorySnapshot(previous, incoming);
+    const capability = merged.capabilities.find((entry) => entry.family === 'mappings')!;
+
+    expect(merged.mappings).toHaveLength(demoInventory.mappings.length);
+    expect(capability.status).toBe('partial');
+    expect(capability.itemCount).toBe(demoInventory.mappings.length);
+  });
+
+  it('does not turn a skipped family into a fresh access-denied failure', () => {
+    const previous = snapshot({ mappings: structuredClone(demoInventory.mappings) });
+    previous.capabilities = previous.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'forbidden' as const, message: 'Access denied.' }
+      : capability);
+    const incoming = snapshot({ mappings: [] }, progress('running', {
+      mappings: { status: 'not-started', loaded: 0 },
+    }));
+    incoming.capabilities = incoming.capabilities.map((capability) => capability.family === 'mappings'
+      ? { ...capability, status: 'not-started' as const, itemCount: 0, message: 'Not started.' }
+      : capability);
+
+    const capability = mergeInventorySnapshot(previous, incoming).capabilities
+      .find((entry) => entry.family === 'mappings')!;
+
+    expect(capability.status).toBe('partial');
+    expect(capability.itemCount).toBe(demoInventory.mappings.length);
+    expect(capability.message).toMatch(/not requested in the latest update/i);
+    expect(capability.message).toMatch(/last known status: forbidden/i);
+  });
+
+  it('reconciles the same mismatch for every retained resource family', () => {
+    for (const family of RESOURCE_FAMILIES) {
+      const field = FAMILY_FIELDS[family] as keyof InventorySnapshot;
+      const previous = snapshot();
+      const originalRows = demoInventory[field] as readonly unknown[];
+      (previous as Record<string, unknown>)[field] = structuredClone(originalRows);
+      const incoming = snapshot();
+      incoming.capabilities = incoming.capabilities.map((capability) => capability.family === family
+        ? { ...capability, status: 'not-started' as const, itemCount: 0, message: 'Not started.' }
+        : capability);
+
+      const merged = mergeInventorySnapshot(previous, incoming);
+      const capability = merged.capabilities.find((entry) => entry.family === family)!;
+      expect(capability.status).not.toBe('not-started');
+      expect(capability.itemCount).toBe(originalRows.length);
+    }
+  });
+
+  it('reports the visible count when a gap keeps older rows but the capability under-reports them', () => {
+    const previous = snapshot({ dataTransforms: structuredClone(demoInventory.dataTransforms) });
+    const incoming = snapshot(
+      { dataTransforms: [] },
+      progress('complete', { 'data-transforms': { status: 'complete', loaded: 0, pagesFetched: 1 } }),
+      [{ family: 'data-transforms', code: 'OUTPUT_LIMIT', message: 'gap', severity: 'error' }],
+    );
+    incoming.capabilities = incoming.capabilities.map((capability) => capability.family === 'data-transforms'
+      ? { ...capability, status: 'error' as const, itemCount: 0, message: 'Retrieval failed.' }
+      : capability);
+
+    const merged = mergeInventorySnapshot(previous, incoming);
+    const capability = merged.capabilities.find((entry) => entry.family === 'data-transforms')!;
+
+    expect(merged.dataTransforms).toHaveLength(demoInventory.dataTransforms.length);
+    expect(capability).toMatchObject({ status: 'error', itemCount: demoInventory.dataTransforms.length });
+    expect(capability.message).toMatch(/in the current view/i);
   });
 });

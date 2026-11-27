@@ -578,12 +578,21 @@ export const api = {
     const snapshot = await run(0, requestOptions);
     return scopeFamilies ? scopeInventorySnapshot(snapshot, scopeFamilies) : snapshot;
   },
-  transformBundle: async (alias: string, id: string, options: { signal?: AbortSignal } = {}): Promise<TransformBundle> => {
+  transformBundle: async (
+    alias: string,
+    id: string,
+    options: { signal?: AbortSignal; apiVersion?: string | null } = {},
+  ): Promise<TransformBundle> => {
+    const apiVersion = options.apiVersion?.trim() || undefined;
     if (isHosted() && !await hostedUsesFixtures()) {
-      return relayCall<TransformBundle>({ operation: 'transform.get', alias, id }, options.signal);
+      return relayCall<TransformBundle>(
+        { operation: 'transform.get', alias, id, ...(apiVersion ? { apiVersion } : {}) },
+        options.signal,
+      );
     }
+    const query = apiVersion ? `?apiVersion=${encodeURIComponent(apiVersion)}` : '';
     return request<TransformBundle>(
-      `/api/orgs/${encodeURIComponent(alias)}/data-transforms/${encodeURIComponent(id)}`,
+      `/api/orgs/${encodeURIComponent(alias)}/data-transforms/${encodeURIComponent(id)}${query}`,
       { signal: options.signal, timeoutMs: RELAY_OPERATION_TIMEOUT_MS['transform.get'] },
     );
   },

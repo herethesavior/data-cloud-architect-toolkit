@@ -139,7 +139,8 @@ interface TransformDetailProps {
 
 function TransformDetail({ context, transform, inventory, onClose }: TransformDetailProps) {
   const id = transformId(transform);
-  const bundleQuery = useTransformBundle(context, id);
+  const bundleQuery = useTransformBundle(context, id, transform, inventory.apiVersion);
+  const preview = bundleQuery.isPlaceholderData;
   const bundle = bundleQuery.data;
   const bundleError = bundleQuery.isError ? describeError(bundleQuery.error, 'transform') : null;
   const detail = bundle?.transform ?? transform;
@@ -179,7 +180,10 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
             <OverviewField label="Type" value={shown(detail.type, 'Not provided')} />
             <OverviewField label="Transform ID" value={shown(detail.id ?? null, 'Not provided')} mono />
             <OverviewField label="Data space" value={shown(detail.dataSpace, 'Not provided')} />
-            <OverviewField label="Schedule / cadence" value={shown(schedule?.cadence ?? detail.schedule, 'No schedule data returned')} />
+            <OverviewField
+              label="Schedule / cadence"
+              value={shown(schedule?.cadence ?? detail.schedule, preview ? 'Loading from live detail…' : 'No schedule data returned')}
+            />
             <OverviewField label="Owner" value={shown(detail.owner, 'Not provided')} />
             <OverviewField label="Created" value={safeDateText(detail.createdAt)} />
             <OverviewField label="Modified" value={safeDateText(detail.modifiedAt)} />
@@ -196,13 +200,17 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
               <p className="text-sm font-semibold text-ink">Schedule</p>
               <Badge tone="neutral">Read-only</Badge>
             </div>
-            <dl className="mt-3 grid gap-2 text-xs text-ink-soft sm:grid-cols-2">
-              <div className="flex justify-between gap-3"><dt>Enabled</dt><dd>{schedule?.enabled === true ? 'Yes' : schedule?.enabled === false ? 'No' : 'Not provided'}</dd></div>
-              <div className="flex justify-between gap-3"><dt>Timezone</dt><dd>{shown(schedule?.timezone)}</dd></div>
-              <div className="flex justify-between gap-3"><dt>Next run</dt><dd>{safeDateText(schedule?.nextRunAt)}</dd></div>
-              <div className="flex justify-between gap-3"><dt>Last run</dt><dd>{safeDateText(schedule?.lastRunAt)}</dd></div>
-            </dl>
-            {sections.schedule === 'unsupported' || sections.schedule === 'forbidden' || sections.schedule === 'error' ? (
+            {preview ? (
+              <p className="mt-3 text-xs text-ink-soft">Loading schedule from this org…</p>
+            ) : (
+              <dl className="mt-3 grid gap-2 text-xs text-ink-soft sm:grid-cols-2">
+                <div className="flex justify-between gap-3"><dt>Enabled</dt><dd>{schedule?.enabled === true ? 'Yes' : schedule?.enabled === false ? 'No' : 'Not provided'}</dd></div>
+                <div className="flex justify-between gap-3"><dt>Timezone</dt><dd>{shown(schedule?.timezone)}</dd></div>
+                <div className="flex justify-between gap-3"><dt>Next run</dt><dd>{safeDateText(schedule?.nextRunAt)}</dd></div>
+                <div className="flex justify-between gap-3"><dt>Last run</dt><dd>{safeDateText(schedule?.lastRunAt)}</dd></div>
+              </dl>
+            )}
+            {!preview && (sections.schedule === 'unsupported' || sections.schedule === 'forbidden' || sections.schedule === 'error') ? (
               <p className="mt-3 text-xs text-ink-soft">
                 <strong>Schedule endpoint:</strong> {sanitizeDetail(messages.schedule, 'No schedule detail was returned.')}
               </p>
@@ -211,12 +219,16 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
 
           <div className="rounded-lg border border-line p-4">
             <p className="label-xs">Provenance</p>
-            <dl className="mt-2 grid gap-1.5 text-xs text-ink-soft">
-              <div className="flex justify-between gap-3"><dt>Endpoint</dt><dd className="mono truncate">{detail.provenance.sourceEndpoint}</dd></div>
-              <div className="flex justify-between gap-3"><dt>API version</dt><dd>{detail.provenance.apiVersion}</dd></div>
-              <div className="flex justify-between gap-3"><dt>Confidence</dt><dd>{detail.provenance.confidence}</dd></div>
-              <div className="flex justify-between gap-3"><dt>Retrieved</dt><dd>{safeDateText(detail.provenance.retrievedAt)}</dd></div>
-            </dl>
+            {preview ? (
+              <p className="mt-2 text-xs text-ink-soft">Loading live provenance…</p>
+            ) : (
+              <dl className="mt-2 grid gap-1.5 text-xs text-ink-soft">
+                <div className="flex justify-between gap-3"><dt>Endpoint</dt><dd className="mono truncate">{detail.provenance.sourceEndpoint}</dd></div>
+                <div className="flex justify-between gap-3"><dt>API version</dt><dd>{detail.provenance.apiVersion}</dd></div>
+                <div className="flex justify-between gap-3"><dt>Confidence</dt><dd>{detail.provenance.confidence}</dd></div>
+                <div className="flex justify-between gap-3"><dt>Retrieved</dt><dd>{safeDateText(detail.provenance.retrievedAt)}</dd></div>
+              </dl>
+            )}
           </div>
         </div>
       ),
@@ -224,7 +236,9 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
     {
       id: 'lineage',
       label: 'Flow & Lineage',
-      content: (
+      content: preview ? (
+        <p className="text-sm text-ink-soft">Loading live lineage…</p>
+      ) : (
         <div className="grid gap-5 md:grid-cols-2">
           <div>
             <p className="label-xs mb-2">Inputs</p>
@@ -251,7 +265,9 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
     {
       id: 'visual-definition',
       label: 'Visual Definition',
-      content: detail.visualDefinition ? (
+      content: preview ? (
+        <p className="text-sm text-ink-soft">Loading live visual definition…</p>
+      ) : detail.visualDefinition ? (
         <div className="space-y-3">
           <TransformDefinitionViewer definition={detail.visualDefinition} />
           {sections.detail === 'partial' ? (
@@ -267,7 +283,9 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
     {
       id: 'definition',
       label: 'Definition',
-      content: shown(detail.definition, '') ? (
+      content: preview ? (
+        <p className="text-sm text-ink-soft">Loading live definition…</p>
+      ) : shown(detail.definition, '') ? (
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="label-xs">Source definition (read-only)</p>
@@ -283,8 +301,10 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
     },
     {
       id: 'runs',
-      label: `Run History (${runs.length})`,
-      content: sections.runHistory === 'available' || sections.runHistory === 'partial' ? (
+      label: preview ? 'Run History' : `Run History (${runs.length})`,
+      content: preview ? (
+        <p className="text-sm text-ink-soft">Loading run history from this org…</p>
+      ) : sections.runHistory === 'available' || sections.runHistory === 'partial' ? (
         <div className="overflow-x-auto rounded-lg border border-line">
           <DataTable
             columns={runColumns()}
@@ -306,7 +326,9 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
     {
       id: 'raw',
       label: 'Raw Metadata',
-      content: (
+      content: preview ? (
+        <p className="text-sm text-ink-soft">Loading live metadata…</p>
+      ) : (
         <pre className="overflow-x-auto rounded-lg border border-line bg-surface-alt p-3 text-xs text-ink-soft">
           {JSON.stringify(rawMetadata, null, 2)}
         </pre>
@@ -325,12 +347,18 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
           <Badge tone="neutral">Read-only</Badge>
           <CopyButton value={detail.apiName} label="Copy API name" />
           {detail.id ? <CopyButton value={detail.id} label="Copy transform ID" icon="info" /> : null}
-          <CopyButton value={JSON.stringify(rawMetadata, null, 2)} label="Copy metadata JSON" icon="book" />
+          {!preview ? <CopyButton value={JSON.stringify(rawMetadata, null, 2)} label="Copy metadata JSON" icon="book" /> : null}
         </>
       }
       onClose={onClose}
     >
-      {bundleQuery.isPending ? <LoadingState label="Loading transform detail..." /> : null}
+      {preview ? (
+        <p role="status" className="mb-3 flex items-center gap-2 rounded-lg border border-line bg-surface-alt px-3 py-2 text-xs text-ink-soft">
+          <span className="skeleton h-2.5 w-2.5 rounded-full" aria-hidden="true" />
+          Loading live detail and run history…
+        </p>
+      ) : null}
+      {bundleQuery.isPending && !preview ? <LoadingState label="Loading transform detail..." /> : null}
       {bundleError ? (
         <ErrorState
           title="Couldn't load transform detail"
@@ -339,7 +367,7 @@ function TransformDetail({ context, transform, inventory, onClose }: TransformDe
           onRetry={() => void bundleQuery.refetch()}
         />
       ) : null}
-      {bundleQuery.isSuccess ? <Tabs items={tabs} label="Data transform detail sections" /> : null}
+      {!bundleError && bundle ? <Tabs items={tabs} label="Data transform detail sections" /> : null}
     </DetailDrawer>
   );
 }

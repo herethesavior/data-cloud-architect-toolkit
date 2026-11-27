@@ -48,7 +48,8 @@ export async function resolveOrgs(state: AppState, force = false): Promise<OrgSu
 export async function resolveInventory(state: AppState, org: OrgSummary, force = false): Promise<InventorySnapshot> {
   if (state.mode === 'demo') return demoInventory;
   const cached = state.inventoryCache;
-  if (!force && cached && cached.alias === org.alias && Date.now() - cached.at < INVENTORY_CACHE_TTL_MS) {
+  if (!force && cached && !cached.partial && cached.alias === org.alias
+    && Date.now() - cached.at < INVENTORY_CACHE_TTL_MS) {
     return cached.inventory;
   }
   const inventory = await discoverInventory({
