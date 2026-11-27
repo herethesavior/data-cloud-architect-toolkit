@@ -145,6 +145,79 @@ describe('inventory relay chunks', () => {
       warning.code === ITEM_DETAILS_OMITTED_WARNING && warning.family === 'mappings'))).toBe(true);
   });
 
+  it('trims a single oversized row instead of making the whole inventory terminal', () => {
+    const inventory = inventoryWithRows(1);
+    inventory.dmos = [{
+      apiName: 'Huge_DMO__dlm',
+      label: `Huge ${'x'.repeat(20_000)}`,
+      fields: Array.from({ length: 400 }, (_, index) => ({
+        apiName: `Field_${index}`,
+        label: 'x'.repeat(200),
+        isPrimaryKey: false,
+        provenance: {
+          orgId: '00D',
+          orgAlias: 'test',
+          sourceEndpoint: '/ssot/dmos',
+          apiVersion: '67.0',
+          retrievedAt: '2026-01-01T00:00:00.000Z',
+          confidence: 'source' as const,
+        },
+      })),
+      provenance: {
+        orgId: '00D',
+        orgAlias: 'test',
+        sourceEndpoint: '/ssot/dmos',
+        apiVersion: '67.0',
+        retrievedAt: '2026-01-01T00:00:00.000Z',
+        confidence: 'source' as const,
+      },
+    }];
+
+    const maxBytes = 8_000;
+    const chunks = chunkInventorySnapshot(inventory, maxBytes);
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.dmos).toHaveLength(1);
+    expect(chunks[0]!.dmos[0]!.apiName).toBe('Huge_DMO__dlm');
+    expect(new TextEncoder().encode(JSON.stringify(chunks[0])).byteLength).toBeLessThanOrEqual(maxBytes);
+    expect(chunks[0]!.warnings.some((warning) =>
+      warning.code === ITEM_DETAILS_OMITTED_WARNING && warning.family === 'dmos')).toBe(true);
+  });
+
+  it('delivers a compacted single row through the relay chunk envelope', () => {
+    const inventory = inventoryWithRows(1);
+    inventory.dmos = [{
+      apiName: 'Huge_DMO__dlm',
+      label: 'x'.repeat(100_000),
+      fields: [],
+      provenance: inventory.dlos[0]!.provenance,
+    }];
+
+    const chunks = chunkRelayResult({ sessionId: 'session-1', snapshot: inventory }, 8_000);
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks![0]!.sessionId).toBe('session-1');
+    expect(chunks![0]!.snapshot.dmos[0]?.apiName).toBe('Huge_DMO__dlm');
+  });
+
+  it('fits a scalar-heavy row without losing its identity', () => {
+    const inventory = inventoryWithRows(1);
+    const wide = {
+      apiName: 'Wide_DMO__dlm',
+      fields: [],
+      provenance: inventory.dlos[0]!.provenance,
+      ...Object.fromEntries(Array.from({ length: 200 }, (_, index) => [`extra_${index}`, 'x'.repeat(500)])),
+    } as unknown as InventorySnapshot['dmos'][number];
+    inventory.dmos = [wide];
+
+    const maxBytes = 8_000;
+    const chunk = chunkInventorySnapshot(inventory, maxBytes)[0]!;
+
+    expect(new TextEncoder().encode(JSON.stringify(chunk)).byteLength).toBeLessThanOrEqual(maxBytes);
+    expect(chunk.dmos[0]!.apiName).toBe('Wide_DMO__dlm');
+    expect(chunk.warnings.some((warning) => warning.code === ITEM_DETAILS_OMITTED_WARNING)).toBe(true);
+  });
+
   it('bounds the number of polls for very large inventories', () => {
     const chunks = chunkInventorySnapshot(inventoryWithRows(MAX_CHUNK_COUNT * 8), 5 * 1024 * 1024);
 

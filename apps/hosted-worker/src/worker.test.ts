@@ -569,6 +569,90 @@ describe('hosted bridge relay', () => {
     expect(delivered).toBe(60);
   });
 
+  it('delivers a single oversized row instead of terminalizing the request', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const provenance = {
+      orgId: '00D',
+      orgAlias: 'test',
+      sourceEndpoint: '/ssot/dmos',
+      apiVersion: '67.0',
+      retrievedAt: '2026-01-01T00:00:00.000Z',
+      confidence: 'source',
+    };
+    const result = {
+      sessionId: 'session-1',
+      snapshot: {
+        org: {
+          alias: 'test',
+          username: null,
+          orgId: '00D',
+          instanceUrl: null,
+          loginUrl: null,
+          environment: 'unknown',
+          connectedStatus: null,
+          isDefault: true,
+          isDevHub: false,
+          source: 'salesforce-cli',
+        },
+        apiVersion: '67.0',
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        mode: 'live',
+        capabilities: [],
+        dataSpaces: [],
+        dlos: [],
+        dmos: [{
+          apiName: 'Huge_DMO__dlm',
+          label: 'x'.repeat(6 * 1024 * 1024),
+          fields: [],
+          provenance,
+        }],
+        mappings: [],
+        dataStreams: [],
+        dataTransforms: [],
+        relationships: [],
+        warnings: [],
+        progress: {
+          sessionId: 'session-1',
+          generation: 'generation-1',
+          state: 'complete',
+          loaded: 1,
+          total: 1,
+          families: [],
+          message: 'All discovered metadata is loaded.',
+        },
+      },
+    };
+    const responded = await app.request('/api/relay/respond', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentToken: paired.agentToken, response: { id: created.id, ok: true, result } }),
+    }, env);
+    expect(responded.status).toBe(200);
+
+    const first = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
+    expect(await first.json()).toMatchObject({
+      status: 'running',
+      result: { snapshot: { dmos: [{ apiName: 'Huge_DMO__dlm' }] } },
+    });
+    const acked = await app.request(`/api/relay/requests/${created.id}?ack=0`, { headers: session.headers }, env);
+    expect(await acked.json()).toMatchObject({
+      status: 'completed',
+      result: { snapshot: { dmos: [{ apiName: 'Huge_DMO__dlm' }] } },
+    });
+  });
+
   it('reports cancellation instead of delivering later chunks', async () => {
     const env = makeEnv();
     const session = await startSession(env);
@@ -1065,11 +1149,12 @@ describe('hosted bridge relay', () => {
     const env = makeEnv();
     const session = await startSession(env);
     const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
-    await postJson('/api/relay/pair', {
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
       code: pairing.code,
       version: '0.1.4',
       cli,
     }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
     stubNpmVersion('0.2.0');
 
     const response = await app.request('/api/relay/status', { headers: session.headers }, env);
@@ -1081,9 +1166,71 @@ describe('hosted bridge relay', () => {
       selfUpdateSupported: true,
     });
   });
+
+  it('keeps a live bridge connected when an explicit probe wakes its held poll', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    const heldPoll = postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, wait: true }, {}, env);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const probePromise = app.request('/api/relay/status?probe=1', { headers: session.headers }, env);
+    // The woken poll returns immediately; a real agent re-polls right away.
+    await heldPoll;
+    void postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, wait: true }, {}, env);
+    const body = await (await probePromise).json() as { relay: string; paired: boolean };
+
+    expect(body).toMatchObject({ paired: true, relay: 'connected' });
+  });
+
+  it('detects a stopped bridge on an explicit status refresh', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const before = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect((await before.json() as { relay: string }).relay).toBe('connected');
+
+    const probed = await app.request('/api/relay/status?probe=1', { headers: session.headers }, env);
+    expect(await probed.json()).toMatchObject({
+      paired: true,
+      relay: 'stale',
+      updateAvailable: false,
+    });
+
+    // The failed probe is recorded: an ordinary refresh must not flip back to
+    // connected using the heartbeat from before the probe.
+    const after = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect((await after.json() as { relay: string }).relay).toBe('stale');
+  });
 });
 
 describe('bridge npm update status', () => {
+  it('does not advertise an update for an offline bridge', async () => {
+    const fetchMock = stubNpmVersion('0.2.0');
+    const session = pairedSession('0.1.4');
+    session.relay.lastSeenAt = Date.now() - 61_000;
+
+    const status = await getBridgeUpdateStatus(session, 'https://dcat.example');
+
+    expect(status.relay).toBe('stale');
+    expect(status).toMatchObject({
+      latestVersion: null,
+      updateAvailable: false,
+      selfUpdateSupported: false,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('reports no update when the paired agent matches npm latest', async () => {
     const fetchMock = stubNpmVersion('0.1.4');
 

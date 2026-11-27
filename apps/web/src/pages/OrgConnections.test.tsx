@@ -156,6 +156,42 @@ describe('OrgConnections connect wizard', () => {
     expect(writeText).toHaveBeenCalledWith('npx -y @dcat-toolkit/bridge@latest start');
   });
 
+  it('shows only the offline recovery card when a stale bridge also has an update pending', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({
+      relay: 'stale',
+      agentVersion: '0.1.8',
+      latestVersion: '0.1.9',
+      updateAvailable: true,
+    }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('The bridge stopped responding.')).toBeInTheDocument();
+    expect(screen.queryByText(/Bridge update available/)).not.toBeInTheDocument();
+    expect(screen.queryByText('npm install -g @dcat-toolkit/bridge@latest')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Last reported bridge version')).toHaveTextContent('v0.1.8');
+    expect(screen.getByText('npx -y @dcat-toolkit/bridge@latest start')).toBeInTheDocument();
+  });
+
+  it('probes the relay when hosted status is refreshed', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const probe = vi.spyOn(api, 'refreshBridgeStatus').mockResolvedValue(status({
+      relay: 'stale',
+      lastSeenAt: new Date().toISOString(),
+    }));
+    const { queryClient } = renderOrgConnections();
+    const cancel = vi.spyOn(queryClient, 'cancelQueries');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Refresh status' }));
+
+    expect(await screen.findByText('The bridge stopped responding.')).toBeInTheDocument();
+    expect(probe).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['health'] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
+  });
+
   it('offers the start command while a newly paired bridge checks in', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     vi.mocked(api.bridgeStatus).mockResolvedValue(status({ relay: 'waiting', lastSeenAt: null }));

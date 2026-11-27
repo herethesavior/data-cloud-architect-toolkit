@@ -609,6 +609,11 @@ export const api = {
     }
     return postJson<CliStatus>('/api/cli/refresh', {});
   },
+  /** Explicit hosted status refresh: ask the relay to probe the bridge now. */
+  refreshBridgeStatus: async (): Promise<BridgeStatus> => {
+    if (isHosted()) return request<BridgeStatus>('/api/relay/status?probe=1');
+    return bridgeStatus();
+  },
   compatibility: async (): Promise<ApiVersionStatus> => {
     if (isHosted()) return (await bridgeStatus()).compatibility ?? createApiVersionStatus();
     return request<ApiVersionStatus>('/api/compatibility');

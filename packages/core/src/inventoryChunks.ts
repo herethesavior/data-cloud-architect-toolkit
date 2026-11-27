@@ -10,6 +10,8 @@ export const ITEM_DETAILS_OMITTED_WARNING = 'ITEM_DETAILS_OMITTED';
 export const MAX_CHUNK_ROWS = 5;
 /** Field maps are the bulkiest mapping rows; keep enough to explain the join. */
 const MAX_COMPACT_FIELD_MAPPINGS = 12;
+/** Identity survives every compaction pass so a trimmed row still identifies a record. */
+const IDENTITY_KEYS = new Set(['apiName', 'id', 'name', 'label', 'sourceObject', 'targetObject']);
 /**
  * Large orgs must not turn into thousands of relay polls. Small batches are
  * preferred, but the row size grows once that many chunks would be needed.
@@ -81,6 +83,64 @@ function compactRow(field: ArrayField, row: unknown): unknown {
     compact.fieldMappings = compact.fieldMappings.slice(0, MAX_COMPACT_FIELD_MAPPINGS);
   }
   return compact;
+}
+
+/** Drop bulky nested structures first; identity fields survive every pass. */
+function stripBulkFields(row: Record<string, unknown>, level: number): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (Array.isArray(value)) {
+      if (level === 0 && value.length > 1) result[key] = value.slice(0, 1);
+      continue;
+    }
+    if (isRecord(value)) {
+      if (key === 'provenance') {
+        result[key] = Object.fromEntries(Object.entries(value).filter(([, nested]) =>
+          typeof nested === 'string' || typeof nested === 'number' || typeof nested === 'boolean'));
+      }
+      continue;
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+function truncateStrings(row: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    result[key] = typeof value === 'string' && value.length > 256 ? `${value.slice(0, 256)}…` : value;
+  }
+  return result;
+}
+
+/**
+ * A single row must never make a whole inventory terminal. Trim details in
+ * stages, keeping the fields that identify the record, until it fits the chunk
+ * budget. The omitted-details warning makes the loss visible to the caller.
+ */
+function fitRow(field: ArrayField, row: unknown, maxBytes: number): { row: unknown; omitted: boolean } {
+  if (!isRecord(row)) return { row, omitted: false };
+  const ceiling = Math.max(1_024, maxBytes - 4_096);
+  // Keep the established detail threshold for field maps and bulky graphs: a
+  // row this large is compacted even when it would technically fit one chunk.
+  if (byteLength(row) <= Math.max(64 * 1024, Math.floor(maxBytes / 2))) {
+    return { row, omitted: false };
+  }
+  let compact = compactRow(field, row) as Record<string, unknown>;
+  for (let level = 0; level < 3 && byteLength(compact) > ceiling; level += 1) {
+    compact = stripBulkFields(compact, level);
+  }
+  if (byteLength(compact) > ceiling) compact = truncateStrings(compact);
+  // A row made almost entirely of scalars survives the staged trimming above.
+  // Drop non-identifying keys until the row actually fits the chunk budget.
+  for (const key of Object.keys(compact)) {
+    if (byteLength(compact) <= ceiling) break;
+    if (!IDENTITY_KEYS.has(key)) delete compact[key];
+  }
+  if (byteLength(compact) > ceiling) {
+    for (const key of Object.keys(compact)) compact[key] = String(compact[key]).slice(0, 64);
+  }
+  return { row: compact, omitted: true };
 }
 
 interface PendingChunk {
@@ -157,15 +217,19 @@ export function chunkInventorySnapshot(
   const rowLimit = Math.max(1, Math.floor(maxRows), Math.ceil(totalRows / MAX_CHUNK_COUNT));
   let current = emptySnapshot(snapshot);
   let omitted = new Set<string>();
+  let compacted = false;
   let bytes = byteLength(current);
   let rowsInChunk = 0;
 
   for (const field of ARRAY_FIELDS) {
     const rows = snapshot[field] as readonly unknown[];
     for (const original of rows) {
-      const oversized = byteLength(original) > Math.max(64 * 1024, Math.floor(maxBytes / 2));
-      const row = oversized ? compactRow(field, original) : original;
-      if (oversized) omitted.add(FAMILY_BY_FIELD[field]);
+      const fitted = fitRow(field, original, maxBytes);
+      const row = fitted.row;
+      if (fitted.omitted) {
+        omitted.add(FAMILY_BY_FIELD[field]);
+        compacted = true;
+      }
       const addition = byteLength(row) + 1;
       if (rowsInChunk > 0 && (rowsInChunk >= rowLimit || bytes + addition > maxBytes)) {
         chunks.push({ snapshot: current, omitted });
@@ -180,7 +244,9 @@ export function chunkInventorySnapshot(
     }
   }
   if (rowsInChunk > 0) chunks.push({ snapshot: current, omitted });
-  if (chunks.length <= 1) return [snapshot];
+  // A compacted single row must still be delivered through the chunk envelope,
+  // otherwise the oversized original would bypass the size check entirely.
+  if (chunks.length <= 1 && !compacted) return [snapshot];
   const cumulative = new Map<string, number>();
   const chunkCounts = chunks.map((pending) => {
     for (const field of ARRAY_FIELDS) {
@@ -196,13 +262,18 @@ export function chunkInventorySnapshot(
 /** Supports both progressive session results and legacy all-at-once snapshots. */
 export function chunkRelayResult<T>(result: T, maxBytes: number): T[] | null {
   if (isRecord(result) && isInventorySnapshotLike(result.snapshot)) {
-    const chunks = chunkInventorySnapshot(result.snapshot, maxBytes);
-    if (chunks.length <= 1) return null;
+    const original = result.snapshot;
+    const chunks = chunkInventorySnapshot(original, maxBytes);
+    // One compacted row is still a new snapshot that must be delivered; only
+    // an untouched single snapshot needs no chunk envelope.
+    if (chunks.length <= 1 && chunks[0] === original) return null;
     return chunks.map((snapshot) => ({ ...result, snapshot }) as T);
   }
   if (isInventorySnapshotLike(result)) {
-    const chunks = chunkInventorySnapshot(result, maxBytes);
-    return chunks.length <= 1 ? null : chunks as T[];
+    const original = result as InventorySnapshot;
+    const chunks = chunkInventorySnapshot(original, maxBytes);
+    if (chunks.length <= 1 && chunks[0] === original) return null;
+    return chunks as T[];
   }
   return null;
 }

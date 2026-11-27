@@ -71,16 +71,20 @@ const MAPPING_CONCURRENCY = 4;
 const RELATIONSHIP_CONCURRENCY = 4;
 /**
  * Mapping discovery is one lookup per eligible DMO. Large orgs routinely have
- * more than 500 DMOs, so the old 500-query ceiling cut mappings off mid-org.
- * Keep a bounded ceiling for safety, but let resume continue past it instead of
- * leaving the family permanently partial.
+ * more than 500 DMOs, so an old 500-query ceiling cut mappings off mid-org.
+ * The value is now a per-advance queue size: candidates beyond it stay pending
+ * work for the next poll instead of becoming a terminal gap.
  */
 export const DEFAULT_MAX_MAPPING_QUERIES = 2_000;
-/** Repeated resumes may extend the checkpoint, but never without a ceiling. */
+/** Kept for sessions resumed from an older, budgeted checkpoint. */
 const MAX_MAPPING_QUERY_BUDGET = 50_000;
 /** Bounded count-repair passes prevent an inconsistent endpoint from looping forever. */
 const MAX_EXPECTED_COUNT_RETRIES = 2;
-/** A session must reach a terminal state even when a slow org cannot drain its queues. */
+/**
+ * Retained for state compatibility with sessions created by older bridges.
+ * It no longer truncates discovery: a slow org finishes in more small batches
+ * rather than silently dropping the records it has not fetched yet.
+ */
 export const DEFAULT_DISCOVERY_DURATION_MS = 8 * 60_000;
 
 type ExpectedTotalSource = 'preflight' | 'response';
@@ -489,10 +493,6 @@ function stopWithWarning(
   pushWarning(state, family, code, message, 'warning');
 }
 
-function deadlineReached(state: ProgressiveDiscoveryState): boolean {
-  return !state.timedOut && Date.now() >= state.deadlineAt;
-}
-
 function stopFamilyCursor(
   state: ProgressiveDiscoveryState,
   family: NonMappingFamily,
@@ -532,7 +532,9 @@ function stopActiveCursors(state: ProgressiveDiscoveryState, code: string, messa
   stopMappingTasks(state, code, message);
   stopRelationshipTasks(state, code, message);
   state.streamEnrichment.attempted = true;
-  state.timedOut = code === 'DISCOVERY_DEADLINE';
+  // An interruption is a deliberate stop: polling must settle until a caller
+  // resumes. Pending candidates stay recorded so a resume can queue them again.
+  state.timedOut = true;
 }
 
 /** Terminalize a discovery state after a background runner exception. */
@@ -704,27 +706,43 @@ function defaultDataspace(state: ProgressiveDiscoveryState): string | null {
   return spaces.find((space) => space.isDefault)?.apiName ?? spaces[0]?.apiName ?? null;
 }
 
+function pendingMappingDmos(state: ProgressiveDiscoveryState): DataModelObject[] {
+  return mappingCandidateDmos(state.families.dmos.items as DataModelObject[])
+    .filter((dmo) => {
+      const name = dmo.apiName?.trim();
+      return Boolean(name) && !state.mappings.queuedDmos.has(name);
+    });
+}
+
+function pendingRelationshipDmos(state: ProgressiveDiscoveryState): DataModelObject[] {
+  return mappingCandidateDmos(state.families.dmos.items as DataModelObject[])
+    .filter((dmo) => {
+      const name = dmo.apiName?.trim();
+      return Boolean(name) && !state.relationshipQueries.queuedDmos.has(name);
+    });
+}
+
 function syncMappingTasks(state: ProgressiveDiscoveryState): void {
   const dmos = state.families.dmos.items as DataModelObject[];
-  const candidates = mappingCandidateDmos(dmos);
   const fallback = defaultDataspace(state);
-  for (const dmo of candidates) {
+  let queued = 0;
+  // The option is an outstanding-query budget, not a total DMO cap: tasks
+  // already in flight occupy the same slots as newly queued ones.
+  const active = state.mappings.tasks.filter((task) => !task.done && !task.failed).length;
+  const room = Math.max(0, state.options.maxMappingQueries - active);
+  for (const dmo of mappingCandidateDmos(dmos)) {
+    if (queued >= room) break;
     const name = dmo.apiName?.trim();
     if (!name || state.mappings.queuedDmos.has(name)) continue;
-    if (state.mappings.tasks.length >= state.options.maxMappingQueries) {
-      if (!state.mappings.limitHit) {
-        state.mappings.limitHit = true;
-        stopWithWarning(state, 'mappings', state.mappings,
-          'MAPPING_QUERY_LIMIT',
-          `Checked the first ${state.options.maxMappingQueries} eligible DMOs; resume loading to check the rest.`);
-      }
-      break;
-    }
     state.mappings.queuedDmos.add(name);
     state.mappings.tasks.push(makeMappingTask(name, state.apiVersion ?? '', dmo.dataSpace ?? fallback));
+    queued += 1;
   }
+  // A queue boundary is not a gap: the remaining DMOs stay active work for the
+  // next poll. The flag only describes pending work for the capability status.
+  state.mappings.limitHit = pendingMappingDmos(state).length > 0;
 
-  if (state.families.dmos.done && state.mappings.tasks.length === 0) {
+  if (state.families.dmos.done && state.mappings.tasks.length === 0 && !state.mappings.limitHit) {
     pushWarning(state, 'mappings', 'MAPPINGS_SKIPPED',
       dmos.length === 0
         ? 'Skipped: no DMOs were found; mapping lookup requires a DMO developer name.'
@@ -753,9 +771,12 @@ async function fetchMappingTaskPage(state: ProgressiveDiscoveryState, task: Mapp
 
 function syncRelationshipTasks(state: ProgressiveDiscoveryState): void {
   const dmos = state.families.dmos.items as DataModelObject[];
-  const candidates = mappingCandidateDmos(dmos);
   const fallback = defaultDataspace(state);
-  for (const dmo of candidates) {
+  let queued = 0;
+  const active = state.relationshipQueries.tasks.filter((task) => !task.done && !task.failed).length;
+  const room = Math.max(0, state.options.maxRelationshipQueries - active);
+  for (const dmo of mappingCandidateDmos(dmos)) {
+    if (queued >= room) break;
     const name = dmo.apiName?.trim();
     if (!name || state.relationshipQueries.queuedDmos.has(name)) continue;
     const dataspace = dmo.dataSpace ?? fallback;
@@ -766,18 +787,11 @@ function syncRelationshipTasks(state: ProgressiveDiscoveryState): void {
         'warning');
       continue;
     }
-    if (state.relationshipQueries.tasks.length >= state.options.maxRelationshipQueries) {
-      if (!state.relationshipQueries.limitHit) {
-        state.relationshipQueries.limitHit = true;
-        stopWithWarning(state, 'dmos', state.relationshipQueries,
-          'RELATIONSHIP_QUERY_LIMIT',
-          `Checked the first ${state.options.maxRelationshipQueries} DMOs; remaining relationship lookups were not attempted.`);
-      }
-      break;
-    }
     state.relationshipQueries.queuedDmos.add(name);
     state.relationshipQueries.tasks.push(makeRelationshipTask(name, state.apiVersion ?? '', dataspace));
+    queued += 1;
   }
+  state.relationshipQueries.limitHit = pendingRelationshipDmos(state).length > 0;
 }
 
 async function fetchRelationshipTaskPage(
@@ -829,10 +843,13 @@ async function fetchRelationshipTaskPage(
 }
 
 function anyActive(state: ProgressiveDiscoveryState): boolean {
+  if (state.timedOut) return false;
   return NON_MAPPING_FAMILIES.some((family) => {
     const cursor = state.families[family];
     return (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family);
-  }) || state.mappings.tasks.some((task) => !task.done && !task.failed)
+  }) || pendingMappingDmos(state).length > 0
+  || state.mappings.tasks.some((task) => !task.done && !task.failed)
+  || pendingRelationshipDmos(state).length > 0
   || state.relationshipQueries.tasks.some((task) => !task.done && !task.failed);
 }
 
@@ -846,7 +863,8 @@ function statusForFamily(state: ProgressiveDiscoveryState, family: ResourceFamil
         : failed.every((task) => task.errorStatus === 'forbidden') ? 'forbidden'
           : 'error';
     }
-    if (active || failed.length > 0 || state.mappings.limitHit || state.mappings.degraded) return 'partial';
+    if (active || failed.length > 0 || pendingMappingDmos(state).length > 0
+      || state.mappings.limitHit || state.mappings.degraded) return 'partial';
     if (tasks.length === 0) return 'not-started';
     return 'available';
   }
@@ -994,8 +1012,10 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
     ? state.mappings.tasks.reduce((sum, task) => sum + task.pageIndex, 0)
     : state.families[family].pageIndex;
   const hasMore = family === 'mappings'
-    ? state.mappings.tasks.some((task) => !task.done && !task.failed)
-    : (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family);
+    ? pendingMappingDmos(state).length > 0 || state.mappings.tasks.some((task) => !task.done && !task.failed)
+    : (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family)
+      || (family === 'dmos' && (pendingRelationshipDmos(state).length > 0
+        || state.relationshipQueries.tasks.some((task) => !task.done && !task.failed)));
   const failedTask = family === 'mappings'
     ? state.mappings.tasks.find((task) => task.failed)
     : null;
@@ -1195,9 +1215,8 @@ async function probeMissingExpectedTotals(
   state: ProgressiveDiscoveryState,
   options: AdvanceDiscoveryOptions,
 ): Promise<void> {
-  if (!state.apiVersion || state.signal?.aborted || deadlineReached(state)) return;
+  if (!state.apiVersion || state.signal?.aborted) return;
   for (const family of NON_MAPPING_FAMILIES) {
-    if (deadlineReached(state)) return;
     const cursor = state.families[family];
     if (cursor.pageIndex === 0 || cursor.failed || cursor.expectedTotal !== null) continue;
     if (cursor.countProbeAttempts > 0) continue;
@@ -1359,13 +1378,6 @@ export async function advanceProgressiveDiscovery(
   if (!state.apiVersion || state.signal?.aborted || state.timedOut) {
     return { active: false, changed: false };
   }
-  if (deadlineReached(state)) {
-    stopActiveCursors(state, 'DISCOVERY_DEADLINE',
-      `Discovery stopped after ${Math.round((Date.now() - state.createdAt) / 1000)} second(s); earlier results were kept.`);
-    finalizeExpectedCounts(state);
-    notifyProgress(state, options);
-    return { active: false, changed: false };
-  }
 
   const changedFlags: boolean[] = [];
   const activeFamilies = NON_MAPPING_FAMILIES.filter((family) => {
@@ -1373,21 +1385,19 @@ export async function advanceProgressiveDiscovery(
     return (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family);
   });
   for (const family of activeFamilies) {
-    if (deadlineReached(state)) break;
     changedFlags.push(await fetchFamilyPageWithCountRepair(state, family));
     notifyProgress(state, options);
   }
 
   const primarySettled = NON_MAPPING_FAMILIES.every((family) =>
     state.families[family].done || state.families[family].failed);
-  if (primarySettled && !deadlineReached(state)) {
+  if (primarySettled) {
     await probeMissingExpectedTotals(state, options);
     const repairFamilies = NON_MAPPING_FAMILIES.filter((family) => {
       const cursor = state.families[family];
       return cursor.done && !cursor.failed && canRetryExpectedCount(state, family);
     });
     for (const family of repairFamilies) {
-      if (deadlineReached(state)) break;
       changedFlags.push(await fetchFamilyPageWithCountRepair(state, family));
       notifyProgress(state, options);
     }
@@ -1396,8 +1406,7 @@ export async function advanceProgressiveDiscovery(
   let enrichmentChanged = false;
   // Wait for the stream family to finish so every page is enriched in one lookup.
   const streamCursor = state.families['data-streams'];
-  if (!state.streamEnrichment.attempted && streamCursor.done && streamCursor.items.length > 0
-    && !deadlineReached(state)) {
+  if (!state.streamEnrichment.attempted && streamCursor.done && streamCursor.items.length > 0) {
     state.streamEnrichment.attempted = true;
     const enriched = await enrichStreamConnectors({
       cli: state.cli,
@@ -1425,34 +1434,26 @@ export async function advanceProgressiveDiscovery(
   // the first batches instead of only after every DMO page has arrived. Keep
   // relationships behind primary pagination; they are numerous and would delay
   // the mapping results this change is meant to surface early.
-  if (!deadlineReached(state)) {
-    syncMappingTasks(state);
-    const tasks = state.mappings.tasks
-      .filter((task) => !task.done && !task.failed)
-      .slice(0, primarySettled ? MAPPING_CONCURRENCY : 1);
-    for (const task of tasks) {
-      if (deadlineReached(state)) break;
-      changedFlags.push(await fetchMappingTaskPage(state, task));
-      notifyProgress(state, options);
-    }
+  syncMappingTasks(state);
+  const tasks = state.mappings.tasks
+    .filter((task) => !task.done && !task.failed)
+    .slice(0, primarySettled ? MAPPING_CONCURRENCY : 1);
+  for (const task of tasks) {
+    changedFlags.push(await fetchMappingTaskPage(state, task));
+    notifyProgress(state, options);
   }
 
-  if (primarySettled && !deadlineReached(state)) {
+  if (primarySettled) {
     syncRelationshipTasks(state);
     const relationshipTasks = state.relationshipQueries.tasks
       .filter((task) => !task.done && !task.failed)
       .slice(0, RELATIONSHIP_CONCURRENCY);
     for (const task of relationshipTasks) {
-      if (deadlineReached(state)) break;
       changedFlags.push(await fetchRelationshipTaskPage(state, task));
       notifyProgress(state, options);
     }
   }
 
-  if (deadlineReached(state)) {
-    stopActiveCursors(state, 'DISCOVERY_DEADLINE',
-      `Discovery stopped after ${Math.round((Date.now() - state.createdAt) / 1000)} second(s); earlier results were kept.`);
-  }
   const changed = changedFlags.some(Boolean) || enrichmentChanged;
   // Freshness follows the most recently loaded page, not the session start.
   if (changed) state.generatedAt = new Date().toISOString();
