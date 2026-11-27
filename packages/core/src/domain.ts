@@ -345,6 +345,26 @@ export const FAMILY_PROGRESS_STATES = [
 export type FamilyProgressState = (typeof FAMILY_PROGRESS_STATES)[number];
 
 /**
+ * Slow per-DMO lookups keep a family active after its row count stops moving.
+ * `total` is only present when every eligible DMO is already known.
+ */
+export const DISCOVERY_ACTIVITY_PHASES = ['mapping-lookups', 'relationship-lookups'] as const;
+export type DiscoveryActivityPhase = (typeof DISCOVERY_ACTIVITY_PHASES)[number];
+
+export const discoveryActivitySchema = z.object({
+  phase: z.enum(DISCOVERY_ACTIVITY_PHASES),
+  completed: z.number().int().nonnegative(),
+  /** Active plus not-yet-queued lookups; distinct from a final `total`. */
+  pending: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative().nullable(),
+  /** When this phase was first observed; elapsed time is derived, never faked. */
+  startedAt: z.string(),
+});
+
+export type DiscoveryActivity = z.infer<typeof discoveryActivitySchema>;
+
+/**
  * Per-family retrieval counters. `total` is the conservative page-derived value;
  * `expectedTotal` is only set when Salesforce reports an authoritative final
  * count before or during loading. The UI must never turn an unknown total into
@@ -359,6 +379,8 @@ export const familyProgressSchema = z.object({
   expectedTotalSource: z.enum(['preflight', 'response']).nullable().optional(),
   pagesFetched: z.number().int().nonnegative(),
   hasMore: z.boolean(),
+  /** Current sub-phase while rows stay static during per-DMO lookups. */
+  activity: discoveryActivitySchema.nullish(),
   error: z.string().nullish(),
   /** Classification behind `error`; retry UI must not offer forbidden/unsupported families. */
   errorStatus: retrievalStatusSchema.nullish(),

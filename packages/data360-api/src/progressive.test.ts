@@ -13,6 +13,7 @@ import {
   mappingsJson,
   versionsJson,
 } from '@dcat/test-fixtures';
+import type { DiscoveryProgress } from '@dcat/core';
 import { CliError } from '@dcat/salesforce-cli';
 import type { RestClient } from './discover.ts';
 import {
@@ -28,6 +29,7 @@ import {
 import {
   advanceProgressiveDiscovery,
   createProgressiveDiscovery,
+  discoveryProgress,
   initializeProgressiveDiscovery,
   interruptProgressiveDiscovery,
   interruptProgressiveFamilies,
@@ -220,7 +222,107 @@ describe('progressive discovery', () => {
       }),
     ]));
     const cli = fakeCli({ ...dmoPages, ...mappingPages });
+    const snapshots: DiscoveryProgress[] = [];
 
+    const state = await createProgressiveDiscovery({
+      cli,
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+    });
+    for (let batch = 0; batch < 500 && isProgressiveDiscoveryActive(state); batch += 1) {
+      await advanceProgressiveDiscovery(state, {
+        onProgress: (current) => snapshots.push(discoveryProgress(current)),
+      });
+    }
+
+    const mappingPhase = snapshots.find((progress) => progress.state === 'running'
+      && progress.families.find((family) => family.family === 'mappings')?.activity?.total === total);
+    expect(mappingPhase).toBeDefined();
+    expect(mappingPhase!.families.find((family) => family.family === 'mappings')?.activity)
+      .toMatchObject({ completed: expect.any(Number), pending: expect.any(Number), failed: 0, total: total });
+
+    const snapshot = progressiveSnapshot(state);
+    expect(snapshot.progress?.state).toBe('complete');
+    expect(snapshot.dmos).toHaveLength(total);
+    expect(snapshot.mappings).toHaveLength(total);
+    expect(snapshot.warnings.some((warning) => warning.code === 'DISCOVERY_DEADLINE')).toBe(false);
+    expect(state.mappings.tasks.every((task) => task.done && !task.failed)).toBe(true);
+  });
+
+  it('reports relationship lookups while the DMO row count stays static', async () => {
+    const mappingErrors = Object.fromEntries(dmoNames.map((name) => [
+      buildMappingPath(name, '65.0', dmoSpaces[name]!), mappingNotFoundOutput,
+    ]));
+    const cli = fakeCli({}, {}, mappingErrors);
+    const snapshots: DiscoveryProgress[] = [];
+    const state = await createProgressiveDiscovery({
+      cli,
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+    });
+
+    let checkedUnknownTotal = false;
+    for (let batch = 0; batch < 500 && isProgressiveDiscoveryActive(state); batch += 1) {
+      await advanceProgressiveDiscovery(state, {
+        onProgress: (current) => {
+          const progress = discoveryProgress(current);
+          snapshots.push(progress);
+          if (checkedUnknownTotal || progress.state !== 'running') return;
+          const active = progress.families.find((family) =>
+            family.family === 'dmos' && family.activity?.phase === 'relationship-lookups');
+          if (!active) return;
+          const activityTotal = () => discoveryProgress(current)
+            .families.find((family) => family.family === 'dmos')?.activity?.total;
+          // A DMO cursor that stopped early has no final eligible set to count.
+          current.families.dmos.degraded = true;
+          expect(activityTotal()).toBeNull();
+          current.families.dmos.degraded = false;
+          // An expected-count repair can still add DMOs after this point.
+          current.families.dmos.expectedTotal = dmoNames.length + 1;
+          current.families.dmos.expectedTotalSource = 'response';
+          expect(activityTotal()).toBeNull();
+          current.families.dmos.expectedTotal = null;
+          current.families.dmos.expectedTotalSource = null;
+          checkedUnknownTotal = true;
+        },
+      });
+    }
+    expect(checkedUnknownTotal).toBe(true);
+
+    const during = snapshots.find((progress) => progress.state === 'running'
+      && progress.families.find((family) => family.family === 'dmos')?.activity?.phase === 'relationship-lookups');
+    expect(during).toBeDefined();
+    const dmos = during!.families.find((family) => family.family === 'dmos')!;
+    expect(dmos.loaded).toBe(dmoNames.length);
+    expect(dmos.hasMore).toBe(true);
+    expect(dmos.activity).toMatchObject({
+      phase: 'relationship-lookups',
+      completed: expect.any(Number),
+      pending: expect.any(Number),
+      failed: 0,
+      total: dmoNames.length,
+      startedAt: expect.any(String),
+    });
+
+    // A static activity must never be mistaken for terminal state.
+    const final = discoveryProgress(state);
+    expect(final.state).toBe('complete');
+    expect(final.families.find((family) => family.family === 'dmos')).toMatchObject({
+      hasMore: false,
+      activity: null,
+    });
+    expect(Object.keys(state.phaseStartedAt)).toHaveLength(0);
+  });
+
+  it('does not report complete when DMO relationship lookups fail', async () => {
+    const relationshipErrors = Object.fromEntries(dmoNames.map((name) => [
+      buildDmoRelationshipsPath(name, '65.0', dmoSpaces[name]!), 'ERROR: 500 Server Error',
+    ]));
+    const cli = fakeCli({}, {}, relationshipErrors);
     const state = await createProgressiveDiscovery({
       cli,
       alias: org.alias,
@@ -231,11 +333,12 @@ describe('progressive discovery', () => {
     await drain(state);
 
     const snapshot = progressiveSnapshot(state);
-    expect(snapshot.progress?.state).toBe('complete');
-    expect(snapshot.dmos).toHaveLength(total);
-    expect(snapshot.mappings).toHaveLength(total);
-    expect(snapshot.warnings.some((warning) => warning.code === 'DISCOVERY_DEADLINE')).toBe(false);
-    expect(state.mappings.tasks.every((task) => task.done && !task.failed)).toBe(true);
+    expect(snapshot.progress?.state).not.toBe('complete');
+    expect(snapshot.progress?.families.find((family) => family.family === 'dmos')).toMatchObject({
+      status: 'failed',
+      hasMore: false,
+    });
+    expect(snapshot.warnings.some((warning) => warning.code === 'RELATIONSHIP_QUERY_FAILED')).toBe(true);
   });
 
   it('keeps outstanding mapping lookups within the configured batch', async () => {

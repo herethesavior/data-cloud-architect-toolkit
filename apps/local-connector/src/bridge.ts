@@ -1,5 +1,6 @@
 import type {
   CliStatus,
+  DiscoveryActivity,
   DiscoveryProgress,
   OrgSummary,
   RelayOperation,
@@ -16,6 +17,7 @@ import {
   createFailureReporter,
   formatDuration,
   type BridgeLogLevel,
+  type BridgeLogger,
 } from './bridge-logging.ts';
 import { clearDiscoverySessions, getDiscoverySession, startDiscoverySession } from './discovery-sessions.ts';
 import { resolveTransformContext } from './transform-context.ts';
@@ -207,6 +209,129 @@ function resultCount(result: unknown): number | undefined {
   return Array.isArray(result) ? result.length : undefined;
 }
 
+export const INVENTORY_HEARTBEAT_MS = 60_000;
+const MAX_TRACKED_INVENTORY_GENERATIONS = 64;
+
+interface InventoryPhase {
+  activeKey: string;
+  startedAt: number;
+  lastHeartbeatAt: number;
+  lastActivity: DiscoveryActivity | null;
+  lastActivityAt: number;
+}
+
+function activeInventoryActivity(progress: DiscoveryProgress): DiscoveryActivity | null {
+  return progress.families.find((family) => family.hasMore && family.activity)?.activity ?? null;
+}
+
+function activityFields(activity: DiscoveryActivity | null, now: number) {
+  if (!activity) return {};
+  const startedAt = Date.parse(activity.startedAt);
+  return {
+    phase: activity.phase,
+    completed: activity.completed,
+    pending: activity.pending,
+    failed: activity.failed,
+    total: activity.total,
+    ...(Number.isFinite(startedAt) ? { phaseElapsed: formatDuration(now - startedAt) } : {}),
+  };
+}
+
+function phaseDurationFields(activity: DiscoveryActivity | null, endedAt: number) {
+  if (!activity) return {};
+  const startedAt = Date.parse(activity.startedAt);
+  if (!Number.isFinite(startedAt)) return { lastPhase: activity.phase };
+  return {
+    lastPhase: activity.phase,
+    phaseDuration: formatDuration(endedAt - startedAt),
+  };
+}
+
+/** Family transitions alone can stay silent through a long per-DMO tail. */
+export function createInventoryProgressReporter(
+  logger: BridgeLogger,
+  now: () => number = Date.now,
+  heartbeatMs = INVENTORY_HEARTBEAT_MS,
+): (request: string, result: unknown, startedAt: number) => void {
+  const phases = new Map<string, InventoryPhase>();
+  const finished = new Set<string>();
+  const rememberPhase = (key: string, value: InventoryPhase) => {
+    phases.delete(key);
+    if (phases.size >= MAX_TRACKED_INVENTORY_GENERATIONS) {
+      const oldest = phases.keys().next().value;
+      if (oldest !== undefined) phases.delete(oldest);
+    }
+    phases.set(key, value);
+  };
+
+  return (request, result, startedAt) => {
+    const progress = inventoryProgress(result);
+    if (!progress) return;
+    const sessionId = progress.sessionId || request;
+    // A scoped refresh keeps the session id but starts a new generation; its
+    // lifecycle must not inherit the previous attempt's heartbeat state.
+    const key = `${sessionId}:${progress.generation || ''}`;
+    const active = loadingFamilies(progress);
+    const activeKey = [...active].sort().join('|');
+    const activity = activeInventoryActivity(progress);
+    const phase = phases.get(key);
+    const time = now();
+
+    if (progress.state === 'running') {
+      finished.delete(key);
+      const firstObservation = !phase;
+      rememberPhase(key, phase ?? {
+        activeKey,
+        startedAt,
+        lastHeartbeatAt: time,
+        lastActivity: null,
+        lastActivityAt: time,
+      });
+      const current = phases.get(key)!;
+      if (activity) {
+        current.lastActivity = activity;
+        current.lastActivityAt = time;
+      }
+      const fields = {
+        request,
+        session: sessionId.slice(0, 8),
+        loaded: progress.loaded,
+        ...activityFields(activity, time),
+      };
+      if (active.length > 0 && (firstObservation || current.activeKey !== activeKey)) {
+        current.activeKey = activeKey;
+        current.lastHeartbeatAt = time;
+        logger.info(`inventory loading family=${active.join(',')}`, fields);
+        return;
+      }
+      if (active.length > 0 && time - current.lastHeartbeatAt >= heartbeatMs) {
+        current.lastHeartbeatAt = time;
+        logger.info('inventory loading still working', {
+          ...fields,
+          family: active.join(','),
+          elapsed: formatDuration(time - current.startedAt),
+        });
+      }
+      return;
+    }
+
+    if (finished.has(key)) return;
+    logger.info(`inventory loading finished state=${progress.state}`, {
+      request,
+      session: sessionId.slice(0, 8),
+      loaded: progress.loaded,
+      duration: formatDuration(time - (phase?.startedAt ?? startedAt)),
+      ...phaseDurationFields(phase?.lastActivity ?? null, phase?.lastActivityAt ?? time),
+    });
+    if (finished.size >= MAX_TRACKED_INVENTORY_GENERATIONS) {
+      const oldest = finished.values().next().value;
+      if (oldest !== undefined) finished.delete(oldest);
+    }
+    finished.add(key);
+    phases.delete(key);
+  };
+}
+
 async function findOrg(state: AppState, alias: string): Promise<OrgSummary> {
   const safeAlias = validateAlias(alias);
   const orgs = await resolveOrgs(state);
@@ -349,35 +474,9 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
   const failures = createFailureReporter(logger);
   const http = options.http ?? new FetchRelayHttp(options.relayUrl);
   const state = options.state;
-  // Only family transitions are logged at INFO: discovery polls every second,
-  // so one line per status check would drown the useful lifecycle events.
-  const inventoryPhases = new Map<string, { activeKey: string; startedAt: number }>();
-  const finishedInventorySessions = new Set<string>();
-  const reportInventoryResult = (request: string, result: unknown, startedAt: number) => {
-    const progress = inventoryProgress(result);
-    if (!progress) return;
-    const sessionId = progress.sessionId || request;
-    const active = loadingFamilies(progress);
-    const activeKey = [...active].sort().join('|');
-    const phase = inventoryPhases.get(sessionId);
-    const fields = { request, session: sessionId.slice(0, 8), loaded: progress.loaded };
-    if (progress.state === 'running' || active.length > 0) {
-      finishedInventorySessions.delete(sessionId);
-      if (!phase) inventoryPhases.set(sessionId, { activeKey, startedAt });
-      if (active.length > 0 && (!phase || phase.activeKey !== activeKey)) {
-        if (phase) phase.activeKey = activeKey;
-        logger.info(`inventory loading family=${active.join(',')}`, fields);
-      }
-      return;
-    }
-    if (finishedInventorySessions.has(sessionId)) return;
-    logger.info(`inventory loading finished state=${progress.state}`, {
-      ...fields,
-      duration: formatDuration(Date.now() - (phase?.startedAt ?? startedAt)),
-    });
-    finishedInventorySessions.add(sessionId);
-    inventoryPhases.delete(sessionId);
-  };
+  // Polls are DEBUG; family changes, throttled heartbeats, and the terminal
+  // result are the only inventory lines at normal verbosity.
+  const reportInventoryResult = createInventoryProgressReporter(logger);
   // The installer has already probed `sf`; avoid a second probe on every start.
   if (!state.cliStatus.installed) await refreshCliStatus(state);
 

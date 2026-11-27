@@ -2,7 +2,8 @@ import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CliStatus, InventorySnapshot, OrgSummary, RelayTask, TransformBundle } from '@dcat/core';
+import type { CliStatus, DiscoveryActivity, DiscoveryProgress, InventorySnapshot, OrgSummary, RelayTask, TransformBundle } from '@dcat/core';
+import { RESOURCE_FAMILIES } from '@dcat/core';
 import { buildFamilyPath } from '@dcat/data360-api';
 import type { ProcessRunner, RunOptions } from '@dcat/salesforce-cli';
 import { CliError } from '@dcat/salesforce-cli';
@@ -25,6 +26,7 @@ import {
   versionsJson,
 } from '@dcat/test-fixtures';
 import {
+  createInventoryProgressReporter,
   executeRelayOperation,
   FetchRelayHttp,
   RelayAuthError,
@@ -772,6 +774,125 @@ describe('runBridge', () => {
       expect.stringMatching(/inventory loading finished state=(complete|partial).+ duration=/),
     ]));
     expect(messages.filter((message) => message.includes('inventory loading finished'))).toHaveLength(1);
+  });
+
+  it('emits a throttled heartbeat while the same DMO phase is still active', () => {
+    const info = vi.fn();
+    const logger = { info, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    let now = 1_000;
+    const report = createInventoryProgressReporter(logger, () => now, 60_000);
+    const progressFor = (state: DiscoveryProgress['state'], completed: number | null): DiscoveryProgress => ({
+      sessionId: 'session-1',
+      generation: 'generation-1',
+      state,
+      loaded: 300,
+      total: null,
+      families: RESOURCE_FAMILIES.map((family) => ({
+        family,
+        status: family === 'dmos' ? state === 'complete' ? 'complete' : 'partial' : 'complete',
+        loaded: family === 'dmos' ? 300 : 0,
+        total: null,
+        pagesFetched: 1,
+        hasMore: family === 'dmos' && state !== 'complete',
+        activity: family === 'dmos' && completed === null
+          ? null
+          : family === 'dmos'
+            ? {
+              phase: 'relationship-lookups',
+              completed: completed!,
+              pending: 300 - completed!,
+              failed: 0,
+              total: 300,
+              startedAt: '1970-01-01T00:00:31.000Z',
+            } satisfies DiscoveryActivity
+            : null,
+        error: null,
+      })),
+      message: state === 'complete' ? 'All discovered metadata is loaded.' : 'Loading metadata in small batches.',
+    });
+    const result = (progress: DiscoveryProgress) => ({ snapshot: { progress } });
+
+    report('task-1', result(progressFor('running', 120)), 1_000);
+    now = 30_000;
+    report('task-2', result(progressFor('running', 150)), 1_000);
+    now = 62_000;
+    report('task-3', result(progressFor('running', 180)), 1_000);
+
+    const heartbeats = info.mock.calls.filter(([message]) => String(message).includes('still working'));
+    expect(heartbeats).toHaveLength(1);
+    expect(heartbeats[0]![1]).toMatchObject({
+      family: 'DMOs',
+      phase: 'relationship-lookups',
+      completed: 180,
+      pending: 120,
+      failed: 0,
+      total: 300,
+      loaded: 300,
+      phaseElapsed: '31s',
+      elapsed: '61s',
+    });
+
+    const complete = result(progressFor('complete', null));
+    report('task-4', complete, 1_000);
+    now = 200_000;
+    report('task-5', complete, 1_000);
+    const finishedCalls = info.mock.calls.filter(([message]) => String(message).includes('inventory loading finished'));
+    expect(finishedCalls).toHaveLength(1);
+    expect(finishedCalls[0]![1]).toMatchObject({
+      lastPhase: 'relationship-lookups',
+      phaseDuration: '31s',
+    });
+    expect(info.mock.calls.filter(([message]) => String(message).includes('still working'))).toHaveLength(1);
+
+    // A scoped refresh reuses the session id but starts a new generation.
+    now = 300_000;
+    report('task-6', { snapshot: { progress: { ...progressFor('running', 10), generation: 'generation-2' } } }, now);
+    now = 360_000;
+    report('task-7', { snapshot: { progress: { ...progressFor('complete', null), generation: 'generation-2' } } }, now);
+    expect(info.mock.calls.filter(([message]) => String(message).includes('inventory loading finished'))).toHaveLength(2);
+  });
+
+  it('bounds abandoned generations without changing later terminal logs', () => {
+    const info = vi.fn();
+    const logger = { info, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const report = createInventoryProgressReporter(logger, () => 1_000);
+    const progressFor = (generation: string, state: DiscoveryProgress['state']): DiscoveryProgress => ({
+      sessionId: 'session-1',
+      generation,
+      state,
+      loaded: 2,
+      total: null,
+      families: RESOURCE_FAMILIES.map((family) => ({
+        family,
+        status: family === 'dmos' ? state === 'complete' ? 'complete' : 'partial' : 'complete',
+        loaded: family === 'dmos' ? 2 : 0,
+        total: null,
+        pagesFetched: 1,
+        hasMore: family === 'dmos' && state === 'running',
+        activity: family === 'dmos' && state === 'running'
+          ? {
+            phase: 'relationship-lookups',
+            completed: 1,
+            pending: 1,
+            failed: 0,
+            total: 2,
+            startedAt: '1970-01-01T00:00:31.000Z',
+          } satisfies DiscoveryActivity
+          : null,
+        error: null,
+      })),
+      message: '',
+    });
+    const result = (progress: DiscoveryProgress) => ({ snapshot: { progress } });
+
+    for (let generation = 0; generation < 65; generation += 1) {
+      report(`task-${generation}`, result(progressFor(`gen-${generation}`, 'running')), 1_000);
+    }
+    report('task-terminal', result(progressFor('gen-0', 'complete')), 1_000);
+
+    const finished = info.mock.calls.filter(([message]) => String(message).includes('inventory loading finished'));
+    expect(finished).toHaveLength(1);
+    expect(finished[0]![1]).not.toHaveProperty('lastPhase');
   });
 
   it('keeps frequent progress polls out of default logs but shows them in verbose mode', async () => {

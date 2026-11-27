@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { DiscoveryProgress as DiscoveryProgressData, InventorySnapshot } from '@dcat/core';
 import {
+  activeDiscoveryActivity,
+  activityDetailLabel,
   isInventoryLoading,
   loadedCountLabel,
   loadedDetailLabel,
@@ -51,8 +53,9 @@ function InventoryProgressBanner({
   const stalled = resumable || progress.state === 'failed';
   const degraded = progress.state === 'partial' || progress.families.some((family) =>
     family.status === 'partial' || family.status === 'failed');
-  const spinning = !interrupted
-    && (progress.state === 'running' || progress.families.some((family) => family.hasMore));
+  // A stopped session can still carry `hasMore` as resume work. Only a running
+  // session is actively loading, so only that state may show a live spinner.
+  const spinning = !interrupted && progress.state === 'running';
   // A terminal `partial` snapshot is a settled result with gapped families, so
   // it must not be presented as still loading.
   const finished = !spinning && (progress.state === 'complete' || progress.state === 'partial');
@@ -63,7 +66,10 @@ function InventoryProgressBanner({
       : finished
         ? degraded ? 'Inventory loaded with gaps' : 'Inventory complete'
         : 'Loading inventory in batches';
-  const detail = loadedDetailLabel(progress.loaded, progressTotal(progress), spinning);
+  const activity = spinning ? activeDiscoveryActivity(progress) : null;
+  const detail = activity
+    ? `${activityDetailLabel(activity)} · ${loadedDetailLabel(progress.loaded, progressTotal(progress), spinning)}`
+    : loadedDetailLabel(progress.loaded, progressTotal(progress), spinning);
 
   // A resumable gap must keep the action-bearing banner even when discovery's
   // own state is terminal; the compact line is only for genuinely finished work.
@@ -256,13 +262,15 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   const timestamp = Date.parse(inventory.generatedAt);
   const absolute = Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : 'time unavailable';
   const live = context.mode === 'live';
-  const stale = live && isInventoryStale(inventory.generatedAt);
   // A failed poll leaves the last partial snapshot in React Query. Spinning on
   // that stale `running` state would promise work nobody is doing anymore.
   const working = !loadError && (
     isInventoryLoading(inventory)
     || Boolean(actions?.isRefreshingInventory || actions?.isResumingDiscovery)
   );
+  // While work is active the timestamp means "last batch", not "settled data";
+  // a stale dot there would contradict the spinner.
+  const stale = live && !working && isInventoryStale(inventory.generatedAt);
 
   const freshness = (
     <span data-testid="inventory-freshness" className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-surface-alt px-2 text-xs text-ink-soft">
@@ -272,8 +280,8 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
         </span>
       ) : null}
       <Icon name="clock" size={13} className="text-ink-faint" />
-      <span title={`Updated ${absolute}`} className="whitespace-nowrap">
-        Updated {formatUpdatedAt(inventory.generatedAt)}
+      <span title={`${working ? 'Last batch' : 'Updated'} ${absolute}`} className="whitespace-nowrap">
+        {working ? 'Last batch' : 'Updated'} {formatUpdatedAt(inventory.generatedAt)}
       </span>
       {stale ? (
         <span
