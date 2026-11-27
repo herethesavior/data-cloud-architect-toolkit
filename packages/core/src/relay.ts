@@ -92,6 +92,13 @@ export type RelayOperation = z.infer<typeof relayOperationSchema>;
 export type RelayOperationName = RelayOperation['operation'];
 
 /**
+ * Liveness is inferred from silence, so the status reader, queue admission, and
+ * the E2E relay must agree on when a bridge is stale and when re-pairing is fair.
+ */
+export const BRIDGE_STALE_AFTER_MS = 60_000;
+export const BRIDGE_REPAIR_GRACE_MS = 2 * 60_000;
+
+/**
  * Shared by the browser and hosted Worker so a client deadline can never expire
  * before the Worker's relay deadline for the same operation.
  */

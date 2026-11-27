@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 import {
   apiVersionStatusSchema,
+  BRIDGE_STALE_AFTER_MS,
   chunkRelayResult,
   cliStatusSchema,
   relayOperationSchema,
@@ -19,7 +20,6 @@ export const RELAY_LONG_POLL_MS = 20_000;
 /** Browser request-state polls are held until this request finishes or the window elapses. */
 export const RELAY_REQUEST_LONG_POLL_MS = 8_000;
 const SEEN_THROTTLE_MS = 20_000;
-const STALE_AFTER_MS = 60_000;
 /** One result is retained per session; this caps a hostile or accidental giant payload. */
 export const MAX_RELAY_RESPONSE_BYTES = 5 * 1024 * 1024;
 
@@ -523,7 +523,7 @@ export class RelayDurableObjectCore {
     // A bridge executing a claimed task cannot poll, so `last_seen_at` may be
     // old while work is still in flight. Busy state is handled above.
     const seen = this.getMetaNumber('last_seen_at');
-    if (seen !== null && now - seen > STALE_AFTER_MS) {
+    if (seen !== null && now - seen > BRIDGE_STALE_AFTER_MS) {
       return error('BRIDGE_NOT_CONNECTED', 'The local bridge is offline. Restart it and try again.', 409);
     }
     if (active) this.wakeRequestWaiters(active.id);

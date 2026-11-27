@@ -90,6 +90,15 @@ interface PollResult {
   status: 'ok' | 'unpaired';
 }
 
+/**
+ * The CLI installs the pinned version first, but only starts the replacement
+ * after the result is safely stored. A failed POST must leave this agent alive.
+ */
+export interface BridgeUpdateHandoff {
+  result: unknown;
+  complete: () => void | Promise<void>;
+}
+
 export interface BridgeOptions {
   relayUrl: string;
   state: AppState;
@@ -102,7 +111,7 @@ export interface BridgeOptions {
   logLevel?: BridgeLogLevel;
   onPaired?: (token: string) => void | Promise<void>;
   /** Supplied by the bridge CLI: installs the latest npm package and restarts the agent. */
-  onUpdate?: () => Promise<unknown>;
+  onUpdate?: () => Promise<BridgeUpdateHandoff>;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -340,22 +349,28 @@ async function findOrg(state: AppState, alias: string): Promise<OrgSummary> {
   return org;
 }
 
+interface ExecutedOperation {
+  result: unknown;
+  handoff: BridgeUpdateHandoff | null;
+}
+
 /** Execute one allowlisted operation. The operation shape is always re-validated. */
-export async function executeRelayOperation(
+async function executeRelayOperationWithHandoff(
   state: AppState,
   operation: unknown,
-  onUpdate?: () => Promise<unknown>,
-): Promise<unknown> {
+  onUpdate?: () => Promise<BridgeUpdateHandoff>,
+): Promise<ExecutedOperation> {
   const parsed = relayOperationSchema.safeParse(operation);
   if (!parsed.success) throw new CliError('INVALID_ARGUMENT', 'Unsupported bridge operation.');
   const task = parsed.data;
+  const done = (result: unknown): ExecutedOperation => ({ result, handoff: null });
 
   switch (task.operation) {
     case 'cli.status':
       await refreshCliStatus(state);
-      return state.cliStatus satisfies CliStatus;
+      return done(state.cliStatus satisfies CliStatus);
     case 'org.list':
-      return resolveOrgs(state, true);
+      return done(await resolveOrgs(state, true));
     case 'org.connect': {
       const alias = validateAlias(task.alias);
       await state.cli.loginOrg(alias, task.instanceUrl, task.browser);
@@ -364,9 +379,9 @@ export async function executeRelayOperation(
       // use the fast local listing to answer instead of a slow network probe.
       const local = await state.cli.listOrgsLocal().catch(() => []);
       const connected = local.find((entry) => entry.alias === alias);
-      if (connected) return { ...connected, connectedStatus: 'Connected' } satisfies OrgSummary;
+      if (connected) return done({ ...connected, connectedStatus: 'Connected' } satisfies OrgSummary);
       const orgs = await resolveOrgs(state, true);
-      return orgs.find((entry) => entry.alias === alias) ?? {
+      return done(orgs.find((entry) => entry.alias === alias) ?? {
         alias,
         username: null,
         orgId: null,
@@ -375,27 +390,27 @@ export async function executeRelayOperation(
         isDefault: true,
         isDevHub: false,
         source: 'salesforce-cli',
-      } satisfies OrgSummary;
+      } satisfies OrgSummary);
     }
     case 'inventory.get': {
       const org = await findOrg(state, task.alias);
-      return resolveInventory(state, org, task.refresh === true);
+      return done(await resolveInventory(state, org, task.refresh === true));
     }
     case 'inventory.start': {
       const org = await findOrg(state, task.alias);
-      return startDiscoverySession(state, org, {
+      return done(await startDiscoverySession(state, org, {
         sessionId: task.sessionId,
         refresh: task.refresh,
         families: task.families,
-      });
+      }));
     }
     case 'inventory.status': {
       const org = await findOrg(state, task.alias);
-      return getDiscoverySession(state, org, {
+      return done(await getDiscoverySession(state, org, {
         sessionId: task.sessionId,
         resume: task.resume,
         family: task.family,
-      });
+      }));
     }
     case 'transform.get': {
       const alias = validateAlias(task.alias);
@@ -405,29 +420,44 @@ export async function executeRelayOperation(
       if (!context.apiVersion) {
         throw new CliError('UNEXPECTED_RESPONSE', 'No API version is available for this org.');
       }
-      return fetchTransformBundle({
+      return done(await fetchTransformBundle({
         client: state.cli,
         alias,
         apiVersion: context.apiVersion,
         id,
         seed: context.seed,
-      });
+      }));
     }
     case 'mode.set':
       state.mode = task.mode;
       state.orgsCache = null;
       state.inventoryCache = null;
       clearDiscoverySessions(state);
-      return { mode: state.mode };
+      return done({ mode: state.mode });
     case 'compatibility.set': {
       const compatibility = setApiVersionSelection(state, task.selection);
       invalidateOrgState(state);
-      return compatibility;
+      return done(compatibility);
     }
-    case 'bridge.update':
+    case 'bridge.update': {
       if (!onUpdate) throw new CliError('INVALID_ARGUMENT', 'Bridge updates require the installed bridge CLI.');
-      return onUpdate();
+      const handoff = await onUpdate();
+      return { result: handoff.result, handoff };
+    }
   }
+}
+
+/**
+ * Keep the operation helper's result-only contract for direct callers. The
+ * relay loop uses the internal form so it can defer the update handoff.
+ */
+export async function executeRelayOperation(
+  state: AppState,
+  operation: unknown,
+  onUpdate?: () => Promise<BridgeUpdateHandoff>,
+): Promise<unknown> {
+  const executed = await executeRelayOperationWithHandoff(state, operation, onUpdate);
+  return executed.result;
 }
 
 function isRestarting(result: unknown): boolean {
@@ -549,8 +579,11 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
           continue;
         }
         let response: RelayResponse;
+        let handoff: BridgeUpdateHandoff | null = null;
         try {
-          const result = await executeRelayOperation(state, task.operation, options.onUpdate);
+          const executed = await executeRelayOperationWithHandoff(state, task.operation, options.onUpdate);
+          handoff = executed.handoff;
+          const result = executed.result;
           response = { id: task.id, ok: true, result };
           failures.success();
           const duration = formatDuration(Date.now() - startedAt);
@@ -602,6 +635,16 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
             continue;
           }
           throw error;
+        }
+        if (handoff) {
+          try {
+            await handoff.complete();
+          } catch (error) {
+            // The install succeeded but the replacement could not start. Keep
+            // serving with this process so the user is not left with no bridge.
+            logger.error(`could not start the updated bridge: ${safeErrorMessage(error)}`, { request });
+            continue;
+          }
         }
         if (response.ok && isRestarting(response.result)) {
           logger.info('update installed; stopping this bridge process');

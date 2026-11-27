@@ -11,7 +11,7 @@ import type {
   RelayRequestState,
   ResourceFamily,
 } from '@dcat/core';
-import { RESOURCE_FAMILIES } from '@dcat/core';
+import { BRIDGE_STALE_AFTER_MS, RESOURCE_FAMILIES } from '@dcat/core';
 import { demoInventory, demoOrgs, demoTransformBundles } from '@dcat/test-fixtures';
 
 declare global {
@@ -238,7 +238,7 @@ function supportsSelfUpdate(current: string | null): boolean {
 }
 
 function bridgeStatus(state: HostedState, origin: string) {
-  const stale = state.lastSeenAt !== null && Date.now() - state.lastSeenAt > 2 * 60_000;
+  const stale = state.lastSeenAt !== null && Date.now() - state.lastSeenAt > BRIDGE_STALE_AFTER_MS;
   const working = state.request?.status === 'running';
   return {
     paired: state.paired,

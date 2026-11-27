@@ -1031,11 +1031,13 @@ describe('hosted bridge relay', () => {
     expect(repaired.agentToken).toMatch(/\S/);
   });
 
-  it('clears a pairing when the relay explicitly reports it as unpaired', async () => {
+  it('reports an explicit relay reset without letting a status read rewrite the session', async () => {
     const env = makeEnv();
     const session = await startSession(env);
     const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
     await postJson('/api/relay/pair', { code: pairing.code, cli }, {}, env);
+    const sessionId = session.cookie.replace('dcat_session=', '');
+    const storedBefore = await env.DCAT_SESSIONS.get(`session:${sessionId}`, 'text');
 
     env.RELAY_DO = stubRelayDo(async () => new Response(JSON.stringify({ paired: false }), {
       status: 200,
@@ -1044,6 +1046,10 @@ describe('hosted bridge relay', () => {
 
     const status = await app.request('/api/relay/status', { headers: session.headers }, env);
     expect(await status.json()).toMatchObject({ paired: false, relay: 'waiting' });
+    expect(await env.DCAT_SESSIONS.get(`session:${sessionId}`, 'text')).toBe(storedBefore);
+
+    const again = await app.request('/api/relay/status/check', { headers: session.headers }, env);
+    expect(await again.json()).toMatchObject({ paired: false, relay: 'waiting' });
   });
 
   it('reports a reset pairing distinctly instead of telling the user to set up a bridge', async () => {
