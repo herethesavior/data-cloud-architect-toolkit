@@ -1,4 +1,4 @@
-import type { DiscoveryProgress, FamilyProgress, InventorySnapshot, ResourceFamily } from '@dcat/core';
+import type { DiscoveryActivity, DiscoveryProgress, FamilyProgress, InventorySnapshot, ResourceFamily } from '@dcat/core';
 
 /** A page-local `total` must never become a final denominator while more pages remain. */
 export function hasUsableTotal(loaded: number, total: number | null, hasMore: boolean): boolean {
@@ -34,8 +34,9 @@ export function isFamilyLoading(inventory: InventorySnapshot, family: ResourceFa
 }
 
 export function isInventoryLoading(inventory: InventorySnapshot): boolean {
-  return inventory.progress?.state === 'running'
-    || Boolean(inventory.progress?.families.some((family) => family.hasMore));
+  // `hasMore` can survive a deliberate stop as a resume candidate. Only a
+  // running session has work in flight right now.
+  return inventory.progress?.state === 'running';
 }
 
 /** Compact counter for list headers: `2/100` only when the denominator is real. */
@@ -48,6 +49,32 @@ export function loadedDetailLabel(loaded: number, total: number | null, hasMore 
   return hasUsableTotal(loaded, total, hasMore)
     ? `${loaded} of ${total} records loaded`
     : `${loaded} records loaded so far`;
+}
+
+/** First active lookup phase, so a static row count still explains the wait. */
+export function activeDiscoveryActivity(progress: DiscoveryProgress): DiscoveryActivity | null {
+  return progress.families.find((family) => family.hasMore && family.activity)?.activity ?? null;
+}
+
+export function formatElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+export function activityDetailLabel(activity: DiscoveryActivity, now = Date.now()): string {
+  const phase = activity.phase === 'mapping-lookups'
+    ? 'Checking DMO mappings'
+    : 'Checking DMO relationships';
+  const failures = activity.failed > 0 ? `, ${activity.failed} failed` : '';
+  const count = activity.total === null
+    ? `${activity.completed} lookups, ${activity.pending} pending${failures}`
+    : `${activity.completed}/${activity.total} lookups${failures}`;
+  const startedAt = Date.parse(activity.startedAt);
+  const elapsed = Number.isFinite(startedAt) ? ` · ${formatElapsed(now - startedAt)} elapsed` : '';
+  return `${phase} — ${count}${elapsed}`;
 }
 
 /** Family counter that uses the authoritative final count when available. */

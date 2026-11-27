@@ -2,6 +2,8 @@ import type {
   ApiCapability,
   ApiVersionSelection,
   DataModelObject,
+  DiscoveryActivity,
+  DiscoveryActivityPhase,
   DiscoveryProgress,
   DiscoverySessionState,
   FamilyProgress,
@@ -13,7 +15,7 @@ import type {
   RetrievalStatus,
   RetrievalWarning,
 } from '@dcat/core';
-import { RESOURCE_FAMILIES } from '@dcat/core';
+import { DISCOVERY_ACTIVITY_PHASES, RESOURCE_FAMILIES } from '@dcat/core';
 import { safeErrorMessage } from '@dcat/salesforce-cli';
 import { classifyRestFailure, isOutputLimitMessage } from './capabilities.ts';
 import { enrichStreamConnectors, STREAM_ENRICHMENT_WARNING_FAMILY } from './connectors.ts';
@@ -178,6 +180,8 @@ export interface ProgressiveDiscoveryState {
   streamEnrichment: { attempted: boolean };
   mappings: MappingState;
   relationshipQueries: RelationshipQueryState;
+  /** First observation time per phase, so elapsed time survives page churn. */
+  phaseStartedAt: Partial<Record<DiscoveryActivityPhase, string>>;
   capabilities: ApiCapability[];
   warnings: RetrievalWarning[];
   relationships: RelationshipEdge[];
@@ -921,6 +925,17 @@ function mappingGapMessage(state: ProgressiveDiscoveryState, loaded: number): st
 function recompute(state: ProgressiveDiscoveryState): void {
   if (!state.apiVersion) return;
 
+  const activePhases = new Set(currentActivityPhases(state));
+  const now = new Date().toISOString();
+  for (const phase of DISCOVERY_ACTIVITY_PHASES) {
+    if (activePhases.has(phase)) {
+      state.phaseStartedAt[phase] ??= now;
+    } else {
+      // A later batch of lookups is a new phase, not a continuation of a gap.
+      delete state.phaseStartedAt[phase];
+    }
+  }
+
   for (const family of RESOURCE_FAMILIES) {
     const status = statusForFamily(state, family);
     const loaded = family === 'mappings'
@@ -981,6 +996,9 @@ function recompute(state: ProgressiveDiscoveryState): void {
       `${skippedRelationships} relationship row(s) were skipped because source or target object names were missing.`,
       'warning');
   }
+  if (state.relationshipQueries.tasks.some((task) => task.failed)) {
+    state.families.dmos.degraded = true;
+  }
 
   const dmoContext: NormalizeContext = {
     ...state.base,
@@ -995,11 +1013,53 @@ function recompute(state: ProgressiveDiscoveryState): void {
   ]);
 }
 
+/** Per-DMO lookups keep a family active without adding rows; expose that work. */
+function lookupActivity(
+  tasks: readonly CursorState[],
+  unqueued: number,
+  phase: DiscoveryActivityPhase,
+  totalKnown: boolean,
+  startedAt: string,
+): DiscoveryActivity | null {
+  const active = tasks.filter((task) => !task.done && !task.failed).length;
+  // A stopped session has pending candidates but no work in flight; showing a
+  // live phase there would claim progress nobody is making.
+  if (active === 0) return null;
+  const completed = tasks.filter((task) => task.done && !task.failed).length;
+  const failed = tasks.filter((task) => task.failed).length;
+  const pending = active + unqueued;
+  return {
+    phase,
+    completed,
+    pending,
+    failed,
+    // While DMO pages are still arriving the eligible set can grow, so a
+    // denominator here would be a guess.
+    total: totalKnown ? completed + pending + failed : null,
+    startedAt,
+  };
+}
+
+function currentActivityPhases(state: ProgressiveDiscoveryState): DiscoveryActivityPhase[] {
+  const hasActive = (tasks: readonly CursorState[]) => tasks.some((task) => !task.done && !task.failed);
+  const phases: DiscoveryActivityPhase[] = [];
+  if (hasActive(state.mappings.tasks)) phases.push('mapping-lookups');
+  if (hasActive(state.relationshipQueries.tasks)) phases.push('relationship-lookups');
+  return phases;
+}
+
 function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily): FamilyProgress {
   const capability = state.capabilities.find((entry) => entry.family === family);
+  const relationshipFailures = family === 'dmos'
+    ? state.relationshipQueries.tasks.filter((task) => task.failed)
+    : [];
   const familyFailed = family === 'mappings'
     ? state.mappings.tasks.some((task) => task.failed)
-    : state.families[family].failed;
+    : family === 'dmos'
+      ? state.families.dmos.failed
+        || (relationshipFailures.length > 0
+          && relationshipFailures.length === state.relationshipQueries.tasks.length)
+      : state.families[family].failed;
   const status: FamilyProgressState = familyFailed ? 'failed'
     : capability?.status === 'available' ? 'complete'
       : capability?.status === 'partial' ? 'partial'
@@ -1011,20 +1071,24 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
   const pages = family === 'mappings'
     ? state.mappings.tasks.reduce((sum, task) => sum + task.pageIndex, 0)
     : state.families[family].pageIndex;
+  const pendingMappings = family === 'mappings' ? pendingMappingDmos(state).length : 0;
+  const pendingRelationships = family === 'dmos' ? pendingRelationshipDmos(state).length : 0;
   const hasMore = family === 'mappings'
-    ? pendingMappingDmos(state).length > 0 || state.mappings.tasks.some((task) => !task.done && !task.failed)
+    ? pendingMappings > 0 || state.mappings.tasks.some((task) => !task.done && !task.failed)
     : (!cursor.done && !cursor.failed) || canRetryExpectedCount(state, family)
-      || (family === 'dmos' && (pendingRelationshipDmos(state).length > 0
+      || (family === 'dmos' && (pendingRelationships > 0
         || state.relationshipQueries.tasks.some((task) => !task.done && !task.failed)));
   const failedTask = family === 'mappings'
     ? state.mappings.tasks.find((task) => task.failed)
-    : null;
-  const error = family === 'mappings'
+    : relationshipFailures[0];
+  const error = family === 'mappings' || family === 'dmos'
     ? failedTask?.error ?? null
     : state.families[family].error;
   const errorStatus = family === 'mappings'
     ? failedTask?.errorStatus ?? (state.mappings.failed ? state.mappings.errorStatus : null)
-    : state.families[family].failed ? state.families[family].errorStatus : null;
+    : family === 'dmos'
+      ? failedTask?.errorStatus ?? (state.families.dmos.failed ? state.families.dmos.errorStatus : null)
+      : state.families[family].failed ? state.families[family].errorStatus : null;
   const loaded = capability?.itemCount ?? (family === 'mappings'
     ? state.mappings.items.length
     : state.families[family].items.length);
@@ -1032,6 +1096,23 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
   // that is already exhausted while more pages remain is not a denominator;
   // exposing it would make an in-flight family look complete.
   const total = cursor.total !== null && (!hasMore || cursor.total > loaded) ? cursor.total : null;
+  // A degraded DMO cursor stopped early, so neither lookup phase knows its final
+  // eligible set; publishing a denominator there would be a guess.
+  const dmoSetKnown = state.families.dmos.done
+    && !state.families.dmos.degraded
+    && !state.families.dmos.failed
+    && !canRetryExpectedCount(state, 'dmos');
+  const activity = family === 'mappings'
+    ? lookupActivity(
+      state.mappings.tasks, pendingMappings, 'mapping-lookups', dmoSetKnown,
+      state.phaseStartedAt['mapping-lookups'] ?? state.generatedAt,
+    )
+    : family === 'dmos'
+      ? lookupActivity(
+        state.relationshipQueries.tasks, pendingRelationships, 'relationship-lookups', dmoSetKnown,
+        state.phaseStartedAt['relationship-lookups'] ?? state.generatedAt,
+      )
+      : null;
 
   return {
     family,
@@ -1042,6 +1123,7 @@ function familyProgress(state: ProgressiveDiscoveryState, family: ResourceFamily
     expectedTotalSource: cursor.expectedTotalSource,
     pagesFetched: pages,
     hasMore,
+    activity,
     error,
     errorStatus,
   };
@@ -1167,6 +1249,7 @@ function unavailableState(
       error: message,
       errorStatus: status,
     },
+    phaseStartedAt: {},
     capabilities: [{
       family: 'api-versions',
       status,
@@ -1323,6 +1406,7 @@ export async function initializeProgressiveDiscovery(
       limitHit: false,
     },
     relationshipQueries: makeRelationshipQueries(apiVersion),
+    phaseStartedAt: {},
     capabilities: [{
       family: 'api-versions',
       status: 'available',
@@ -1599,6 +1683,11 @@ export function resumeProgressiveDiscovery(
     }
     return !clearedFamilies.has(warning.family) || !retryableCodes.has(warning.code);
   });
+  if (clearedFamilies.has('mappings')) delete state.phaseStartedAt['mapping-lookups'];
+  if (clearedFamilies.has('dmos')) {
+    delete state.phaseStartedAt['relationship-lookups'];
+    state.families.dmos.degraded = false;
+  }
   recompute(state);
 }
 
@@ -1655,6 +1744,8 @@ export function restartProgressiveDiscovery(
   state.base.retrievedAt = retrievedAt;
   state.deadlineAt = now + state.durationMs;
   state.timedOut = false;
+  if (scope.has('mappings')) delete state.phaseStartedAt['mapping-lookups'];
+  if (scope.has('dmos')) delete state.phaseStartedAt['relationship-lookups'];
   recompute(state);
 }
 

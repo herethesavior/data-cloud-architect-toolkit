@@ -32,12 +32,12 @@ function progressFor(state: DiscoveryProgress['state']): DiscoveryProgress {
     families: RESOURCE_FAMILIES.map((family) => ({
       family,
       status: family === 'dlos'
-        ? state === 'failed' ? 'failed' : 'partial'
+        ? state === 'complete' ? 'complete' : state === 'failed' ? 'failed' : 'partial'
         : 'complete',
       loaded: family === 'dlos' ? 2 : 0,
       total: family === 'dlos' ? 100 : 0,
       pagesFetched: 1,
-      hasMore: family === 'dlos' && state !== 'failed',
+      hasMore: family === 'dlos' && state === 'running',
       error: family === 'dlos' && state === 'failed' ? 'A page failed after three attempts.' : null,
     })),
     message: state === 'failed' ? 'Some families stopped after a page failure.' : 'Loading metadata in small batches.',
@@ -55,6 +55,35 @@ function snapshotFor(state: DiscoveryProgress['state']): InventorySnapshot {
       ? { ...capability, status: 'partial', itemCount: 2 }
       : capability),
     progress: progressFor(state),
+  };
+}
+
+function snapshotWithRelationshipActivity(): InventorySnapshot {
+  const snapshot = snapshotFor('running');
+  const progress = snapshot.progress!;
+  return {
+    ...snapshot,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    progress: {
+      ...progress,
+      loaded: progress.loaded + 3,
+      families: progress.families.map((family) => family.family === 'dmos'
+        ? {
+          ...family,
+          loaded: 3,
+          total: null,
+          hasMore: true,
+          activity: {
+            phase: 'relationship-lookups',
+            completed: 120,
+            pending: 180,
+            failed: 0,
+            total: 300,
+            startedAt: '2026-01-01T00:05:40.000Z',
+          },
+        }
+        : family),
+    },
   };
 }
 
@@ -135,6 +164,29 @@ describe('InventoryBoundary progressive state', () => {
     expect(screen.getAllByText('Account_DLO__dll').length).toBeGreaterThan(0);
     expect(screen.queryByTestId('inventory-refresh-skeleton')).not.toBeInTheDocument();
     expect(screen.getAllByRole('img', { name: /inventory.*loading/i }).length).toBeGreaterThan(0);
+  });
+
+  it('explains a static DMO count with its active lookup phase and elapsed time', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-01-01T00:10:00.000Z'));
+    renderExplorer(snapshotWithRelationshipActivity());
+
+    const banner = await screen.findByTestId('inventory-progress');
+    expect(banner).toHaveTextContent('Checking DMO relationships — 120/300 lookups · 4m 20s elapsed');
+    expect(screen.getByTestId('inventory-progress-dmos')).toHaveTextContent('3 loaded');
+    const freshness = await screen.findByTestId('inventory-freshness');
+    expect(freshness).toHaveTextContent('Last batch');
+    expect(screen.queryByLabelText('Cached snapshot')).not.toBeInTheDocument();
+  });
+
+  it('does not describe a stopped session as actively checking lookups', async () => {
+    const snapshot = snapshotWithRelationshipActivity();
+    snapshot.progress = { ...snapshot.progress!, state: 'partial' };
+    renderExplorer(snapshot);
+
+    const banner = await screen.findByTestId('inventory-progress');
+    expect(banner).not.toHaveTextContent('Checking DMO relationships');
+    expect(banner).not.toHaveTextContent('Loading inventory in batches');
+    expect(screen.queryByRole('img', { name: /inventory.*loading/i })).not.toBeInTheDocument();
   });
 
   it('uses the authoritative expected count instead of an unknown envelope total', async () => {
