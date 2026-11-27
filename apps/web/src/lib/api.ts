@@ -609,9 +609,12 @@ export const api = {
     }
     return postJson<CliStatus>('/api/cli/refresh', {});
   },
-  /** Explicit hosted status refresh: ask the relay to probe the bridge now. */
-  refreshBridgeStatus: async (): Promise<BridgeStatus> => {
-    if (isHosted()) return request<BridgeStatus>('/api/relay/status?probe=1');
+  /**
+   * Explicit read-only status check. The hosted relay answers from its own
+   * snapshot; it does not wake the bridge, queue a task, or change the heartbeat.
+   */
+  checkBridgeStatus: async (): Promise<BridgeStatus> => {
+    if (isHosted()) return request<BridgeStatus>('/api/relay/status/check');
     return bridgeStatus();
   },
   compatibility: async (): Promise<ApiVersionStatus> => {
