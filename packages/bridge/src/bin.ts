@@ -1,4 +1,5 @@
 import { safeErrorMessage } from '@dcat/salesforce-cli';
+import { formatBridgeLine } from '../../../apps/local-connector/src/bridge-logging.ts';
 import { main } from './main.ts';
 
 const controller = new AbortController();
@@ -7,6 +8,6 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 await main(process.argv.slice(2), controller.signal).catch((error: unknown) => {
-  console.error(`[${new Date().toISOString()}] ${safeErrorMessage(error)}`);
+  console.error(formatBridgeLine('error', 'bridge', safeErrorMessage(error)));
   process.exitCode = 1;
 });

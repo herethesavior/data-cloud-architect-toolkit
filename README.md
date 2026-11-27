@@ -211,7 +211,7 @@ Copy `.env.example` to `.env` only if you need to change a local setting. It hol
 | `DCAT_API_COMPATIBILITY_PATH` | `~/.dcat/api-compatibility.json` | Optional bridge-local path for the saved Salesforce API version setting. |
 | `SESSION_TTL_SECONDS` | `2592000` | Optional Worker session lifetime; set in `.dev.vars` for local Worker development. |
 
-On the bridge machine, `DCAT_BRIDGE_LOG_LEVEL=debug` includes relay polls and progress checks; `quiet` keeps failures only. The default logs each request with its duration and summarizes repeated failures, so a multi-day run stays readable. See `packages/bridge/README.md` for the published bridge's full logging, update, and troubleshooting guide.
+On the bridge machine, `DCAT_BRIDGE_LOG_LEVEL=debug` includes relay polls and progress checks; `quiet` keeps warnings and errors. Each line is one event with an ISO timestamp, level (`DEBUG`, `INFO`, `WARN`, `ERROR`), source (`bridge`, `installer`, `updater`), and short `key=value` context such as the operation, request id, duration, or retry delay. Repeated failures are summarized, so a multi-day run stays readable. See `packages/bridge/README.md` for the published bridge's full logging, update, and troubleshooting guide.
 
 ## Scripts
 
@@ -280,7 +280,7 @@ Live-site checks covered `/api/health`, `/api/relay/status`, built assets, and t
 
 ## What changed
 
-- The published bridge now has bounded, timestamped logging: one line per request with duration, debug-only progress polls, and five-minute summaries for repeated relay failures. Relay calls, CLI installs, and self-updates have deadlines so a stalled process cannot freeze a long-running agent. The npm README documents logging, updates, and troubleshooting for `@dcat-toolkit/bridge`.
+- The published bridge now has bounded, timestamped logging: one line per event with level, source, and context fields, debug-only progress polls, and five-minute summaries for repeated failures. Relay calls, CLI installs, and self-updates have deadlines so a stalled process cannot freeze a long-running agent. The npm README documents logging, updates, and troubleshooting for `@dcat-toolkit/bridge`.
 - **Org Connections → Step 1** now labels the installed bridge and Salesforce CLI versions separately; local mode shows only the CLI version, and a hosted bridge version appears once paired.
 - The new **Change Impact Analyzer** traces grounded upstream and downstream dependencies from a selected DLO, DMO, field, or relationship. It separates direct from all-path impact, labels inferred and missing paths, and shows field-level impact only when the current snapshot names that field.
 - Stream details and exports now show resolved source-connector and configured-connection labels from Data 360 lookups while keeping the raw connector code stable for lineage, joins, and exports.

@@ -97,6 +97,25 @@ describe('@dcat-toolkit/bridge CLI', () => {
     expect(runBridge).toHaveBeenCalledWith(expect.objectContaining({ logLevel: 'quiet' }));
   });
 
+  it('prints formatted startup lines and shares the console sink with the bridge', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    fs.readFile.mockResolvedValue(JSON.stringify({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token-1234567890',
+      version: '0.1.9',
+    }));
+
+    await main(['start']);
+
+    expect(log.mock.calls.map(([line]) => String(line))).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z INFO  bridge    reconnecting with saved pairing relay=https:\/\/dcat\.example$/),
+    ]));
+    expect(runBridge).toHaveBeenCalledWith(expect.objectContaining({
+      logLevel: 'info',
+      logger: expect.any(Function),
+    }));
+  });
+
   it('documents the logging controls in help', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 

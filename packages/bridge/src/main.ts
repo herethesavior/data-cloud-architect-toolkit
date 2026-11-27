@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
 import { runBridge } from '../../../apps/local-connector/src/bridge.ts';
-import { resolveBridgeLogLevel } from '../../../apps/local-connector/src/bridge-logging.ts';
+import { createBridgeLogger, resolveBridgeLogLevel } from '../../../apps/local-connector/src/bridge-logging.ts';
 import { loadConfig } from '../../../apps/local-connector/src/config.ts';
 import { createAppState } from '../../../apps/local-connector/src/state.ts';
 import { normalizeRelayUrl, parseStoredBridge, validatePairingCode, type StoredBridge } from './config.ts';
@@ -22,10 +22,11 @@ An update requested by the paired site installs the latest release and restarts 
 
 Options:
   --verbose       Log relay polls and progress checks (same as DCAT_BRIDGE_LOG_LEVEL=debug).
-  --quiet         Log failures only (same as DCAT_BRIDGE_LOG_LEVEL=quiet).
+  --quiet         Log warnings and errors only (same as DCAT_BRIDGE_LOG_LEVEL=quiet).
 
-Every log line has a timestamp. Normal output stays bounded during long runs;
-repeated relay failures are summarized instead of printed on every retry.`;
+Every log line has a timestamp, level, source, and short context fields:
+2026-11-27T12:00:00.000Z INFO  bridge    cli.status finished request=task-1 duration=42ms
+Normal output stays bounded during long runs; repeated failures are summarized.`;
 
 const configPath = join(homedir(), '.dcat', 'bridge.json');
 
@@ -57,8 +58,11 @@ async function saveStored(value: StoredBridge): Promise<void> {
 
 export async function main(argv: readonly string[] = process.argv.slice(2), signal?: AbortSignal): Promise<void> {
   const command = argv[0] ?? 'start';
-  const logger = (message: string) => console.log(`[${new Date().toISOString()}] ${message}`);
   const logLevel = resolveBridgeLogLevel(argv, process.env);
+  const sink = (line: string) => console.log(line);
+  const bridgeLogger = createBridgeLogger(sink, logLevel);
+  const installerLogger = createBridgeLogger(sink, logLevel, 'installer');
+  const updaterLogger = createBridgeLogger(sink, logLevel, 'updater');
 
   if (command === '--help' || command === '-h' || command === 'help') {
     console.log(HELP);
@@ -67,7 +71,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
 
   const config = { ...loadConfig(process.env, argv), mode: 'live' as const, version: BRIDGE_VERSION };
   const logArgs = argv.filter((arg) => arg === '--verbose' || arg === '--quiet');
-  const onUpdate = () => updateBridge({ logger, env: process.env, logArgs });
+  const onUpdate = () => updateBridge({ logger: updaterLogger.info, env: process.env, logArgs });
   const state = createAppState(config);
 
   if (command === 'setup') {
@@ -78,14 +82,14 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
     }
     const relayUrl = normalizeRelayUrl(relay);
     const pairingCode = validatePairingCode(code);
-    state.cliStatus = await ensureSalesforceCli({ logger });
-    logger('Pairing this browser session with DCAT…');
+    state.cliStatus = await ensureSalesforceCli({ logger: installerLogger.info });
+    bridgeLogger.info('pairing with the site', { relay: relayUrl });
     await runBridge({
       relayUrl,
       code: pairingCode,
       state,
       signal,
-      logger,
+      logger: sink,
       logLevel,
       onPaired: (token) => saveStored({ relayUrl, token, version: config.version }),
       onUpdate,
@@ -98,14 +102,14 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
   }
 
   const stored = await readStored();
-  state.cliStatus = await ensureSalesforceCli({ logger });
-  logger(`Reconnecting to ${stored.relayUrl}…`);
+  state.cliStatus = await ensureSalesforceCli({ logger: installerLogger.info });
+  bridgeLogger.info('reconnecting with saved pairing', { relay: stored.relayUrl });
   await runBridge({
     relayUrl: stored.relayUrl,
     token: stored.token,
     state,
     signal,
-    logger,
+    logger: sink,
     logLevel,
     onUpdate,
   });

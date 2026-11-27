@@ -28,17 +28,26 @@ The bridge stores only the relay origin, agent token, and its own version in `~/
 
 ## Logging
 
-Every log line has an ISO timestamp. Normal output is intentionally bounded so the bridge can run for days without filling a terminal or log file:
+Every line is one event with an ISO timestamp, level, source, a short message, and `key=value` context:
 
-- Startup and pairing: the installed bridge and Salesforce CLI versions.
-- One line when each request starts and one when it finishes, with its operation, short request id, and duration.
-- Progress polls (`inventory.status`) are omitted from normal output; they run about once per second during a load.
-- Relay failures are logged once, then summarized at most every five minutes while they keep repeating. Recovery is announced once.
-- Cancelled requests, terminal results, pairing loss, and updates are always reported.
+```text
+2026-11-27T15:04:05.123Z INFO  bridge    ready; press Ctrl+C to stop version=0.1.9 cli=2.116.6
+2026-11-27T15:04:05.456Z INFO  bridge    cli.status started request=task-1
+2026-11-27T15:04:05.498Z INFO  bridge    cli.status finished request=task-1 duration=42ms
+```
+
+Levels are `DEBUG`, `INFO`, `WARN`, and `ERROR`. Sources are `bridge`, `installer`, and `updater`. Context fields identify the operation, short request id, duration, retry delay, or repeat count without breaking the sentence. Normal output is bounded so the bridge can run for days without filling a terminal or log file:
+
+- Startup and pairing name the relay, installed bridge version, and Salesforce CLI version.
+- One line marks each request as started and another as finished, with a short request id and human-readable duration.
+- Recoverable failures are `WARN` lines with the retry delay; terminal failures, pairing loss, and undeliverable results are `ERROR` lines that say what to do next.
+- Progress polls (`inventory.status`) are `DEBUG` lines; they run about once per second during a load.
+- Repeated failures are summarized at most every five minutes. A quiet gap starts a new failure episode, and recovery is announced once from the next successful request.
+- Cancelled requests and updates are always reported with their request id or next step.
 
 ```bash
 npx -y @dcat-toolkit/bridge@latest start --verbose   # include polls and progress detail
-npx -y @dcat-toolkit/bridge@latest start --quiet    # failures only
+npx -y @dcat-toolkit/bridge@latest start --quiet     # warnings and errors only
 ```
 
 `DCAT_BRIDGE_LOG_LEVEL=debug` and `DCAT_BRIDGE_LOG_LEVEL=quiet` do the same for long-running service installs. `--quiet` wins over `--verbose` when both are present. Logs never contain the agent token or credential-shaped values.

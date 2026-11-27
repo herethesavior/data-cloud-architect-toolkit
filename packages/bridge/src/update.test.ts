@@ -38,7 +38,7 @@ describe('bridge self-update', () => {
       expect.objectContaining({ detached: true, stdio: 'ignore', windowsHide: true }),
     );
     expect(child.unref).toHaveBeenCalledOnce();
-    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge updated'));
+    expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge update installed'));
   });
 
   it('keeps the requested log level when starting the replacement', async () => {

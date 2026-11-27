@@ -5,6 +5,7 @@ import { CliError, safeErrorMessage, validateAlias } from '@dcat/salesforce-cli'
 import {
   createBridgeLogger,
   createFailureReporter,
+  formatDuration,
   type BridgeLogLevel,
 } from './bridge-logging.ts';
 import { clearDiscoverySessions, getDiscoverySession, startDiscoverySession } from './discovery-sessions.ts';
@@ -309,16 +310,19 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
     }, options.signal, PAIR_TIMEOUT_MS);
     token = paired.agentToken;
     await options.onPaired?.(token);
-    logger.info('DCAT bridge paired with the site.');
+    logger.info('paired with the site', { relay: options.relayUrl });
   }
 
   // Idle polls are held open by the relay. This delay only backs off failures.
-  const interval = options.pollIntervalMs ?? 2000;
-  logger.info(`DCAT bridge ${state.config.version} is running with Salesforce CLI ${state.cliStatus.version ?? 'unknown'}. Press Ctrl+C to stop.`);
+  const interval = options.pollIntervalMs ?? 2_000;
+  logger.info('ready; press Ctrl+C to stop', {
+    version: state.config.version,
+    cli: state.cliStatus.version ?? 'unknown',
+  });
 
   while (!options.signal?.aborted) {
     try {
-      logger.debug('Polling the relay for work…');
+      logger.debug('polling the relay for work');
       const poll = await postWithDeadline<PollResult>(http, '/api/relay/poll', {
         agentToken: token,
         version: state.config.version,
@@ -328,11 +332,11 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
         // action reaches the bridge without a two-second polling delay.
         wait: true,
       }, options.signal, POLL_TIMEOUT_MS);
-      failures.success();
-      logger.debug(`Relay returned ${poll.tasks.length} ${poll.tasks.length === 1 ? 'task' : 'tasks'}.`);
+      logger.debug(`relay returned ${poll.tasks.length} ${poll.tasks.length === 1 ? 'task' : 'tasks'}`);
       if (poll.status === 'unpaired') {
         throw new RelayAuthError('The site reset this bridge pairing. Run setup again.');
       }
+      failures.success();
       // A successful empty long-poll ends only when the relay woke it for a
       // status probe or its 20s window expired. Re-poll immediately so the
       // probe sees liveness within its short window; failures and executed
@@ -341,13 +345,14 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
 
       for (const task of poll.tasks) {
         const operation = task.operation.operation;
+        const request = task.id.slice(0, 8);
         // Status polls happen about once per second during discovery. Logging
         // each one at info level would dominate a long-running agent's output.
         const taskLogger = operation === 'inventory.status' ? logger.debug : logger.info;
-        taskLogger(`Running ${operation} (${task.id.slice(0, 8)})…`);
+        taskLogger(`${operation} started`, { request });
         const startedAt = Date.now();
         if (await taskCancelled(http, token, task.id, options.signal)) {
-          logger.info(`Bridge skipped cancelled request ${task.id}.`);
+          logger.info(`${operation} skipped`, { request, reason: 'cancelled' });
           continue;
         }
         let response: RelayResponse;
@@ -355,11 +360,15 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
           const result = await executeRelayOperation(state, task.operation, options.onUpdate);
           response = { id: task.id, ok: true, result };
           failures.success();
-          taskLogger(`${operation} completed in ${Date.now() - startedAt} ms.`);
+          taskLogger(`${operation} finished`, { request, duration: formatDuration(Date.now() - startedAt) });
         } catch (error) {
           response = errorResponse(task.id, error);
           const message = safeErrorMessage(error);
-          failures.report(`${operation}:${message}`, `${operation} failed in ${Date.now() - startedAt} ms: ${message}`);
+          failures.report({
+            key: `${operation}:${message}`,
+            message: `${operation} failed: ${message}`,
+            fields: { request, duration: formatDuration(Date.now() - startedAt) },
+          });
         }
         try {
           await postResponse(http, token, response, options.signal);
@@ -367,23 +376,31 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
           if (error instanceof RelayTerminalError) {
             // The Worker has stored a terminal failure for the browser; the
             // bridge itself is still healthy and must keep serving new tasks.
-            logger.error(`Bridge result rejected for this request: ${safeErrorMessage(error)} The browser can start a new load in smaller batches.`);
+            const detail = safeErrorMessage(error).replace(/\.\s*$/, '');
+            logger.error(
+              `could not deliver ${operation} result: ${detail}. The browser can retry in smaller batches.`,
+              { request },
+            );
             continue;
           }
           throw error;
         }
         if (response.ok && isRestarting(response.result)) {
-          logger.info('Bridge updated. Restarting with the latest version…');
+          logger.info('update installed; stopping this bridge process');
           return;
         }
       }
     } catch (error) {
       if (options.signal?.aborted) break;
       if (error instanceof RelayAuthError) {
-        logger.error(`Bridge stopped: ${safeErrorMessage(error)}`);
+        logger.error(`stopping: ${safeErrorMessage(error)}`);
         return;
       }
-      failures.report('relay', `Bridge request failed: ${safeErrorMessage(error)}. Retrying.`);
+      failures.report({
+        key: 'relay',
+        message: `relay request failed: ${safeErrorMessage(error)}`,
+        fields: { retryIn: formatDuration(interval) },
+      });
     }
 
     try {
