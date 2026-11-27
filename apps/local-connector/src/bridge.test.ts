@@ -108,16 +108,24 @@ function task(operation: RelayTask['operation']): RelayTask {
   return { id: 'task-1', operation, createdAt: '2026-11-18T00:00:00.000Z' };
 }
 
+function progressTask(): RelayTask {
+  return task({
+    operation: 'inventory.status',
+    alias: 'demo-uat',
+    sessionId: 'missing-session',
+  });
+}
+
 class FakeRelayHttp implements RelayHttp {
-  readonly calls: Array<{ path: string; body: unknown }> = [];
+  readonly calls: Array<{ path: string; body: unknown; signal?: AbortSignal }> = [];
 
   constructor(
     private readonly tasks: RelayTask[],
     private readonly controller: AbortController,
   ) {}
 
-  async post<T>(path: string, body: unknown): Promise<T> {
-    this.calls.push({ path, body });
+  async post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    this.calls.push({ path, body, signal });
     if (path === '/api/relay/pair') return { agentToken: 'agent-token' } as T;
     if (path === '/api/relay/cancelled') return { cancelled: false } as T;
     if (path === '/api/relay/poll') return { status: 'ok', tasks: this.tasks.splice(0) } as T;
@@ -613,5 +621,148 @@ describe('runBridge', () => {
     expect(calls).toBe(1);
     expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge stopped'));
     expect(logger).not.toHaveBeenCalledWith(expect.stringContaining('Retrying'));
+  });
+
+  it('logs each request with its operation and duration', async () => {
+    const controller = new AbortController();
+    const http = new FakeRelayHttp([task({ operation: 'cli.status' })], controller);
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    const messages = logger.mock.calls.map(([message]) => String(message));
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.stringContaining('DCAT bridge'),
+      expect.stringContaining('Running cli.status (task-1)…'),
+      expect.stringContaining('cli.status completed in'),
+    ]));
+    expect(messages.some((message) => message.includes('Polling the relay for work'))).toBe(false);
+  });
+
+  it('keeps frequent progress polls out of default logs but shows them in verbose mode', async () => {
+    const controller = new AbortController();
+    const http = new FakeRelayHttp([progressTask()], controller);
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+    expect(logger.mock.calls.map(([message]) => String(message)).join('\n'))
+      .not.toContain('Running inventory.status');
+
+    const verboseController = new AbortController();
+    const verboseLogger = vi.fn();
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http: new FakeRelayHttp([progressTask()], verboseController),
+      signal: verboseController.signal,
+      pollIntervalMs: 1,
+      logger: verboseLogger,
+      logLevel: 'debug',
+    });
+    const verboseMessages = verboseLogger.mock.calls.map(([message]) => String(message));
+    expect(verboseMessages).toEqual(expect.arrayContaining([
+      'Polling the relay for work…',
+      expect.stringContaining('Running inventory.status'),
+    ]));
+  });
+
+  it('passes an abort signal to every relay request', async () => {
+    const controller = new AbortController();
+    const http = new FakeRelayHttp([task({ operation: 'cli.status' })], controller);
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      code: 'PAIR12345678',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+    });
+
+    expect(http.calls.length).toBeGreaterThan(0);
+    expect(http.calls.every((call) => call.signal instanceof AbortSignal)).toBe(true);
+  });
+
+  it('times out a stalled relay poll instead of hanging forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      let polls = 0;
+      const http: RelayHttp = {
+        async post<T>(_path: string, _body: unknown, signal?: AbortSignal): Promise<T> {
+          polls += 1;
+          if (polls > 1) {
+            controller.abort();
+            throw new Error('Bridge stopped.');
+          }
+          await new Promise<void>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('Request aborted')));
+          });
+          return undefined as T;
+        },
+      };
+      const logger = vi.fn();
+      const running = runBridge({
+        relayUrl: 'https://dcat.example',
+        token: 'agent-token',
+        state: createState(),
+        http,
+        signal: controller.signal,
+        pollIntervalMs: 1,
+        logger,
+      });
+
+      await vi.advanceTimersByTimeAsync(45_001);
+      await running;
+      expect(logger).toHaveBeenCalledWith(expect.stringContaining('The relay did not respond in time'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('throttles repeated relay failures and reports recovery', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const http: RelayHttp = {
+      async post<T>(): Promise<T> {
+        calls += 1;
+        if (calls === 3) {
+          controller.abort();
+          throw new Error('Bridge stopped.');
+        }
+        throw new Error('Network down.');
+      },
+    };
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    expect(calls).toBe(3);
+    expect(logger.mock.calls.filter(([message]) => String(message).includes('Network down'))).toHaveLength(1);
   });
 });

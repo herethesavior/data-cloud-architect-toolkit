@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fs = vi.hoisted(() => ({
   chmod: vi.fn(async (_path: string, _mode: number) => {}),
@@ -27,6 +27,11 @@ describe('@dcat-toolkit/bridge CLI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fs.readFile.mockResolvedValue('');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('installs/checks the CLI, pairs once, and starts the bridge with saved storage', async () => {
@@ -66,5 +71,40 @@ describe('@dcat-toolkit/bridge CLI', () => {
     await expect(main(['setup', '--relay', 'http://dcat.example', '--code', 'PAIR12345678']))
       .rejects.toThrow('Use only the base HTTPS site URL');
     expect(runBridge).not.toHaveBeenCalled();
+  });
+
+  it('reuses the CLI check from setup and forwards the requested log level', async () => {
+    await main(['setup', '--relay', 'https://dcat.example', '--code', 'PAIR12345678', '--verbose']);
+
+    expect(runBridge).toHaveBeenCalledWith(expect.objectContaining({
+      logLevel: 'debug',
+      state: expect.objectContaining({
+        cliStatus: { installed: true, version: '2.116.6', error: null },
+      }),
+    }));
+  });
+
+  it('accepts a quiet log level from the environment', async () => {
+    vi.stubEnv('DCAT_BRIDGE_LOG_LEVEL', 'quiet');
+    fs.readFile.mockResolvedValue(JSON.stringify({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token-1234567890',
+      version: '0.1.9',
+    }));
+
+    await main(['start']);
+
+    expect(runBridge).toHaveBeenCalledWith(expect.objectContaining({ logLevel: 'quiet' }));
+  });
+
+  it('documents the logging controls in help', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await main(['--help']);
+
+    expect(log.mock.calls.map(([line]) => String(line)).join('\n'))
+      .toContain('--verbose');
+    expect(log.mock.calls.map(([line]) => String(line)).join('\n'))
+      .toContain('DCAT_BRIDGE_LOG_LEVEL=quiet');
   });
 });

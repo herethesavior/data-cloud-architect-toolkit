@@ -433,7 +433,20 @@ export function OrgConnections({
                 <Badge tone={bridgeReady ? 'success' : setupState === 'Checking...' ? 'neutral' : 'warning'} dot>
                   {setupState}
                 </Badge>
-                {status?.cli.version ? <span className="text-xs text-ink-soft">{status.cli.version}</span> : null}
+                {!demo && ((hosted && status?.agentVersion) || status?.cli.version) ? (
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-soft">
+                    {hosted && status?.agentVersion ? (
+                      <span title="Installed DCAT bridge version">
+                        Bridge <span className="mono text-ink">v{status.agentVersion}</span>
+                      </span>
+                    ) : null}
+                    {status?.cli.version ? (
+                      <span title="Installed Salesforce CLI version">
+                        SF CLI <span className="mono text-ink">v{status.cli.version}</span>
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
               </>}
           action={
             <Button

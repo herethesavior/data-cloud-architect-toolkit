@@ -170,7 +170,7 @@ KV is only an identity/config plane: `session:<id>` and one-time `pairing:<code>
 | Screen | What it shows |
 | --- | --- |
 | Dashboard | Inventory metrics, discovery stages, health, warnings, quick links, and exports. |
-| Org Connections | SF CLI setup, pairing, org login, environment, selection, and remove/restore. |
+| Org Connections | SF CLI setup with labelled bridge and SF CLI versions, pairing, org login, environment, selection, and remove/restore. |
 | Data Spaces | Spaces with linked object and stream counts. |
 | DLO / DMO Explorer | Searchable objects, relationship badges, tabbed detail drawers, and exports. |
 | Mapping Explorer | Source-to-target mappings with field-level detail. |
@@ -210,6 +210,8 @@ Copy `.env.example` to `.env` only if you need to change a local setting. It hol
 | `DCAT_DATA_DIR` | `.dcat-data` | Reserved for local snapshot and export files. |
 | `DCAT_API_COMPATIBILITY_PATH` | `~/.dcat/api-compatibility.json` | Optional bridge-local path for the saved Salesforce API version setting. |
 | `SESSION_TTL_SECONDS` | `2592000` | Optional Worker session lifetime; set in `.dev.vars` for local Worker development. |
+
+On the bridge machine, `DCAT_BRIDGE_LOG_LEVEL=debug` includes relay polls and progress checks; `quiet` keeps failures only. The default logs each request with its duration and summarizes repeated failures, so a multi-day run stays readable. See `packages/bridge/README.md` for the published bridge's full logging, update, and troubleshooting guide.
 
 ## Scripts
 
@@ -266,9 +268,9 @@ Release verification commands:
 
 ```bash
 npm run typecheck
-npm test                       # 197 passed
-npm run test:e2e:local         # 27 passed
-npm run test:e2e:hosted        # 4 passed
+npm test                       # all unit and integration tests
+npm run test:e2e:local         # local mocked-connector suite
+npm run test:e2e:hosted        # hosted pairing, connect, and inventory suite
 npm run build:pages
 npm run build:bridge
 npm run worker:dry-run         # confirms the DCAT_SESSIONS binding
@@ -278,6 +280,8 @@ Live-site checks covered `/api/health`, `/api/relay/status`, built assets, and t
 
 ## What changed
 
+- The published bridge now has bounded, timestamped logging: one line per request with duration, debug-only progress polls, and five-minute summaries for repeated relay failures. Relay calls, CLI installs, and self-updates have deadlines so a stalled process cannot freeze a long-running agent. The npm README documents logging, updates, and troubleshooting for `@dcat-toolkit/bridge`.
+- **Org Connections → Step 1** now labels the installed bridge and Salesforce CLI versions separately; local mode shows only the CLI version, and a hosted bridge version appears once paired.
 - The new **Change Impact Analyzer** traces grounded upstream and downstream dependencies from a selected DLO, DMO, field, or relationship. It separates direct from all-path impact, labels inferred and missing paths, and shows field-level impact only when the current snapshot names that field.
 - Stream details and exports now show resolved source-connector and configured-connection labels from Data 360 lookups while keeping the raw connector code stable for lineage, joins, and exports.
 - A stability pass fixed progressive ERD refresh, normalized case-insensitive joins across explorers, and polished the dashboard hero without changing tested copy or CTA labels.

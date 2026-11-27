@@ -111,6 +111,30 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.queryByText(/OAuth/i)).not.toBeInTheDocument();
   });
 
+  it('labels both installed versions in hosted setup', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    renderOrgConnections();
+
+    expect(await screen.findByTitle('Installed DCAT bridge version')).toHaveTextContent('v0.1.4');
+    expect(screen.getByTitle('Installed Salesforce CLI version')).toHaveTextContent('v2.116.6');
+  });
+
+  it('shows only the SF CLI version in local setup', async () => {
+    renderOrgConnections();
+
+    expect(await screen.findByTitle('Installed Salesforce CLI version')).toHaveTextContent('v2.116.6');
+    expect(screen.queryByTitle('Installed DCAT bridge version')).not.toBeInTheDocument();
+  });
+
+  it('does not show a bridge version before a hosted bridge has paired', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({ paired: false, agentVersion: null, relay: 'waiting' }));
+    renderOrgConnections();
+
+    expect(await screen.findByTitle('Installed Salesforce CLI version')).toHaveTextContent('v2.116.6');
+    expect(screen.queryByTitle('Installed DCAT bridge version')).not.toBeInTheDocument();
+  });
+
   it('names the hosted status action for what it actually refreshes', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     renderOrgConnections();
