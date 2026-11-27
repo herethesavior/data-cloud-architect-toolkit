@@ -35,7 +35,8 @@ export function createFailureReporter(logger: BridgeLogger, now: () => number = 
       const at = now();
       if (key === activeKey) {
         suppressed += 1;
-        announcedRecovery = false;
+        // Keep the recovery latch: a flapping relay must not print a recovery
+        // line after every repeated failure.
         if (at - reportedAt >= FAILURE_REPEAT_WINDOW_MS) {
           logger.error(`${activeMessage} (${suppressed} similar failures so far)`);
           suppressed = 0;

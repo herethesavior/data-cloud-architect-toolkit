@@ -29,6 +29,8 @@ export interface UpdateOptions {
   env?: NodeJS.ProcessEnv;
   runner?: CommandRunner;
   timeoutMs?: number;
+  /** Log-level flags from the current process, so the replacement keeps the same verbosity. */
+  logArgs?: readonly string[];
   spawnDetached?: SpawnDetached;
 }
 
@@ -59,7 +61,7 @@ export async function updateBridge(options: UpdateOptions = {}): Promise<BridgeU
 
   const child = spawnDetached(
     npm.command,
-    [...npm.args, 'exec', '--yes', '--package=@dcat-toolkit/bridge@latest', '--', 'dcat-bridge', 'start'],
+    [...npm.args, 'exec', '--yes', '--package=@dcat-toolkit/bridge@latest', '--', 'dcat-bridge', 'start', ...(options.logArgs ?? [])],
     {
       cwd: process.cwd(),
       env,

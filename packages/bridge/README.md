@@ -24,7 +24,7 @@ npx -y @dcat-toolkit/bridge@latest start
 
 `start` reuses the saved pairing. Stop the agent with `Ctrl+C` (or `SIGTERM`); it finishes the current step and exits cleanly.
 
-The bridge stores only the relay origin, agent token, and its own version in `~/.dcat/bridge.json` with mode `600`. It never reads the Salesforce CLI credential store. Only ten typed, read-only operations are accepted: `cli.status`, `org.list`, `org.connect`, `inventory.get`, `inventory.start`, `inventory.status`, `transform.get`, `mode.set`, `compatibility.set`, and `bridge.update`. There is no shell, URL proxy, arbitrary command, or SOQL. Process output is redacted before it is returned to the browser.
+The bridge stores only the relay origin, agent token, and its own version in `~/.dcat/bridge.json` with mode `600`. It never reads the Salesforce CLI credential store directly. Only ten typed operations are accepted: `cli.status`, `org.list`, `org.connect` (interactive browser login), `inventory.get`, `inventory.start`, `inventory.status`, `transform.get`, local preference changes (`mode.set`, `compatibility.set`), and `bridge.update`. There is no shell, URL proxy, arbitrary command, or SOQL. Process output is redacted before it is returned to the browser.
 
 ## Logging
 

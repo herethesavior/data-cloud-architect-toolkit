@@ -66,7 +66,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
   }
 
   const config = { ...loadConfig(process.env, argv), mode: 'live' as const, version: BRIDGE_VERSION };
-  const onUpdate = () => updateBridge({ logger, env: process.env });
+  const logArgs = argv.filter((arg) => arg === '--verbose' || arg === '--quiet');
+  const onUpdate = () => updateBridge({ logger, env: process.env, logArgs });
   const state = createAppState(config);
 
   if (command === 'setup') {

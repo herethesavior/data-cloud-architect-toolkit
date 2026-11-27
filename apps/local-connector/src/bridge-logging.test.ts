@@ -88,4 +88,19 @@ describe('bridge logging', () => {
 
     expect(logger.error).toHaveBeenCalledTimes(1);
   });
+
+  it('announces recovery once even when failures and successes alternate', () => {
+    const logger: BridgeLogger = { info: vi.fn(), debug: vi.fn(), error: vi.fn() };
+    const reporter = createFailureReporter(logger, () => 0);
+    const failure = 'Bridge request failed: Network down. Retrying.';
+
+    reporter.report('relay', failure);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      reporter.report('relay', failure);
+      reporter.success();
+    }
+
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledTimes(1);
+  });
 });
