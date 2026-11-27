@@ -538,6 +538,24 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   });
 });
 
+test('hosted setup before pairing does not report a CLI or org failure', async ({ page }) => {
+  const state = createState('live');
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  // The real Worker rejects org.list before pairing; reproduce that response.
+  await page.route(/\/api\/orgs(?:\/|\?|$)/, (route) =>
+    json(route, { error: { code: 'BRIDGE_NOT_CONNECTED', message: 'Set up SF CLI first.' } }, 409));
+  await page.goto('/orgs');
+
+  await expect(page.getByRole('heading', { name: 'Set up SF CLI' })).toBeVisible();
+  await expect(page.getByText('Bridge not paired')).toBeVisible();
+  await expect(page.getByText('SF CLI missing')).toHaveCount(0);
+  await expect(page.getByText("Couldn't check for Salesforce orgs")).toHaveCount(0);
+  await expect(page.getByText('The bridge is not connected')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Retry org check' })).toHaveCount(0);
+  await expect(page.getByText('Complete steps 1 and 2 first')).toBeVisible();
+});
+
 test('hosted connect detects a sandbox from its Salesforce instance URL', async ({ page }) => {
   const state = createState('live');
   await seedPreference(page, 'live');

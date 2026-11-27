@@ -75,9 +75,9 @@ function Step({ number, title, description, badge, action, children }: StepProps
 
 function setupLabel(status: BridgeStatus | undefined, hosted: boolean, installed: boolean | null): string {
   if (status === undefined) return 'Checking...';
+  if (hosted && !status.paired) return 'Bridge not paired';
   if (installed === false || status.cli.installed === false) return 'SF CLI missing';
   if (!hosted) return 'SF CLI ready';
-  if (!status.paired) return 'Bridge not paired';
   if (status.relay === 'unavailable') return 'Status unavailable';
   if (status.relay === 'stale') return 'Bridge offline';
   if (status.relay === 'working') return 'Bridge working';

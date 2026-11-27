@@ -82,12 +82,19 @@ export function App() {
   // The Worker creates its session cookie on /api/session. Hosted queries wait
   // for that response so parallel first-load requests cannot create competing cookies.
   const sessionReady = Boolean(sessionQuery.data);
+  const bridgeStatusQuery = useQuery({
+    queryKey: ['bridge-status'],
+    queryFn: api.bridgeStatus,
+    enabled: hosted && sessionReady && mode === 'live',
+  });
   const orgsQuery = useQuery({
     queryKey: orgsQueryKey(mode),
     queryFn: ({ signal }) => api.orgs({ signal }),
     // The mode lives in the session response. Waiting for it prevents a live
-    // reload from briefly retrieving orgs under the demo key.
-    enabled: sessionReady,
+    // reload from briefly retrieving orgs under the demo key. Hosted live also
+    // waits for pairing; an unpaired org.list is an expected failure, not an
+    // error to surface before setup.
+    enabled: sessionReady && (!hosted || mode === 'demo' || bridgeStatusQuery.data?.paired === true),
     ...orgsQueryOptions(hosted),
   });
 

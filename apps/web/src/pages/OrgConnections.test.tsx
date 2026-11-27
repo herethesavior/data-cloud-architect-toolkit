@@ -135,6 +135,19 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.queryByTitle('Installed DCAT bridge version')).not.toBeInTheDocument();
   });
 
+  it('does not blame SF CLI before a hosted bridge has paired', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    vi.mocked(api.bridgeStatus).mockResolvedValue(status({
+      paired: false,
+      relay: 'waiting',
+      cli: { installed: false, version: null, error: null },
+    }));
+    renderOrgConnections();
+
+    expect(await screen.findByText('Bridge not paired')).toBeInTheDocument();
+    expect(screen.queryByText('SF CLI missing')).not.toBeInTheDocument();
+  });
+
   it('names the hosted status action for what it actually refreshes', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     renderOrgConnections();
