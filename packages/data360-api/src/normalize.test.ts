@@ -9,6 +9,7 @@ import {
   dmoRelationshipsJson,
   dmosJson,
   mappingsJson,
+  transformLiveDetailJson,
 } from '@dcat/test-fixtures';
 import {
   deriveInferredRelationships,
@@ -41,6 +42,8 @@ describe('Data 360 response normalization', () => {
     expect(extractCollection({ result: { items: [] }, items: [{ name: 'B' }] }, 'Test')).toHaveLength(1);
     expect(extractCollection({ dataModelObject: [] }, 'Data Model Objects')).toEqual([]);
     expect(extractCollection({ objectSourceTargetMaps: [{ name: 'A' }] }, 'Mappings')).toHaveLength(1);
+    expect(() => extractCollection({ histories: [] }, 'Test')).toThrow(CliError);
+    expect(extractCollection({ histories: [] }, 'Test', ['histories'])).toEqual([]);
     expect(() => extractCollection({ unexpected: true }, 'Test')).toThrow(CliError);
     expect(() => parseJsonResponse('not json', 'Test')).toThrow(/not valid JSON/);
   });
@@ -292,6 +295,16 @@ describe('Data 360 response normalization', () => {
     expect(transform.definition).toBe('{"nodes":[]}');
     expect(transform.raw).toEqual(record);
     expect(transform.status).not.toBe(transform.lastRunStatus);
+  });
+
+  it('derives lineage and definition from live Big transform definitions', () => {
+    const detail = JSON.parse(transformLiveDetailJson) as { result: Record<string, unknown> };
+    const transform = normalizeDataTransforms([detail.result], context).items[0]!;
+
+    expect(transform.inputs).toEqual(['Account_Home__dll']);
+    expect(transform.outputs).toEqual(['Account_Cleaned__dll']);
+    expect(transform.definition).toContain('AccountTransformDefinition');
+    expect(transform.visualDefinition?.nodes).toHaveLength(2);
   });
 
   it('normalizes streaming type only from explicit values and preserves unknown statuses', () => {

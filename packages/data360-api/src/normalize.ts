@@ -10,7 +10,7 @@ import type {
   ResourceProvenance,
 } from '@dcat/core';
 import { CliError } from '@dcat/salesforce-cli';
-import { parseTransformVisualDefinition } from './transformVisual.ts';
+import { extractTransformLineage, parseTransformVisualDefinition } from './transformVisual.ts';
 
 export interface NormalizeContext {
   orgId: string;
@@ -50,12 +50,13 @@ const CONTAINER_KEYS = ['result', 'data', 'response', 'payload'];
  * Accept the common documented envelopes without assuming any of them.
  * A response we cannot recognize is an error, never an empty dataset.
  */
-export function extractCollection(raw: unknown, label: string): unknown[] {
+export function extractCollection(raw: unknown, label: string, extraEnvelopeKeys: readonly string[] = []): unknown[] {
   if (Array.isArray(raw)) return raw;
   if (!isRecord(raw)) {
     throw new CliError('UNEXPECTED_RESPONSE', `The ${label} response was not a JSON object or array.`);
   }
 
+  const envelopes = [...ENVELOPE_KEYS, ...extraEnvelopeKeys];
   const containers = [raw];
   for (const key of CONTAINER_KEYS) {
     const nested = raw[key];
@@ -64,7 +65,7 @@ export function extractCollection(raw: unknown, label: string): unknown[] {
 
   let firstArray: unknown[] | null = null;
   for (const container of containers) {
-    for (const key of ENVELOPE_KEYS) {
+    for (const key of envelopes) {
       const value = container[key];
       if (!Array.isArray(value)) continue;
       firstArray ??= value;
@@ -569,6 +570,7 @@ export function normalizeDataTransforms(raw: unknown, context: NormalizeContext)
       skipped += 1;
       continue;
     }
+    const lineage = extractTransformLineage(entry);
     items.push({
       apiName,
       label: firstString(entry, ['label', 'displayName', 'Label']),
@@ -579,15 +581,15 @@ export function normalizeDataTransforms(raw: unknown, context: NormalizeContext)
       type: normalizeTransformType(
         entry.type ?? entry.transformType ?? entry.Type ?? entry.kind,
       ) ?? undefined,
-      inputs: stringArrayValue(entry, ['inputs', 'inputObjects', 'sourceObjects', 'inputObject', 'sourceObject', 'InputObjects']),
-      outputs: stringArrayValue(entry, ['outputs', 'outputObjects', 'targetObjects', 'outputObject', 'targetObject', 'OutputObjects']),
+      inputs: stringArrayValue(entry, ['inputs', 'inputObjects', 'sourceObjects', 'inputObject', 'sourceObject', 'InputObjects']) ?? lineage.inputs,
+      outputs: stringArrayValue(entry, ['outputs', 'outputObjects', 'targetObjects', 'outputObject', 'targetObject', 'OutputObjects']) ?? lineage.outputs,
       lastRunStatus: firstString(entry, ['lastRunStatus', 'lastRunState', 'mostRecentRunStatus', 'LastRunStatus']),
       lastRunAt: firstString(entry, ['lastRunAt', 'lastRunDate', 'lastRunTimestamp', 'lastRunTime', 'LastRunAt']),
       schedule: toDefinitionText(
         entry.schedule ?? entry.scheduleSummary ?? entry.cadence ?? entry.scheduleDescription ?? entry.frequency,
       ),
       definition: toDefinitionText(
-        entry.definition ?? entry.transformDefinition ?? entry.sql ?? entry.sqlExpression ?? entry.pipeline ?? entry.pipelineDefinition,
+        entry.definition ?? entry.transformDefinition ?? entry.sql ?? entry.sqlExpression ?? entry.pipeline ?? entry.pipelineDefinition ?? entry.definitions,
       ),
       visualDefinition: parseTransformVisualDefinition(entry),
       dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace']),

@@ -92,6 +92,7 @@ export async function fetchCollection(
   maxPages: number,
   offsetPageSize?: number,
   allowEmptyBody = false,
+  extraEnvelopeKeys: readonly string[] = [],
 ): Promise<FetchedCollection> {
   const entries: unknown[] = [];
   const warnings: string[] = [];
@@ -103,7 +104,7 @@ export async function fetchCollection(
     const raw = await cli.restGet(alias, requestPath);
     // Salesforce answers a DMO with no relationships as 204 No Content.
     const decoded = allowEmptyBody && !raw.trim() ? [] : parseJsonResponse(raw, label);
-    const pageEntries = extractCollection(decoded, label);
+    const pageEntries = extractCollection(decoded, label, extraEnvelopeKeys);
     for (const entry of pageEntries) {
       const key = JSON.stringify(entry);
       if (seen.has(key)) continue;

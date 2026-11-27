@@ -74,6 +74,10 @@ function sanitizeTransform(transform: DataTransform): DataTransform {
     : { ...transform, raw: sanitizeRaw(transform.raw) };
 }
 
+function sanitizeDefinition(value: string | null | undefined): string | null | undefined {
+  return value === null || value === undefined ? value : redactSensitive(value);
+}
+
 interface Prepared<T> {
   value: T;
   omitted: boolean;
@@ -92,7 +96,7 @@ function omitIfTooLarge(value: unknown, fallback: unknown): { value: unknown; om
 /** Preserve summary fields while dropping a definition that cannot be relayed. */
 function prepareTransform(transform: DataTransform): Prepared<DataTransform> {
   const sanitized = sanitizeTransform(transform);
-  const definition = omitIfTooLarge(sanitized.definition, OMITTED_METADATA_MESSAGE);
+  const definition = omitIfTooLarge(sanitizeDefinition(sanitized.definition), OMITTED_METADATA_MESSAGE);
   const raw = omitIfTooLarge(sanitized.raw, { omitted: true, reason: OMITTED_METADATA_MESSAGE });
   return {
     value: { ...sanitized, definition: definition.value as string | undefined, raw: raw.value },
@@ -139,15 +143,17 @@ function hasEmptyCollection(raw: unknown): boolean {
 }
 
 export function normalizeTransformRuns(raw: unknown, context: NormalizeContext): TransformRun[] {
-  const entries = extractCollection(raw, 'Transform Run History');
+  const entries = extractCollection(raw, 'Transform Run History', ['histories']);
   const runs: TransformRun[] = [];
+  const seenIds = new Set<string>();
 
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
     if (!isRecord(entry)) continue;
-    const id = firstStringValue(entry, ['id', 'runId', 'Id', 'executionId']);
+    const id = firstStringValue(entry, ['requestId', 'id', 'runId', 'Id', 'executionId']);
     // A run without an id cannot be identified safely; never invent one.
-    if (!id) continue;
+    if (!id || seenIds.has(id)) continue;
+    seenIds.add(id);
 
     const startedAt = firstStringValue(entry, ['startedAt', 'startTime', 'startDate', 'started', 'StartTime']);
     const endedAt = firstStringValue(entry, ['endedAt', 'endTime', 'endDate', 'completedAt', 'EndTime']);
@@ -257,7 +263,16 @@ export async function fetchTransformBundle(options: FetchTransformBundleOptions)
   let runs: TransformRun[] = [];
   let runHistoryState: SectionState;
   try {
-    const fetched = await fetchCollection(client, alias, runHistoryPath, 'Transform Run History', maxPages);
+    const fetched = await fetchCollection(
+      client,
+      alias,
+      runHistoryPath,
+      'Transform Run History',
+      maxPages,
+      undefined,
+      false,
+      ['histories'],
+    );
     runs = normalizeTransformRuns(fetched.entries, {
       ...base,
       apiVersion,

@@ -5,6 +5,8 @@ import { CliError } from '@dcat/salesforce-cli';
 import {
   forbiddenRestOutput,
   transformDetailJson,
+  transformHistoriesJson,
+  transformLiveDetailJson,
   transformRunHistoryJson,
   transformScheduleEmptyJson,
   transformScheduleJson,
@@ -100,9 +102,55 @@ describe('lazy transform bundle retrieval', () => {
     expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
   });
 
+  it('reads live Big definitions and documented histories into the detail tabs', async () => {
+    const client = fakeClient({
+      [detailPath]: transformLiveDetailJson,
+      [runPath]: transformHistoriesJson,
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.sections).toEqual({ detail: 'available', runHistory: 'available', schedule: 'available' });
+    expect(bundle.transform).toMatchObject({
+      apiName: 'AccountTransform',
+      label: 'Account Transform',
+      type: 'Batch',
+      inputs: ['Account_Home__dll'],
+      outputs: ['Account_Cleaned__dll'],
+    });
+    expect(bundle.transform?.definition).toContain('Account_Cleaned__dll');
+    expect(bundle.transform?.visualDefinition?.nodes.map((node) => node.id)).toEqual(['LOAD_DATASET0', 'OUTPUT0']);
+    expect(bundle.transform?.visualDefinition?.edges).toHaveLength(1);
+    expect(bundle.runs).toMatchObject([{
+      id: 'req-1dtg7000001XCY5AAO',
+      status: 'Success',
+      recordsProcessed: 1130,
+      startedAt: '2026-11-26T02:53:50.000Z',
+      endedAt: '2026-11-26T02:53:55.000Z',
+    }]);
+    expect(bundle.messages.runHistory).toMatch(/Retrieved 1 run/);
+    expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
+  });
+
+  it('treats an empty documented history collection as an explicit empty run history', async () => {
+    const client = fakeClient({
+      [detailPath]: transformDetailJson,
+      [runPath]: JSON.stringify({ histories: [], totalSize: 0 }),
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.sections.runHistory).toBe('available');
+    expect(bundle.runs).toEqual([]);
+    expect(bundle.messages.runHistory).toMatch(/no runs/);
+  });
+
   it('omits an oversized transform definition instead of producing an unrelayable bundle', async () => {
     const detail = JSON.parse(transformDetailJson) as { result: Record<string, unknown> };
-    detail.result.transformDefinition = 'x'.repeat(MAX_TRANSFORM_METADATA_BYTES + 1);
+    delete detail.result.transformDefinition;
+    detail.result.definitions = 'x'.repeat(MAX_TRANSFORM_METADATA_BYTES + 1);
     detail.result.notes = 'y'.repeat(MAX_TRANSFORM_METADATA_BYTES + 1);
     const client = fakeClient({
       [detailPath]: JSON.stringify(detail),
@@ -191,6 +239,41 @@ describe('lazy transform bundle retrieval', () => {
     expect(bundle.messages.runHistory).toMatch(/Pagination stopped after 20 page/);
     expect(client.calls.filter((path) => path.startsWith(runPath))).toHaveLength(20);
     expect(bundle.sections.schedule).toBe('available');
+  });
+
+  it('redacts credential-shaped values from live definition text', async () => {
+    const detail = JSON.parse(transformLiveDetailJson) as { result: { definitions: Array<Record<string, unknown>> } };
+    detail.result.definitions[0]!.clientSecret = 'fake-definition-secret';
+    const client = fakeClient({
+      [detailPath]: JSON.stringify(detail),
+      [runPath]: transformHistoriesJson,
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.transform?.definition).toContain('[REDACTED]');
+    expect(JSON.stringify(bundle)).not.toContain('fake-definition-secret');
+  });
+
+  it('prefers requestId and drops duplicate history rows', async () => {
+    const client = fakeClient({
+      [detailPath]: transformDetailJson,
+      [runPath]: JSON.stringify({
+        histories: [
+          { requestId: 'req-1', id: 'parent-transform', status: 'Success' },
+          { requestId: 'req-1', status: 'Failure' },
+          { requestId: 'req-2', status: 'Success' },
+        ],
+        totalSize: 3,
+      }),
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.runs.map((run) => run.id)).toEqual(['req-1', 'req-2']);
+    expect(bundle.runs[0]?.status).toBe('Success');
   });
 
   it('redacts credential-shaped values from raw metadata', async () => {
