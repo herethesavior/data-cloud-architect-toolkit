@@ -209,6 +209,18 @@ describe('Settings bridge diagnostics', () => {
     expect(screen.queryByText(/raw stack trace/)).not.toBeInTheDocument();
   });
 
+  it('uses the read-only relay check for a hosted status refresh', async () => {
+    vi.stubEnv('VITE_HOSTED', 'true');
+    const check = vi.spyOn(api, 'checkBridgeStatus').mockResolvedValue(bridge);
+    const refreshCli = vi.spyOn(api, 'refreshCli').mockResolvedValue(bridge.cli);
+    renderSettings();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Refresh status' }));
+
+    expect(check).toHaveBeenCalledOnce();
+    expect(refreshCli).not.toHaveBeenCalled();
+  });
+
   it('shows the paired bridge version instead of the relay version in hosted mode', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     renderSettings();

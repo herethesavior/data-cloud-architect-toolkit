@@ -337,10 +337,9 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
         throw new RelayAuthError('The site reset this bridge pairing. Run setup again.');
       }
       failures.success();
-      // A successful empty long-poll ends only when the relay woke it for a
-      // status probe or its 20s window expired. Re-poll immediately so the
-      // probe sees liveness within its short window; failures and executed
-      // tasks keep the normal backoff below.
+      // A successful empty long-poll ends when its window expires or the relay
+      // wakes it for queued work. Re-poll immediately so a new task is picked up
+      // without a backoff; failures and executed tasks back off below.
       if (poll.tasks.length === 0) continue;
 
       for (const task of poll.tasks) {

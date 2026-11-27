@@ -12,6 +12,7 @@ import { demoInventory, demoOrgs, demoTransformBundles } from '@dcat/test-fixtur
 declare global {
   interface Window {
     __dcatBridgeStop?: boolean;
+    __dcatBridgeHold?: boolean;
   }
 }
 
@@ -45,7 +46,7 @@ interface HostedState {
   pairCalls: number;
   pollCalls: number;
   respondCalls: number;
-  statusProbes: number;
+  statusChecks: number;
   authCalls: string[];
   csrf: Record<string, number>;
   requestCounter: number;
@@ -94,7 +95,7 @@ function createState(mode: Mode): HostedState {
     pairCalls: 0,
     pollCalls: 0,
     respondCalls: 0,
-    statusProbes: 0,
+    statusChecks: 0,
     authCalls: [],
     csrf: {},
     requestCounter: 0,
@@ -157,6 +158,7 @@ function supportsSelfUpdate(current: string | null): boolean {
 
 function bridgeStatus(state: HostedState, origin: string) {
   const stale = state.lastSeenAt !== null && Date.now() - state.lastSeenAt > 2 * 60_000;
+  const working = state.request?.status === 'running';
   return {
     paired: state.paired,
     mode: state.mode,
@@ -165,7 +167,9 @@ function bridgeStatus(state: HostedState, origin: string) {
     lastSeenAt: state.lastSeenAt === null ? null : new Date(state.lastSeenAt).toISOString(),
     relay: state.paired && state.statusUnavailable
       ? 'unavailable'
-      : !state.paired || state.lastSeenAt === null ? 'waiting' : stale ? 'stale' : 'connected',
+      : working ? 'working'
+        : !state.paired || state.lastSeenAt === null ? 'waiting' : stale ? 'stale' : 'connected',
+    working,
     canRepairPairing: state.paired && state.statusUnavailable,
     agentVersion: state.agentVersion,
     latestVersion: state.latestVersion,
@@ -275,8 +279,8 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
     const method = route.request().method();
     noteCsrf(state, route);
 
-    if (path === '/api/relay/status' && method === 'GET') {
-      if (new URL(url).searchParams.get('probe') === '1') state.statusProbes += 1;
+    if ((path === '/api/relay/status' || path === '/api/relay/status/check') && method === 'GET') {
+      if (path === '/api/relay/status/check') state.statusChecks += 1;
       return json(route, bridgeStatus(state, new URL(url).origin));
     }
 
@@ -464,6 +468,9 @@ async function startFakeBridge(page: Page, pairingCode: string): Promise<void> {
         if (!poll.ok) return;
         const payload = (await poll.json()) as { tasks?: Array<{ id: string; operation?: RelayOperation }> };
         for (const task of payload.tasks ?? []) {
+          while (bridge.__dcatBridgeHold) {
+            await new Promise((resolve) => window.setTimeout(resolve, 50));
+          }
           const result = task.operation?.operation === 'bridge.update'
             ? { updated: true, restarting: true, message: 'Bridge updated and restarting.' }
             : {};
@@ -502,7 +509,7 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
   await startFakeBridge(page, 'PAIR12345678');
   await page.getByRole('button', { name: 'Refresh status' }).click();
   await expect(page.getByText('Bridge connected')).toBeVisible();
-  expect(state.statusProbes).toBeGreaterThan(0);
+  expect(state.statusChecks).toBeGreaterThan(0);
 
   await page.getByLabel('Org alias').fill('prod-org');
   await page.getByRole('button', { name: 'Connect org' }).click();
@@ -535,6 +542,48 @@ test('hosted bridge pairs, connects an org, and loads its inventory', async ({ p
 
   await page.evaluate(() => {
     (window as Window & { __dcatBridgeStop?: boolean }).__dcatBridgeStop = true;
+  });
+});
+
+test('hosted refresh status reports a long operation without queuing relay work', async ({ page }) => {
+  const state = createState('live');
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  await page.goto('/');
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
+  await page.getByRole('button', { name: 'Create pairing code' }).click();
+  await startFakeBridge(page, 'PAIR12345678');
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.getByText('Bridge connected')).toBeVisible();
+
+  await page.evaluate(() => {
+    window.__dcatBridgeHold = true;
+  });
+  await page.evaluate(async (sessionToken) => {
+    const response = await fetch('/api/relay/requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-dcat-token': sessionToken },
+      body: JSON.stringify({ operation: 'org.connect', alias: 'prod-org' }),
+    });
+    if (!response.ok) throw new Error(`Could not start long operation: ${response.status}`);
+  }, token);
+  await expect.poll(async () => state.request?.status).toBe('running');
+
+  const operationsBeforeRefresh = [...state.operations];
+  const checksBeforeRefresh = state.statusChecks;
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+
+  await expect(page.getByText('The bridge is running a long operation.')).toBeVisible();
+  await expect(page.getByText(
+    'It will check in again when it finishes. The API version stays unchanged until then.',
+  )).toBeVisible();
+  expect(state.statusChecks).toBeGreaterThan(checksBeforeRefresh);
+  expect(state.operations).toEqual(operationsBeforeRefresh);
+
+  await page.evaluate(() => {
+    window.__dcatBridgeHold = false;
+    window.__dcatBridgeStop = true;
   });
 });
 

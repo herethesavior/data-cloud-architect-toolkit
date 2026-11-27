@@ -186,9 +186,9 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.getByText('npx -y @dcat-toolkit/bridge@latest start')).toBeInTheDocument();
   });
 
-  it('probes the relay when hosted status is refreshed', async () => {
+  it('uses the read-only relay check when hosted status is refreshed', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
-    const probe = vi.spyOn(api, 'refreshBridgeStatus').mockResolvedValue(status({
+    const check = vi.spyOn(api, 'checkBridgeStatus').mockResolvedValue(status({
       relay: 'stale',
       lastSeenAt: new Date().toISOString(),
     }));
@@ -199,10 +199,12 @@ describe('OrgConnections connect wizard', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Refresh status' }));
 
     expect(await screen.findByText('The bridge stopped responding.')).toBeInTheDocument();
-    expect(probe).toHaveBeenCalledOnce();
+    expect(check).toHaveBeenCalledOnce();
     expect(cancel).toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['health'] });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: orgsQueryKey('live') });
+    expect(invalidate.mock.calls.some(([options]) => options?.queryKey?.[0] === 'inventory')).toBe(false);
   });
 
   it('offers the start command while a newly paired bridge checks in', async () => {

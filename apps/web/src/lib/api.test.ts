@@ -116,7 +116,7 @@ describe('web API session handling', () => {
     expect((options?.headers as Record<string, string>)['x-dcat-token']).toBeUndefined();
   });
 
-  it('probes the hosted relay on an explicit status refresh', async () => {
+  it('uses a dedicated read-only endpoint for an explicit status check', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     const status = {
       paired: true,
@@ -132,10 +132,10 @@ describe('web API session handling', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(status));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(api.refreshBridgeStatus()).resolves.toEqual(status);
+    await expect(api.checkBridgeStatus()).resolves.toEqual(status);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![0]).toBe('/api/relay/status?probe=1');
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/relay/status/check');
   });
 
   it('uses the current time for hosted health checks', async () => {

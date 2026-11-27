@@ -394,7 +394,7 @@ describe('runBridge', () => {
     });
   });
 
-  it('re-polls immediately after an empty held poll so a status probe sees liveness', async () => {
+  it('re-polls immediately after an empty held poll so new tasks are picked up without backoff', async () => {
     const controller = new AbortController();
     let polls = 0;
     const http: RelayHttp = {

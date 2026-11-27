@@ -109,7 +109,7 @@ function setupNotice(status: BridgeStatus, hosted: boolean): SetupNotice | null 
     return {
       tone: 'brand',
       title: 'The bridge is running a long operation.',
-      lines: ['It will check in again as soon as the operation finishes. Keep the bridge running.'],
+      lines: ['It will check in again when it finishes. The API version stays unchanged until then.'],
     };
   }
   if (status.relay === 'stale') {
@@ -202,14 +202,14 @@ export function OrgConnections({
 
   const refreshStatus = useMutation({
     mutationFn: async () => {
-      // Hosted status is a live relay probe; local status re-runs the CLI probe.
-      if (hosted) return api.refreshBridgeStatus();
+      // Hosted status is a read-only relay check; local status re-runs the CLI probe.
+      if (hosted) return api.checkBridgeStatus();
       await api.refreshCli();
       return api.bridgeStatus();
     },
     onSuccess: async (next) => {
       // A passive status read already in flight can resolve after this mutation
-      // and overwrite the probe result. Cancel it before writing the snapshot.
+      // and overwrite the checked result. Cancel it before writing the snapshot.
       await queryClient.cancelQueries({ queryKey: ['bridge-status'] });
       queryClient.setQueryData<BridgeStatus>(['bridge-status'], next);
       setSetupError('');
@@ -328,7 +328,7 @@ export function OrgConnections({
   // The session mode is authoritative; a cached bridge payload can briefly
   // describe the previous mode after a switch.
   const liveMode = hosted && mode === 'live';
-  // Hosted refresh probes the relay; local refresh re-runs the installed CLI.
+  // Hosted refresh reads the relay snapshot; local refresh re-runs the installed CLI.
   const statusRefreshLabel = !demo && hosted ? 'Refresh status' : 'Re-check CLI';
   // The shared cache can briefly contain fixtures from a prior mode switch.
   const candidateOrgs = (orgsQuery.data ?? []).filter(

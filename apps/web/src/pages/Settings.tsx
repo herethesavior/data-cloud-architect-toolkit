@@ -108,7 +108,10 @@ export function Settings({
     },
   });
   const refreshCli = useMutation({
-    mutationFn: api.refreshCli,
+    mutationFn: async () => {
+      // Hosted uses the read-only relay check; local re-runs the installed CLI.
+      return hosted ? api.checkBridgeStatus() : api.refreshCli();
+    },
     onSuccess: () => {
       setRefreshError('');
       invalidateDiagnosticsState(queryClient);

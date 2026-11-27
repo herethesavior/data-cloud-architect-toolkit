@@ -917,6 +917,63 @@ describe('hosted bridge relay', () => {
     }
   });
 
+  it('reports working on an explicit check while a task runs', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'org.connect',
+      alias: 'prod-org',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, version: '0.2.0' }, {}, env);
+
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now + 61_000);
+    try {
+      const check = await app.request('/api/relay/status/check', { headers: session.headers }, env);
+      expect(await check.json()).toMatchObject({
+        paired: true,
+        relay: 'working',
+        working: true,
+        agentVersion: '0.2.0',
+        cli,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not wake a held bridge poll during an explicit check', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    let pollSettled = false;
+    const heldPoll = postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, wait: true }, {}, env)
+      .then((result) => {
+        pollSettled = true;
+        return result;
+      });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const check = await app.request('/api/relay/status/check', { headers: session.headers }, env);
+    expect(await check.json()).toMatchObject({ paired: true, relay: 'connected' });
+    expect(pollSettled).toBe(false);
+
+    // Release the held poll so the test does not leave a dangling DO wait.
+    await postJson('/api/relay/requests', { operation: 'org.list' }, session.headers, env);
+    await heldPoll;
+  });
+
   it('stops an orphaned bridge when the shared session deadline passes', async () => {
     const env = makeEnv();
     const session = await startSession(env);
@@ -1167,27 +1224,7 @@ describe('hosted bridge relay', () => {
     });
   });
 
-  it('keeps a live bridge connected when an explicit probe wakes its held poll', async () => {
-    const env = makeEnv();
-    const session = await startSession(env);
-    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
-    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
-      code: pairing.code,
-      cli,
-    }, {}, env);
-
-    const heldPoll = postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, wait: true }, {}, env);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const probePromise = app.request('/api/relay/status?probe=1', { headers: session.headers }, env);
-    // The woken poll returns immediately; a real agent re-polls right away.
-    await heldPoll;
-    void postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, wait: true }, {}, env);
-    const body = await (await probePromise).json() as { relay: string; paired: boolean };
-
-    expect(body).toMatchObject({ paired: true, relay: 'connected' });
-  });
-
-  it('detects a stopped bridge on an explicit status refresh', async () => {
+  it('reports a stopped bridge on an explicit check after the heartbeat expires', async () => {
     const env = makeEnv();
     const session = await startSession(env);
     const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
@@ -1200,17 +1237,24 @@ describe('hosted bridge relay', () => {
     const before = await app.request('/api/relay/status', { headers: session.headers }, env);
     expect((await before.json() as { relay: string }).relay).toBe('connected');
 
-    const probed = await app.request('/api/relay/status?probe=1', { headers: session.headers }, env);
-    expect(await probed.json()).toMatchObject({
-      paired: true,
-      relay: 'stale',
-      updateAvailable: false,
-    });
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now + 61_000);
+    try {
+      const checked = await app.request('/api/relay/status/check', { headers: session.headers }, env);
+      expect(await checked.json()).toMatchObject({
+        paired: true,
+        relay: 'stale',
+        updateAvailable: false,
+      });
 
-    // The failed probe is recorded: an ordinary refresh must not flip back to
-    // connected using the heartbeat from before the probe.
-    const after = await app.request('/api/relay/status', { headers: session.headers }, env);
-    expect((await after.json() as { relay: string }).relay).toBe('stale');
+      // A read-only check must not rewrite the heartbeat; ordinary status stays
+      // consistent with what the explicit check reported.
+      const after = await app.request('/api/relay/status', { headers: session.headers }, env);
+      expect((await after.json() as { relay: string }).relay).toBe('stale');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

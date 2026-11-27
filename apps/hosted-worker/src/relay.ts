@@ -243,8 +243,6 @@ export async function getBridgeUpdateStatus(
 
 type AgentStateBody = RelayAgentSnapshot & {
   paired?: boolean;
-  /** Present only for an explicit probe: false means no bridge answered. */
-  alive?: boolean;
   error?: { code?: string; message?: string };
 };
 
@@ -273,12 +271,11 @@ async function revokeAgentToken(env: Env, session: SessionRecord): Promise<void>
 async function agentState(
   env: Env,
   session: SessionRecord,
-  probe = false,
 ): Promise<{ status: number; body: AgentStateBody | null }> {
   const token = session.relay.agentToken;
   if (!token) return { status: 401, body: null };
   try {
-    const { response, body } = await relayJson<AgentStateBody>(env, token, probe ? '/probe' : '/state', {
+    const { response, body } = await relayJson<AgentStateBody>(env, token, '/state', {
       agentToken: token,
       sessionId: session.id,
     });
@@ -293,12 +290,11 @@ export async function bridgeStatusForSession(
   session: SessionRecord,
   origin: string,
   context?: Context,
-  probe = false,
 ): Promise<BridgeStatus> {
   const agentToken = session.relay.agentToken;
   if (!agentToken) return getBridgeUpdateStatus(session, origin);
 
-  const { status, body } = await agentState(env, session, probe);
+  const { status, body } = await agentState(env, session);
   if (isInvalidAgentToken(body, status) || isExplicitlyUnpaired(body, status)) {
     await revokeAgentToken(env, session);
     resetSessionRelay(session);
@@ -312,7 +308,6 @@ export async function bridgeStatusForSession(
     // last known pairing and show a retryable degraded state instead.
     return getBridgeUpdateStatus(session, origin, { relay: 'unavailable', working: false });
   }
-  const missedProbe = probe && body.alive === false;
   return getBridgeUpdateStatus({
     ...session,
     relay: {
@@ -321,9 +316,9 @@ export async function bridgeStatusForSession(
       agentVersion: body.agentVersion,
       cli: body.cli,
       compatibility: body.compatibility ?? session.relay.compatibility,
-      working: body.working === true && !missedProbe,
+      working: body.working === true,
     },
-  }, origin, missedProbe ? { relay: 'stale', working: false } : {});
+  }, origin);
 }
 
 async function pairingState(env: Env, session: SessionRecord): Promise<PairingState> {
@@ -351,21 +346,27 @@ export async function clearRelayRequest(env: Env, session: SessionRecord): Promi
 export function relayRoutes() {
   const app = new Hono<{ Bindings: Env }>();
 
-  app.get('/api/relay/status', async (context) => {
+  async function statusResponse(context: Context<{ Bindings: Env }>): Promise<Response> {
     try {
       const session = await resolveSession(context, context.env);
-      const probe = context.req.query('probe') === '1';
       return context.json(await bridgeStatusForSession(
         context.env,
         session,
         originOf(context.req.url),
         context,
-        probe,
       ));
     } catch (error) {
       return sendRouteError(context, error);
     }
-  });
+  }
+
+  app.get('/api/relay/status', statusResponse);
+
+  // Dedicated read-only check for the UI's Refresh status action. It shares the
+  // passive path on purpose: no Durable Object probe, no woken poll, no relay
+  // task, and no mutation of the recorded heartbeat. A busy bridge is reported
+  // from the relay's current operation state instead of being probed.
+  app.get('/api/relay/status/check', statusResponse);
 
   app.post('/api/relay/pairing', async (context) => {
     try {
