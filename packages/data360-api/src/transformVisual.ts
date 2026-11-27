@@ -4,6 +4,7 @@ const MAX_VISUAL_NODES = 120;
 const MAX_VISUAL_EDGES = 240;
 const MAX_SUMMARY_ITEMS = 6;
 const MAX_SUMMARY_LENGTH = 120;
+const TWO_STEP_GAP = 288;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -132,8 +133,10 @@ function nodeRoles(node: JsonRecord): { input: boolean; output: boolean } {
   const action = text(node.action)?.toLowerCase() ?? '';
   const type = text(node.type)?.toLowerCase() ?? '';
   return {
-    input: /load|source|input|read|ingest|extract/.test(action) || /load|source|input|read/.test(type),
-    output: /output|write|target|sink|save/.test(action) || /output|write|target|sink/.test(type),
+    input: /(^|[^a-z])(load|source|input|read|ingest|extract)/.test(action)
+      || /(^|[^a-z])(load|source|input|read)/.test(type),
+    output: /(^|[^a-z])(output|write|target|sink|save)/.test(action)
+      || /(^|[^a-z])(output|write|target|sink)/.test(type),
   };
 }
 
@@ -192,6 +195,7 @@ export function parseTransformVisualDefinition(raw: unknown): TransformVisualDef
 
   const byId = new Map(graphNodes.map((entry) => [entry.id, entry.record]));
   const ordered = uiNodes.length > 0 ? uiNodes : graphNodes;
+  const roles = new Map<string, { input: boolean; output: boolean }>();
   let positioned = 0;
 
   const nodes: TransformVisualNode[] = ordered.slice(0, MAX_VISUAL_NODES).map((entry, index) => {
@@ -201,6 +205,7 @@ export function parseTransformVisualDefinition(raw: unknown): TransformVisualDef
     if (sourceTop !== null && sourceLeft !== null) positioned += 1;
     const top = sourceTop ?? 64 + Math.floor(index / 4) * 132;
     const left = sourceLeft ?? 64 + (index % 4) * 220;
+    roles.set(entry.id, nodeRoles({ ...entry.record, ...graphNode }));
     const sources = [
       ...sourcesOf(entry.record.sources),
       ...sourcesOf(graphNode?.sources),
@@ -251,6 +256,25 @@ export function parseTransformVisualDefinition(raw: unknown): TransformVisualDef
       break;
     }
     edges.push({ id, source: candidate.source, target: candidate.target, label: candidate.label });
+  }
+
+  const inputs = nodes.filter((node) => roles.get(node.id)?.input);
+  const outputs = nodes.filter((node) => roles.get(node.id)?.output);
+  if (nodes.length === 2 && edges.length === 0 && inputs.length === 1 && outputs.length === 1
+    && inputs[0]!.id !== outputs[0]!.id) {
+    const source = inputs[0]!;
+    const target = outputs[0]!;
+    edges.push({ id: `${source.id}->${target.id}`, source: source.id, target: target.id, label: null });
+  }
+
+  // Two wide nodes at Salesforce's source positions often overlap, which hides
+  // the connector. Keep the first position and open a gap for the single arrow.
+  if (nodes.length === 2 && edges.length === 1) {
+    const source = nodes.find((node) => node.id === (inputs[0]?.id ?? edges[0]!.source));
+    const target = nodes.find((node) => node.id === (outputs[0]?.id ?? edges[0]!.target));
+    if (source && target && source.id !== target.id) {
+      target.left = Math.max(target.left, source.left + TWO_STEP_GAP);
+    }
   }
 
   if (nodes.length === 0) return null;
