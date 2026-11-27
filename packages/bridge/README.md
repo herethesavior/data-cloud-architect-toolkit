@@ -31,7 +31,7 @@ The bridge stores only the relay origin, agent token, and its own version in `~/
 Every line is one event with an ISO timestamp, level, source, a short message, and `key=value` context:
 
 ```text
-2026-11-27T15:04:05.123Z INFO  bridge    ready; press Ctrl+C to stop version=0.1.9 cli=2.116.6
+2026-11-27T15:04:05.123Z INFO  bridge    ready; press Ctrl+C to stop version=0.2.0 cli=2.116.6
 2026-11-27T15:04:05.456Z INFO  bridge    cli.status started request=task-1
 2026-11-27T15:04:05.498Z INFO  bridge    cli.status finished request=task-1 duration=42ms
 ```
