@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTransformVisualDefinition } from './transformVisual.ts';
+import { extractTransformLineage, parseTransformVisualDefinition } from './transformVisual.ts';
 import { normalizeDataTransforms } from './normalize.ts';
 
 function liveDetail() {
@@ -114,6 +114,37 @@ describe('Salesforce transform canvas metadata', () => {
     }]);
     expect(visual!.nodes[1]!.left).toBeGreaterThanOrEqual(visual!.nodes[0]!.left + 280);
     expect(visual!.nodes[1]!.top).toBe(visual!.nodes[0]!.top);
+  });
+
+  it('reads lineage roles from UI nodes when graph actions are absent', () => {
+    const detail = liveDetail();
+    for (const node of Object.values(detail.definitions[0]!.nodes)) {
+      delete (node as Record<string, unknown>).action;
+    }
+    delete (detail.definitions[0]!.ui as { connectors?: unknown }).connectors;
+    for (const node of Object.values(detail.definitions[0]!.nodes)) {
+      delete (node as Record<string, unknown>).sources;
+    }
+
+    expect(extractTransformLineage(detail)).toEqual({
+      inputs: ['Account_Home__dll'],
+      outputs: ['Account_Cleaned__dll'],
+    });
+    expect(parseTransformVisualDefinition(detail)?.edges).toHaveLength(1);
+  });
+
+  it('uses the same definition for lineage and the canvas when versions are stacked', () => {
+    const detail = liveDetail();
+    const stale = structuredClone(detail.definitions[0]!);
+    stale.nodes.LOAD_DATASET0.parameters.dataset.name = 'Old_Home__dll';
+    stale.nodes.OUTPUT0.parameters.dataset.name = 'Old_Cleaned__dll';
+    detail.definitions.unshift(stale);
+
+    expect(extractTransformLineage(detail)).toEqual({
+      inputs: ['Old_Home__dll'],
+      outputs: ['Old_Cleaned__dll'],
+    });
+    expect(parseTransformVisualDefinition(detail)?.label).toBe(stale.label);
   });
 
   it('attaches the canvas model during transform normalization', () => {

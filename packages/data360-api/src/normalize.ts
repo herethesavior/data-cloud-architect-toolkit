@@ -43,19 +43,20 @@ export function parseJsonResponse(raw: string, label: string): unknown {
   }
 }
 
-const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'relationships', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'histories', 'transformRuns', 'executions', 'connectorInfoList', 'connections'];
+const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'relationships', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions', 'connectorInfoList', 'connections'];
 const CONTAINER_KEYS = ['result', 'data', 'response', 'payload'];
 
 /**
  * Accept the common documented envelopes without assuming any of them.
  * A response we cannot recognize is an error, never an empty dataset.
  */
-export function extractCollection(raw: unknown, label: string): unknown[] {
+export function extractCollection(raw: unknown, label: string, extraEnvelopeKeys: readonly string[] = []): unknown[] {
   if (Array.isArray(raw)) return raw;
   if (!isRecord(raw)) {
     throw new CliError('UNEXPECTED_RESPONSE', `The ${label} response was not a JSON object or array.`);
   }
 
+  const envelopes = [...ENVELOPE_KEYS, ...extraEnvelopeKeys];
   const containers = [raw];
   for (const key of CONTAINER_KEYS) {
     const nested = raw[key];
@@ -64,7 +65,7 @@ export function extractCollection(raw: unknown, label: string): unknown[] {
 
   let firstArray: unknown[] | null = null;
   for (const container of containers) {
-    for (const key of ENVELOPE_KEYS) {
+    for (const key of envelopes) {
       const value = container[key];
       if (!Array.isArray(value)) continue;
       firstArray ??= value;

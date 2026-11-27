@@ -42,6 +42,8 @@ describe('Data 360 response normalization', () => {
     expect(extractCollection({ result: { items: [] }, items: [{ name: 'B' }] }, 'Test')).toHaveLength(1);
     expect(extractCollection({ dataModelObject: [] }, 'Data Model Objects')).toEqual([]);
     expect(extractCollection({ objectSourceTargetMaps: [{ name: 'A' }] }, 'Mappings')).toHaveLength(1);
+    expect(() => extractCollection({ histories: [] }, 'Test')).toThrow(CliError);
+    expect(extractCollection({ histories: [] }, 'Test', ['histories'])).toEqual([]);
     expect(() => extractCollection({ unexpected: true }, 'Test')).toThrow(CliError);
     expect(() => parseJsonResponse('not json', 'Test')).toThrow(/not valid JSON/);
   });

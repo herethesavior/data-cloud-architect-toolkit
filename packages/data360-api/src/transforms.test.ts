@@ -149,7 +149,8 @@ describe('lazy transform bundle retrieval', () => {
 
   it('omits an oversized transform definition instead of producing an unrelayable bundle', async () => {
     const detail = JSON.parse(transformDetailJson) as { result: Record<string, unknown> };
-    detail.result.transformDefinition = 'x'.repeat(MAX_TRANSFORM_METADATA_BYTES + 1);
+    delete detail.result.transformDefinition;
+    detail.result.definitions = 'x'.repeat(MAX_TRANSFORM_METADATA_BYTES + 1);
     detail.result.notes = 'y'.repeat(MAX_TRANSFORM_METADATA_BYTES + 1);
     const client = fakeClient({
       [detailPath]: JSON.stringify(detail),
@@ -238,6 +239,41 @@ describe('lazy transform bundle retrieval', () => {
     expect(bundle.messages.runHistory).toMatch(/Pagination stopped after 20 page/);
     expect(client.calls.filter((path) => path.startsWith(runPath))).toHaveLength(20);
     expect(bundle.sections.schedule).toBe('available');
+  });
+
+  it('redacts credential-shaped values from live definition text', async () => {
+    const detail = JSON.parse(transformLiveDetailJson) as { result: { definitions: Array<Record<string, unknown>> } };
+    detail.result.definitions[0]!.clientSecret = 'fake-definition-secret';
+    const client = fakeClient({
+      [detailPath]: JSON.stringify(detail),
+      [runPath]: transformHistoriesJson,
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.transform?.definition).toContain('[REDACTED]');
+    expect(JSON.stringify(bundle)).not.toContain('fake-definition-secret');
+  });
+
+  it('prefers requestId and drops duplicate history rows', async () => {
+    const client = fakeClient({
+      [detailPath]: transformDetailJson,
+      [runPath]: JSON.stringify({
+        histories: [
+          { requestId: 'req-1', id: 'parent-transform', status: 'Success' },
+          { requestId: 'req-1', status: 'Failure' },
+          { requestId: 'req-2', status: 'Success' },
+        ],
+        totalSize: 3,
+      }),
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.runs.map((run) => run.id)).toEqual(['req-1', 'req-2']);
+    expect(bundle.runs[0]?.status).toBe('Success');
   });
 
   it('redacts credential-shaped values from raw metadata', async () => {
