@@ -1,5 +1,14 @@
-import type { CliStatus, OrgSummary, RelayOperation, RelayRequestState, RelayResponse, RelayTask } from '@dcat/core';
-import { relayOperationSchema } from '@dcat/core';
+import type {
+  CliStatus,
+  DiscoveryProgress,
+  OrgSummary,
+  RelayOperation,
+  RelayRequestState,
+  RelayResponse,
+  RelayTask,
+  ResourceFamily,
+} from '@dcat/core';
+import { RESOURCE_FAMILIES, relayOperationSchema } from '@dcat/core';
 import { fetchTransformBundle, validateTransformId } from '@dcat/data360-api';
 import { CliError, safeErrorMessage, validateAlias } from '@dcat/salesforce-cli';
 import {
@@ -154,6 +163,50 @@ function errorResponse(id: string, error: unknown): RelayResponse {
   return { id, ok: false, error: { code, message: safeErrorMessage(error) } };
 }
 
+const FAMILY_LABELS: Record<ResourceFamily, string> = {
+  'data-spaces': 'data spaces',
+  dlos: 'DLOs',
+  dmos: 'DMOs',
+  mappings: 'mappings',
+  'data-streams': 'data streams',
+  'data-transforms': 'data transforms',
+};
+
+function actionLabel(operation: string): string {
+  if (operation === 'org.list') return 'org list';
+  if (operation === 'org.connect') return 'org connect';
+  if (operation === 'inventory.start' || operation === 'inventory.status' || operation === 'inventory.get') {
+    return 'inventory loading';
+  }
+  return operation;
+}
+
+function familyScope(families: readonly ResourceFamily[] | undefined): string {
+  if (!families?.length || (families.length === RESOURCE_FAMILIES.length
+    && RESOURCE_FAMILIES.every((family) => families.includes(family)))) return 'all';
+  return families.map((family) => FAMILY_LABELS[family]).join(',');
+}
+
+function inventoryProgress(result: unknown): DiscoveryProgress | null {
+  if (typeof result !== 'object' || result === null) return null;
+  if ('snapshot' in result) {
+    const snapshot = (result as { snapshot?: { progress?: DiscoveryProgress } }).snapshot;
+    return snapshot?.progress ?? null;
+  }
+  if ('progress' in result) return (result as { progress?: DiscoveryProgress }).progress ?? null;
+  return null;
+}
+
+function loadingFamilies(progress: DiscoveryProgress): string[] {
+  return progress.families
+    .filter((family) => family.hasMore || family.status === 'running')
+    .map((family) => FAMILY_LABELS[family.family]);
+}
+
+function resultCount(result: unknown): number | undefined {
+  return Array.isArray(result) ? result.length : undefined;
+}
+
 async function findOrg(state: AppState, alias: string): Promise<OrgSummary> {
   const safeAlias = validateAlias(alias);
   const orgs = await resolveOrgs(state);
@@ -296,6 +349,35 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
   const failures = createFailureReporter(logger);
   const http = options.http ?? new FetchRelayHttp(options.relayUrl);
   const state = options.state;
+  // Only family transitions are logged at INFO: discovery polls every second,
+  // so one line per status check would drown the useful lifecycle events.
+  const inventoryPhases = new Map<string, { activeKey: string; startedAt: number }>();
+  const finishedInventorySessions = new Set<string>();
+  const reportInventoryResult = (request: string, result: unknown, startedAt: number) => {
+    const progress = inventoryProgress(result);
+    if (!progress) return;
+    const sessionId = progress.sessionId || request;
+    const active = loadingFamilies(progress);
+    const activeKey = [...active].sort().join('|');
+    const phase = inventoryPhases.get(sessionId);
+    const fields = { request, session: sessionId.slice(0, 8), loaded: progress.loaded };
+    if (progress.state === 'running' || active.length > 0) {
+      finishedInventorySessions.delete(sessionId);
+      if (!phase) inventoryPhases.set(sessionId, { activeKey, startedAt });
+      if (active.length > 0 && (!phase || phase.activeKey !== activeKey)) {
+        if (phase) phase.activeKey = activeKey;
+        logger.info(`inventory loading family=${active.join(',')}`, fields);
+      }
+      return;
+    }
+    if (finishedInventorySessions.has(sessionId)) return;
+    logger.info(`inventory loading finished state=${progress.state}`, {
+      ...fields,
+      duration: formatDuration(Date.now() - (phase?.startedAt ?? startedAt)),
+    });
+    finishedInventorySessions.add(sessionId);
+    inventoryPhases.delete(sessionId);
+  };
   // The installer has already probed `sf`; avoid a second probe on every start.
   if (!state.cliStatus.installed) await refreshCliStatus(state);
 
@@ -345,13 +427,26 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
       for (const task of poll.tasks) {
         const operation = task.operation.operation;
         const request = task.id.slice(0, 8);
-        // Status polls happen about once per second during discovery. Logging
-        // each one at info level would dominate a long-running agent's output.
+        const action = actionLabel(operation);
         const taskLogger = operation === 'inventory.status' ? logger.debug : logger.info;
-        taskLogger(`${operation} started`, { request });
+        if (operation === 'org.list') {
+          logger.info('org list started', { request });
+        } else if (task.operation.operation === 'org.connect') {
+          logger.info('org connect started', { request, alias: task.operation.alias });
+        } else if (task.operation.operation === 'inventory.start' || task.operation.operation === 'inventory.get') {
+          logger.info('inventory loading started', {
+            request,
+            alias: task.operation.alias,
+            families: familyScope(task.operation.operation === 'inventory.start' ? task.operation.families : undefined),
+          });
+        } else if (operation === 'inventory.status') {
+          logger.debug('inventory progress check started', { request });
+        } else {
+          taskLogger(`${operation} started`, { request });
+        }
         const startedAt = Date.now();
         if (await taskCancelled(http, token, task.id, options.signal)) {
-          logger.info(`${operation} skipped`, { request, reason: 'cancelled' });
+          logger.info(`${action} skipped`, { request, reason: 'cancelled' });
           continue;
         }
         let response: RelayResponse;
@@ -359,13 +454,38 @@ export async function runBridge(options: BridgeOptions): Promise<void> {
           const result = await executeRelayOperation(state, task.operation, options.onUpdate);
           response = { id: task.id, ok: true, result };
           failures.success();
-          taskLogger(`${operation} finished`, { request, duration: formatDuration(Date.now() - startedAt) });
+          const duration = formatDuration(Date.now() - startedAt);
+          if (operation === 'org.list') {
+            logger.info('org list finished', { request, count: resultCount(result), duration });
+          } else if (task.operation.operation === 'org.connect') {
+            logger.info('org connect finished', { request, alias: task.operation.alias, duration });
+          } else if (operation === 'inventory.status') {
+            reportInventoryResult(request, result, startedAt);
+            logger.debug('inventory progress check finished', { request, duration });
+          } else if (operation === 'inventory.start') {
+            reportInventoryResult(request, result, startedAt);
+            logger.debug('inventory.start finished', { request, duration });
+          } else if (task.operation.operation === 'inventory.get') {
+            const progress = inventoryProgress(result);
+            reportInventoryResult(request, result, startedAt);
+            if (progress) {
+              logger.debug('inventory.get finished', { request, duration });
+            } else {
+              logger.info('inventory loading finished state=complete', {
+                request,
+                alias: task.operation.alias,
+                duration,
+              });
+            }
+          } else {
+            taskLogger(`${operation} finished`, { request, duration });
+          }
         } catch (error) {
           response = errorResponse(task.id, error);
           const message = safeErrorMessage(error);
           failures.report({
             key: `${operation}:${message}`,
-            message: `${operation} failed: ${message}`,
+            message: `${action} failed: ${message}`,
             fields: { request, duration: formatDuration(Date.now() - startedAt) },
           });
         }

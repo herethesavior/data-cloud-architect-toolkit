@@ -104,8 +104,8 @@ async function operation<T>(state: AppState, value: unknown): Promise<T> {
   return (await executeRelayOperation(state, value)) as T;
 }
 
-function task(operation: RelayTask['operation']): RelayTask {
-  return { id: 'task-1', operation, createdAt: '2026-11-18T00:00:00.000Z' };
+function task(operation: RelayTask['operation'], id = 'task-1'): RelayTask {
+  return { id, operation, createdAt: '2026-11-18T00:00:00.000Z' };
 }
 
 function progressTask(): RelayTask {
@@ -133,6 +133,34 @@ class FakeRelayHttp implements RelayHttp {
       this.controller.abort();
       return { ok: true } as T;
     }
+    throw new Error(`Unexpected relay path: ${path}`);
+  }
+}
+
+/** Hands out several tasks in order so a full inventory lifecycle can be logged. */
+class SequenceRelayHttp implements RelayHttp {
+  private index = 0;
+
+  constructor(
+    private readonly tasks: RelayTask[],
+    private readonly controller: AbortController,
+    private readonly taskDelayMs = 0,
+  ) {}
+
+  async post<T>(path: string, _body: unknown, _signal?: AbortSignal): Promise<T> {
+    if (path === '/api/relay/poll') {
+      const next = this.tasks[this.index];
+      this.index += 1;
+      if (next && this.taskDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, this.taskDelayMs));
+      }
+      return { status: 'ok', tasks: next ? [next] : [] } as T;
+    }
+    if (path === '/api/relay/respond') {
+      if (this.index >= this.tasks.length) this.controller.abort();
+      return { ok: true } as T;
+    }
+    if (path === '/api/relay/cancelled') return { cancelled: false } as T;
     throw new Error(`Unexpected relay path: ${path}`);
   }
 }
@@ -679,6 +707,73 @@ describe('runBridge', () => {
     expect(messages.some((message) => message.includes('polling the relay for work'))).toBe(false);
   });
 
+  it('reports org list work as a complete action', async () => {
+    const controller = new AbortController();
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http: new FakeRelayHttp([task({ operation: 'org.list' })], controller),
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    expect(logger.mock.calls.map(([message]) => String(message))).toEqual(expect.arrayContaining([
+      expect.stringContaining('org list started request=task-1'),
+      expect.stringContaining('org list finished request=task-1 count=1 duration='),
+    ]));
+  });
+
+  it('reports org connect work with its alias', async () => {
+    const controller = new AbortController();
+    const logger = vi.fn();
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http: new FakeRelayHttp([task({ operation: 'org.connect', alias: 'demo-uat' })], controller),
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    expect(logger.mock.calls.map(([message]) => String(message))).toEqual(expect.arrayContaining([
+      expect.stringContaining('org connect started request=task-1 alias=demo-uat'),
+      expect.stringContaining('org connect finished request=task-1 alias=demo-uat duration='),
+    ]));
+  });
+
+  it('reports inventory loading from start through family transitions to completion', async () => {
+    const controller = new AbortController();
+    const logger = vi.fn();
+    const sessionId = 'session-1';
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      token: 'agent-token',
+      state: createState(),
+      http: new SequenceRelayHttp([
+        task({ operation: 'inventory.start', alias: 'demo-uat', sessionId }, 'task-1'),
+        task({ operation: 'inventory.status', alias: 'demo-uat', sessionId }, 'task-2'),
+      ], controller, 500),
+      signal: controller.signal,
+      pollIntervalMs: 1,
+      logger,
+    });
+
+    const messages = logger.mock.calls.map(([message]) => String(message));
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.stringContaining('inventory loading started request=task-1 alias=demo-uat families=all'),
+      expect.stringMatching(/inventory loading family=.+ request=task-/),
+      expect.stringMatching(/inventory loading finished state=(complete|partial).+ duration=/),
+    ]));
+    expect(messages.filter((message) => message.includes('inventory loading finished'))).toHaveLength(1);
+  });
+
   it('keeps frequent progress polls out of default logs but shows them in verbose mode', async () => {
     const controller = new AbortController();
     const http = new FakeRelayHttp([progressTask()], controller);
@@ -694,7 +789,7 @@ describe('runBridge', () => {
       logger,
     });
     expect(logger.mock.calls.map(([message]) => String(message)).join('\n'))
-      .not.toContain('inventory.status started');
+      .not.toContain('inventory progress check started');
 
     const verboseController = new AbortController();
     const verboseLogger = vi.fn();
@@ -711,7 +806,7 @@ describe('runBridge', () => {
     const verboseMessages = verboseLogger.mock.calls.map(([message]) => String(message));
     expect(verboseMessages).toEqual(expect.arrayContaining([
       expect.stringContaining('polling the relay for work'),
-      expect.stringContaining('inventory.status started request=task-1'),
+      expect.stringContaining('inventory progress check started request=task-1'),
     ]));
   });
 
