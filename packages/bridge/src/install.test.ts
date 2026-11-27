@@ -1,8 +1,15 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { CliError } from '@dcat/salesforce-cli';
 import { cliVersionOutput } from '@dcat/test-fixtures';
 import { normalizeRelayUrl, parseStoredBridge, validatePairingCode } from './config.ts';
-import { ensureSalesforceCli, resolveInstalledCommand, type CommandResult, type CommandRunner } from './install.ts';
+import {
+  createNodeCommandRunner,
+  ensureSalesforceCli,
+  resolveInstalledCommand,
+  type CommandResult,
+  type CommandRunner,
+} from './install.ts';
 
 interface Call {
   command: string;
@@ -42,6 +49,46 @@ describe('bridge installer configuration', () => {
       version: '0.1.0',
     });
     expect(() => parseStoredBridge({ relayUrl: 'https://dcat.example', token: 'bad' })).toThrow(CliError);
+  });
+});
+
+describe('createNodeCommandRunner', () => {
+  function fakeChild() {
+    return Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      kill: vi.fn(),
+    });
+  }
+
+  it('kills a stalled installer instead of waiting forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      const spawnFn = (() => child) as unknown as Parameters<typeof createNodeCommandRunner>[1];
+      const runner = createNodeCommandRunner(1_000, spawnFn);
+      const pending = runner.run('npm', ['install'], {});
+      const rejection = expect(pending).rejects.toMatchObject({ code: 'COMMAND_FAILED' });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rejection;
+      expect(child.kill).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('caps captured output so a noisy installer cannot exhaust memory', async () => {
+    const child = fakeChild();
+    const spawnFn = (() => child) as unknown as Parameters<typeof createNodeCommandRunner>[1];
+    const pending = createNodeCommandRunner(60_000, spawnFn).run('npm', ['install'], {});
+
+    child.stdout.emit('data', Buffer.alloc(3 * 1024 * 1024, 'x'));
+    child.emit('close', 0);
+
+    const result = await pending;
+    expect(result.stdout).toHaveLength(2 * 1024 * 1024);
+    expect(result.exitCode).toBe(0);
   });
 });
 

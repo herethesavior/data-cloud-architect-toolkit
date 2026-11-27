@@ -41,6 +41,23 @@ describe('bridge self-update', () => {
     expect(logger).toHaveBeenCalledWith(expect.stringContaining('Bridge updated'));
   });
 
+  it('keeps the requested log level when starting the replacement', async () => {
+    const spawnDetached = vi.fn(() => ({ unref: vi.fn() }));
+
+    await updateBridge({
+      env: { PATH: '/usr/bin' },
+      runner: runner(0),
+      spawnDetached,
+      logArgs: ['--quiet'],
+    });
+
+    expect(spawnDetached).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining(['dcat-bridge', 'start', '--quiet']),
+      expect.anything(),
+    );
+  });
+
   it('reports an install failure without starting a replacement', async () => {
     const spawnDetached = vi.fn(() => ({ unref: vi.fn() }));
     await expect(updateBridge({

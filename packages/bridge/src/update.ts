@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
-import { nodeCommandRunner, npmInvocation, type CommandRunner } from './install.ts';
+import { createNodeCommandRunner, npmInvocation, type CommandRunner } from './install.ts';
 
 export interface BridgeUpdateResult {
   updated: true;
@@ -28,6 +28,9 @@ export interface UpdateOptions {
   logger?: (message: string) => void;
   env?: NodeJS.ProcessEnv;
   runner?: CommandRunner;
+  timeoutMs?: number;
+  /** Log-level flags from the current process, so the replacement keeps the same verbosity. */
+  logArgs?: readonly string[];
   spawnDetached?: SpawnDetached;
 }
 
@@ -39,7 +42,7 @@ const defaultSpawnDetached: SpawnDetached = (command, args, options) => spawn(co
  */
 export async function updateBridge(options: UpdateOptions = {}): Promise<BridgeUpdateResult> {
   const env = options.env ?? process.env;
-  const runner = options.runner ?? nodeCommandRunner;
+  const runner = options.runner ?? createNodeCommandRunner(options.timeoutMs ?? 5 * 60_000);
   const logger = options.logger ?? (() => {});
   const spawnDetached = options.spawnDetached ?? defaultSpawnDetached;
   const npm = npmInvocation(env);
@@ -58,7 +61,7 @@ export async function updateBridge(options: UpdateOptions = {}): Promise<BridgeU
 
   const child = spawnDetached(
     npm.command,
-    [...npm.args, 'exec', '--yes', '--package=@dcat-toolkit/bridge@latest', '--', 'dcat-bridge', 'start'],
+    [...npm.args, 'exec', '--yes', '--package=@dcat-toolkit/bridge@latest', '--', 'dcat-bridge', 'start', ...(options.logArgs ?? [])],
     {
       cwd: process.cwd(),
       env,

@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CliError, safeErrorMessage } from '@dcat/salesforce-cli';
 import { runBridge } from '../../../apps/local-connector/src/bridge.ts';
+import { resolveBridgeLogLevel } from '../../../apps/local-connector/src/bridge-logging.ts';
 import { loadConfig } from '../../../apps/local-connector/src/config.ts';
 import { createAppState } from '../../../apps/local-connector/src/state.ts';
 import { normalizeRelayUrl, parseStoredBridge, validatePairingCode, type StoredBridge } from './config.ts';
@@ -17,7 +18,14 @@ const HELP = `DCAT Bridge
 
 setup installs Salesforce CLI when needed, pairs this browser session, and starts the bridge.
 start reconnects with the saved pairing. DCAT never asks for Salesforce credentials.
-An update requested by the paired site installs the latest release and restarts the bridge automatically.`;
+An update requested by the paired site installs the latest release and restarts the bridge automatically.
+
+Options:
+  --verbose       Log relay polls and progress checks (same as DCAT_BRIDGE_LOG_LEVEL=debug).
+  --quiet         Log failures only (same as DCAT_BRIDGE_LOG_LEVEL=quiet).
+
+Every log line has a timestamp. Normal output stays bounded during long runs;
+repeated relay failures are summarized instead of printed on every retry.`;
 
 const configPath = join(homedir(), '.dcat', 'bridge.json');
 
@@ -49,15 +57,17 @@ async function saveStored(value: StoredBridge): Promise<void> {
 
 export async function main(argv: readonly string[] = process.argv.slice(2), signal?: AbortSignal): Promise<void> {
   const command = argv[0] ?? 'start';
-  const logger = (message: string) => console.log(message);
+  const logger = (message: string) => console.log(`[${new Date().toISOString()}] ${message}`);
+  const logLevel = resolveBridgeLogLevel(argv, process.env);
 
   if (command === '--help' || command === '-h' || command === 'help') {
     console.log(HELP);
     return;
   }
 
-  const config = { ...loadConfig({}, []), mode: 'live' as const, version: BRIDGE_VERSION };
-  const onUpdate = () => updateBridge({ logger, env: process.env });
+  const config = { ...loadConfig(process.env, argv), mode: 'live' as const, version: BRIDGE_VERSION };
+  const logArgs = argv.filter((arg) => arg === '--verbose' || arg === '--quiet');
+  const onUpdate = () => updateBridge({ logger, env: process.env, logArgs });
   const state = createAppState(config);
 
   if (command === 'setup') {
@@ -68,7 +78,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
     }
     const relayUrl = normalizeRelayUrl(relay);
     const pairingCode = validatePairingCode(code);
-    await ensureSalesforceCli({ logger });
+    state.cliStatus = await ensureSalesforceCli({ logger });
     logger('Pairing this browser session with DCAT…');
     await runBridge({
       relayUrl,
@@ -76,6 +86,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
       state,
       signal,
       logger,
+      logLevel,
       onPaired: (token) => saveStored({ relayUrl, token, version: config.version }),
       onUpdate,
     });
@@ -87,7 +98,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
   }
 
   const stored = await readStored();
-  await ensureSalesforceCli({ logger });
+  state.cliStatus = await ensureSalesforceCli({ logger });
   logger(`Reconnecting to ${stored.relayUrl}…`);
   await runBridge({
     relayUrl: stored.relayUrl,
@@ -95,6 +106,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), sign
     state,
     signal,
     logger,
+    logLevel,
     onUpdate,
   });
 }

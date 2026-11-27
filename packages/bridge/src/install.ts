@@ -47,41 +47,74 @@ export function resolveInstalledCommand(
     : { command, args: [...args] };
 }
 
-/** Spawn fixed argument arrays without a shell; raw output is redacted before it is returned. */
-export const nodeCommandRunner: CommandRunner = {
-  run(command, args, env) {
-    return new Promise<CommandResult>((resolveResult, rejectResult) => {
-      const resolved = resolveInstalledCommand(command, args, env);
-      let child: ChildProcess;
-      try {
-        child = spawn(resolved.command, resolved.args, {
-          env,
-          shell: false,
-          windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-      } catch (error) {
-        rejectResult(new CliError('CLI_NOT_FOUND', 'Could not start the installer command.', { cause: error }));
-        return;
-      }
+const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60_000;
+const MAX_CAPTURED_OUTPUT_BYTES = 2 * 1024 * 1024;
 
-      let stdout = '';
-      let stderr = '';
-      child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
-      child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
-      child.on('error', (error) => {
-        rejectResult(new CliError('CLI_NOT_FOUND', 'Could not run the installer command.', { cause: error }));
-      });
-      child.on('close', (exitCode) => {
-        resolveResult({
-          stdout: redactSensitive(stdout),
-          stderr: redactSensitive(stderr),
-          exitCode: exitCode ?? 1,
+function appendOutput(current: string, chunk: Buffer): string {
+  if (current.length >= MAX_CAPTURED_OUTPUT_BYTES) return current;
+  return (current + chunk.toString('utf8')).slice(0, MAX_CAPTURED_OUTPUT_BYTES);
+}
+
+/** Spawn fixed argument arrays without a shell; a hung installer must not strand the bridge. */
+export function createNodeCommandRunner(
+  timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
+  spawnFn: typeof spawn = spawn,
+): CommandRunner {
+  return {
+    run(command, args, env) {
+      return new Promise<CommandResult>((resolveResult, rejectResult) => {
+        const resolved = resolveInstalledCommand(command, args, env);
+        let child: ChildProcess;
+        try {
+          child = spawnFn(resolved.command, resolved.args, {
+            env,
+            shell: false,
+            windowsHide: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+        } catch (error) {
+          rejectResult(new CliError('CLI_NOT_FOUND', 'Could not start the installer command.', { cause: error }));
+          return;
+        }
+
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const finish = (result: CommandResult | CliError, failed: boolean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (failed) rejectResult(result as CliError);
+          else resolveResult(result as CommandResult);
+        };
+
+        timer = setTimeout(() => {
+          child.kill();
+          const duration = timeoutMs >= 60_000
+            ? `${Math.round(timeoutMs / 60_000)} minutes`
+            : `${Math.round(timeoutMs / 1_000)} seconds`;
+          finish(new CliError('COMMAND_FAILED', `${command} did not finish within ${duration}.`), true);
+        }, timeoutMs);
+
+        child.stdout?.on('data', (chunk: Buffer) => { stdout = appendOutput(stdout, chunk); });
+        child.stderr?.on('data', (chunk: Buffer) => { stderr = appendOutput(stderr, chunk); });
+        child.on('error', (error) => {
+          finish(new CliError('CLI_NOT_FOUND', 'Could not run the installer command.', { cause: error }), true);
+        });
+        child.on('close', (exitCode) => {
+          finish({
+            stdout: redactSensitive(stdout),
+            stderr: redactSensitive(stderr),
+            exitCode: exitCode ?? 1,
+          }, false);
         });
       });
-    });
-  },
-};
+    },
+  };
+}
+
+export const nodeCommandRunner = createNodeCommandRunner();
 
 export interface NpmInvocation {
   command: string;
@@ -125,12 +158,13 @@ export interface EnsureCliOptions {
   logger?: (message: string) => void;
   platform?: NodeJS.Platform;
   skipInstall?: boolean;
+  timeoutMs?: number;
 }
 
 /** Install Salesforce CLI when missing, then make `sf` available to the bridge process. */
 export async function ensureSalesforceCli(options: EnsureCliOptions = {}): Promise<CliStatus> {
   const env = options.env ?? process.env;
-  const runner = options.runner ?? nodeCommandRunner;
+  const runner = options.runner ?? createNodeCommandRunner(options.timeoutMs);
   const logger = options.logger ?? (() => {});
   const platform = options.platform ?? process.platform;
   const skipInstall = options.skipInstall ?? env.DCAT_SKIP_CLI_INSTALL === '1';
