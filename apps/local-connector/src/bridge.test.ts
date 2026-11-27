@@ -394,6 +394,38 @@ describe('runBridge', () => {
     });
   });
 
+  it('re-polls immediately after an empty held poll so a status probe sees liveness', async () => {
+    const controller = new AbortController();
+    let polls = 0;
+    const http: RelayHttp = {
+      async post<T>(path: string, _body: unknown): Promise<T> {
+        if (path === '/api/relay/pair') return { agentToken: 'agent-token' } as T;
+        if (path === '/api/relay/cancelled') return { cancelled: false } as T;
+        if (path === '/api/relay/poll') {
+          polls += 1;
+          if (polls >= 2) controller.abort();
+          return { status: 'ok', tasks: [] } as T;
+        }
+        throw new Error(`Unexpected relay path: ${path}`);
+      },
+    };
+    const timer = setTimeout(() => controller.abort(), 300);
+
+    await runBridge({
+      relayUrl: 'https://dcat.example',
+      code: 'PAIR12345678',
+      state: createState(),
+      http,
+      signal: controller.signal,
+      pollIntervalMs: 1_000,
+      logger: vi.fn(),
+      onPaired: vi.fn(),
+    });
+    clearTimeout(timer);
+
+    expect(polls).toBe(2);
+  });
+
   it('logs a rejected result as terminal for this request but recoverable by a new load', async () => {
     const controller = new AbortController();
     const relay = new FakeRelayHttp([task({ operation: 'cli.status' })], controller);

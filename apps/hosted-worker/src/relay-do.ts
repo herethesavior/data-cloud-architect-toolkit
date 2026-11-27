@@ -516,7 +516,7 @@ export class RelayDurableObjectCore {
       // preserves the rows instead of turning a big org into a terminal error.
       const chunkMax = MAX_RELAY_RESPONSE_BYTES - 64 * 1024;
       const chunks = chunkRelayResult(response.data.result, chunkMax);
-      if (chunks && chunks.length > 1 && chunks.every((result) =>
+      if (chunks && chunks.length >= 1 && chunks.every((result) =>
         new TextEncoder().encode(JSON.stringify({ id: response.data.id, ok: true, result })).byteLength
           <= MAX_RELAY_RESPONSE_BYTES)) {
         this.clearChunks();

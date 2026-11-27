@@ -569,6 +569,90 @@ describe('hosted bridge relay', () => {
     expect(delivered).toBe(60);
   });
 
+  it('delivers a single oversized row instead of terminalizing the request', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+    const created = await postJson<{ id: string }>('/api/relay/requests', {
+      operation: 'cli.status',
+    }, session.headers, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli }, {}, env);
+
+    const provenance = {
+      orgId: '00D',
+      orgAlias: 'test',
+      sourceEndpoint: '/ssot/dmos',
+      apiVersion: '67.0',
+      retrievedAt: '2026-01-01T00:00:00.000Z',
+      confidence: 'source',
+    };
+    const result = {
+      sessionId: 'session-1',
+      snapshot: {
+        org: {
+          alias: 'test',
+          username: null,
+          orgId: '00D',
+          instanceUrl: null,
+          loginUrl: null,
+          environment: 'unknown',
+          connectedStatus: null,
+          isDefault: true,
+          isDevHub: false,
+          source: 'salesforce-cli',
+        },
+        apiVersion: '67.0',
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        mode: 'live',
+        capabilities: [],
+        dataSpaces: [],
+        dlos: [],
+        dmos: [{
+          apiName: 'Huge_DMO__dlm',
+          label: 'x'.repeat(6 * 1024 * 1024),
+          fields: [],
+          provenance,
+        }],
+        mappings: [],
+        dataStreams: [],
+        dataTransforms: [],
+        relationships: [],
+        warnings: [],
+        progress: {
+          sessionId: 'session-1',
+          generation: 'generation-1',
+          state: 'complete',
+          loaded: 1,
+          total: 1,
+          families: [],
+          message: 'All discovered metadata is loaded.',
+        },
+      },
+    };
+    const responded = await app.request('/api/relay/respond', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ agentToken: paired.agentToken, response: { id: created.id, ok: true, result } }),
+    }, env);
+    expect(responded.status).toBe(200);
+
+    const first = await app.request(`/api/relay/requests/${created.id}`, { headers: session.headers }, env);
+    expect(await first.json()).toMatchObject({
+      status: 'running',
+      result: { snapshot: { dmos: [{ apiName: 'Huge_DMO__dlm' }] } },
+    });
+    const acked = await app.request(`/api/relay/requests/${created.id}?ack=0`, { headers: session.headers }, env);
+    expect(await acked.json()).toMatchObject({
+      status: 'completed',
+      result: { snapshot: { dmos: [{ apiName: 'Huge_DMO__dlm' }] } },
+    });
+  });
+
   it('reports cancellation instead of delivering later chunks', async () => {
     const env = makeEnv();
     const session = await startSession(env);

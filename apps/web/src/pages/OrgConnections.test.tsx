@@ -179,12 +179,17 @@ describe('OrgConnections connect wizard', () => {
       relay: 'stale',
       lastSeenAt: new Date().toISOString(),
     }));
-    renderOrgConnections();
+    const { queryClient } = renderOrgConnections();
+    const cancel = vi.spyOn(queryClient, 'cancelQueries');
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
     await userEvent.click(await screen.findByRole('button', { name: 'Refresh status' }));
 
     expect(await screen.findByText('The bridge stopped responding.')).toBeInTheDocument();
     expect(probe).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['health'] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
   });
 
   it('offers the start command while a newly paired bridge checks in', async () => {

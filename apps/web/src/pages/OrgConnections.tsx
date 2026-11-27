@@ -207,12 +207,14 @@ export function OrgConnections({
       await api.refreshCli();
       return api.bridgeStatus();
     },
-    onSuccess: (next) => {
-      // Set the probed status directly. Invalidating `bridge-status` here would
-      // immediately refetch the cached heartbeat and undo an offline result.
+    onSuccess: async (next) => {
+      // A passive status read already in flight can resolve after this mutation
+      // and overwrite the probe result. Cancel it before writing the snapshot.
+      await queryClient.cancelQueries({ queryKey: ['bridge-status'] });
       queryClient.setQueryData<BridgeStatus>(['bridge-status'], next);
       setSetupError('');
-      if (!hosted) invalidateDiagnosticsState(queryClient);
+      if (hosted) void queryClient.invalidateQueries({ queryKey: ['health'] });
+      else invalidateDiagnosticsState(queryClient);
     },
     onError: (error: Error) => {
       const described = describeError(error, 'setup');

@@ -10,6 +10,8 @@ export const ITEM_DETAILS_OMITTED_WARNING = 'ITEM_DETAILS_OMITTED';
 export const MAX_CHUNK_ROWS = 5;
 /** Field maps are the bulkiest mapping rows; keep enough to explain the join. */
 const MAX_COMPACT_FIELD_MAPPINGS = 12;
+/** Identity survives every compaction pass so a trimmed row still identifies a record. */
+const IDENTITY_KEYS = new Set(['apiName', 'id', 'name', 'label', 'sourceObject', 'targetObject']);
 /**
  * Large orgs must not turn into thousands of relay polls. Small batches are
  * preferred, but the row size grows once that many chunks would be needed.
@@ -129,6 +131,15 @@ function fitRow(field: ArrayField, row: unknown, maxBytes: number): { row: unkno
     compact = stripBulkFields(compact, level);
   }
   if (byteLength(compact) > ceiling) compact = truncateStrings(compact);
+  // A row made almost entirely of scalars survives the staged trimming above.
+  // Drop non-identifying keys until the row actually fits the chunk budget.
+  for (const key of Object.keys(compact)) {
+    if (byteLength(compact) <= ceiling) break;
+    if (!IDENTITY_KEYS.has(key)) delete compact[key];
+  }
+  if (byteLength(compact) > ceiling) {
+    for (const key of Object.keys(compact)) compact[key] = String(compact[key]).slice(0, 64);
+  }
   return { row: compact, omitted: true };
 }
 
@@ -251,13 +262,18 @@ export function chunkInventorySnapshot(
 /** Supports both progressive session results and legacy all-at-once snapshots. */
 export function chunkRelayResult<T>(result: T, maxBytes: number): T[] | null {
   if (isRecord(result) && isInventorySnapshotLike(result.snapshot)) {
-    const chunks = chunkInventorySnapshot(result.snapshot, maxBytes);
-    if (chunks.length <= 1) return null;
+    const original = result.snapshot;
+    const chunks = chunkInventorySnapshot(original, maxBytes);
+    // One compacted row is still a new snapshot that must be delivered; only
+    // an untouched single snapshot needs no chunk envelope.
+    if (chunks.length <= 1 && chunks[0] === original) return null;
     return chunks.map((snapshot) => ({ ...result, snapshot }) as T);
   }
   if (isInventorySnapshotLike(result)) {
-    const chunks = chunkInventorySnapshot(result, maxBytes);
-    return chunks.length <= 1 ? null : chunks as T[];
+    const original = result as InventorySnapshot;
+    const chunks = chunkInventorySnapshot(original, maxBytes);
+    if (chunks.length <= 1 && chunks[0] === original) return null;
+    return chunks as T[];
   }
   return null;
 }

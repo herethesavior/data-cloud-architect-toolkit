@@ -726,8 +726,12 @@ function syncMappingTasks(state: ProgressiveDiscoveryState): void {
   const dmos = state.families.dmos.items as DataModelObject[];
   const fallback = defaultDataspace(state);
   let queued = 0;
+  // The option is an outstanding-query budget, not a total DMO cap: tasks
+  // already in flight occupy the same slots as newly queued ones.
+  const active = state.mappings.tasks.filter((task) => !task.done && !task.failed).length;
+  const room = Math.max(0, state.options.maxMappingQueries - active);
   for (const dmo of mappingCandidateDmos(dmos)) {
-    if (queued >= state.options.maxMappingQueries) break;
+    if (queued >= room) break;
     const name = dmo.apiName?.trim();
     if (!name || state.mappings.queuedDmos.has(name)) continue;
     state.mappings.queuedDmos.add(name);
@@ -769,8 +773,10 @@ function syncRelationshipTasks(state: ProgressiveDiscoveryState): void {
   const dmos = state.families.dmos.items as DataModelObject[];
   const fallback = defaultDataspace(state);
   let queued = 0;
+  const active = state.relationshipQueries.tasks.filter((task) => !task.done && !task.failed).length;
+  const room = Math.max(0, state.options.maxRelationshipQueries - active);
   for (const dmo of mappingCandidateDmos(dmos)) {
-    if (queued >= state.options.maxRelationshipQueries) break;
+    if (queued >= room) break;
     const name = dmo.apiName?.trim();
     if (!name || state.relationshipQueries.queuedDmos.has(name)) continue;
     const dataspace = dmo.dataSpace ?? fallback;

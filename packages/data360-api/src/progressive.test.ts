@@ -238,6 +238,58 @@ describe('progressive discovery', () => {
     expect(state.mappings.tasks.every((task) => task.done && !task.failed)).toBe(true);
   });
 
+  it('keeps outstanding mapping lookups within the configured batch', async () => {
+    const names = Array.from({ length: 25 }, (_, index) => `Dmo_${String(index).padStart(2, '0')}__dlm`);
+    const dmoPages: Record<string, string> = {};
+    for (let offset = 0; offset < names.length; offset += 10) {
+      dmoPages[buildDmoPath('65.0', offset)] = JSON.stringify({
+        records: names.slice(offset, offset + 10).map((apiName) => ({
+          apiName,
+          label: apiName,
+          isCustom: true,
+          dataSpace: 'default',
+        })),
+        totalSize: names.length,
+      });
+    }
+    dmoPages[buildDmoPath('65.0', names.length)] = JSON.stringify({
+      records: [],
+      totalSize: names.length,
+      hasMore: false,
+    });
+    const mappingPages = Object.fromEntries(names.map((name, index) => [
+      buildMappingPath(name, '65.0', 'default'),
+      JSON.stringify({
+        records: [{
+          apiName: `Map_${index}`,
+          sourceObject: `Dlo_${index}__dll`,
+          targetObject: name,
+          fieldMappings: [{ sourceField: 'Id', targetField: 'Id' }],
+        }],
+      }),
+    ]));
+    const state = await initializeProgressiveDiscovery({
+      cli: fakeCli({ ...dmoPages, ...mappingPages }),
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+      maxMappingQueries: 5,
+    });
+
+    let peakOutstanding = 0;
+    for (let batch = 0; batch < 100 && isProgressiveDiscoveryActive(state); batch += 1) {
+      await advanceProgressiveDiscovery(state);
+      peakOutstanding = Math.max(peakOutstanding,
+        state.mappings.tasks.filter((task) => !task.done && !task.failed).length);
+    }
+
+    expect(peakOutstanding).toBeLessThanOrEqual(5);
+    expect(state.mappings.tasks).toHaveLength(names.length);
+    expect(state.mappings.tasks.every((task) => task.done && !task.failed)).toBe(true);
+    expect(progressiveSnapshot(state).progress?.state).toBe('complete');
+  });
+
   it('reads final expected counts from first-page response envelopes without delaying rows', async () => {
     const cli = fakeCli();
     const state = await createProgressiveDiscovery({ cli, alias: org.alias, org, retry, apiVersionSelection: { mode: 'latest' } });
