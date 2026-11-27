@@ -171,6 +171,80 @@ export const transformDetailJson = JSON.stringify({
   },
 });
 
+export const transformLiveDetailJson = JSON.stringify({
+  result: {
+    id: '1dtg7000001XCY5AAO',
+    name: 'AccountTransform',
+    label: 'Account Transform',
+    type: 'BATCH',
+    status: 'ACTIVE',
+    lastRunStatus: 'NONE',
+    definitions: [{
+      name: 'AccountTransformDefinition',
+      label: 'Account Transform Definition',
+      type: 'STL',
+      version: '56.0',
+      nodes: {
+        LOAD_DATASET0: {
+          action: 'load',
+          sources: [],
+          parameters: {
+            dataset: { name: 'Account_Home__dll', type: 'dataLakeObject' },
+            fields: ['KQ_Id__c', 'CreatedById__c'],
+            sampleDetails: { type: 'TopN', dataspace: 'default' },
+          },
+        },
+        OUTPUT0: {
+          action: 'outputD360',
+          sources: ['LOAD_DATASET0'],
+          parameters: {
+            name: 'Account_Cleaned__dll',
+            type: 'dataLakeObject',
+            writeMode: 'OVERWRITE',
+            fieldsMappings: [{ sourceField: 'KQ_Id__c', targetField: 'Id1__c' }],
+          },
+        },
+      },
+      outputDataObjects: [{
+        name: 'Account_Cleaned__dll',
+        label: 'Account Cleaned',
+        type: 'dataLakeObject',
+      }],
+      ui: {
+        nodes: {
+          LOAD_DATASET0: {
+            label: 'Account_Home',
+            type: 'LOAD_DATASET',
+            top: 112,
+            left: 112,
+            parameters: { sampleSize: 500 },
+          },
+          OUTPUT0: {
+            label: 'Account_Cleaned',
+            type: 'OUTPUT',
+            top: 112,
+            left: 252,
+          },
+        },
+        connectors: [{ source: 'LOAD_DATASET0', target: 'OUTPUT0' }],
+      },
+    }],
+  },
+});
+
+export const transformHistoriesJson = JSON.stringify({
+  histories: [{
+    requestId: 'req-1dtg7000001XCY5AAO',
+    type: 'Batch',
+    status: 'Success',
+    startTime: '2026-11-26T02:53:50.000Z',
+    endTime: '2026-11-26T02:53:55.000Z',
+    processedRows: 1130,
+    errorMessage: '',
+  }],
+  totalSize: 1,
+});
+
 export const transformRunHistoryJson = JSON.stringify({
   records: [
     {

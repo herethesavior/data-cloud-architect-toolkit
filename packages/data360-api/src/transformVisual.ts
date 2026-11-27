@@ -123,6 +123,58 @@ function sourcesOf(value: unknown): string[] {
   });
 }
 
+export interface TransformLineage {
+  inputs: string[] | null;
+  outputs: string[] | null;
+}
+
+function nodeRoles(node: JsonRecord): { input: boolean; output: boolean } {
+  const action = text(node.action)?.toLowerCase() ?? '';
+  const type = text(node.type)?.toLowerCase() ?? '';
+  return {
+    input: /load|source|input|read|ingest|extract/.test(action) || /load|source|input|read/.test(type),
+    output: /output|write|target|sink|save/.test(action) || /output|write|target|sink/.test(type),
+  };
+}
+
+function addNamed(target: Set<string>, value: unknown): void {
+  const name = named(value);
+  if (name) target.add(name);
+}
+
+/** Read object names from the same live definition shape the canvas parser uses. */
+export function extractTransformLineage(raw: unknown): TransformLineage {
+  if (!isRecord(raw)) return { inputs: null, outputs: null };
+  const inputs = new Set<string>();
+  const outputs = new Set<string>();
+
+  for (const candidate of definitionCandidates(raw)) {
+    const definitions = Array.isArray(candidate) ? candidate : [candidate];
+    for (const definition of definitions) {
+      if (!isRecord(definition)) continue;
+      if (Array.isArray(definition.outputDataObjects)) {
+        for (const object of definition.outputDataObjects) addNamed(outputs, object);
+      }
+      for (const node of nodeEntries(definition.nodes)) {
+        const parameters = isRecord(node.record.parameters) ? node.record.parameters : null;
+        if (!parameters) continue;
+        const roles = nodeRoles(node.record);
+        if (roles.input) {
+          addNamed(inputs, parameters.dataset ?? parameters.source ?? parameters.input);
+        }
+        if (roles.output) {
+          addNamed(outputs, parameters.name ?? parameters.target ?? parameters.output ?? parameters.dataset);
+        }
+      }
+    }
+  }
+
+  return {
+    inputs: inputs.size > 0 ? [...inputs] : null,
+    outputs: outputs.size > 0 ? [...outputs] : null,
+  };
+}
+
 /**
  * Extract Salesforce's own read-only canvas metadata. Only labels, coordinates,
  * connector endpoints, and small parameter summaries are kept; large field lists

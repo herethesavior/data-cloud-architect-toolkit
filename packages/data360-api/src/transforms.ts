@@ -145,7 +145,7 @@ export function normalizeTransformRuns(raw: unknown, context: NormalizeContext):
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
     if (!isRecord(entry)) continue;
-    const id = firstStringValue(entry, ['id', 'runId', 'Id', 'executionId']);
+    const id = firstStringValue(entry, ['id', 'runId', 'requestId', 'Id', 'executionId']);
     // A run without an id cannot be identified safely; never invent one.
     if (!id) continue;
 

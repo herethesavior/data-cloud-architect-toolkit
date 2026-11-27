@@ -10,7 +10,7 @@ import type {
   ResourceProvenance,
 } from '@dcat/core';
 import { CliError } from '@dcat/salesforce-cli';
-import { parseTransformVisualDefinition } from './transformVisual.ts';
+import { extractTransformLineage, parseTransformVisualDefinition } from './transformVisual.ts';
 
 export interface NormalizeContext {
   orgId: string;
@@ -43,7 +43,7 @@ export function parseJsonResponse(raw: string, label: string): unknown {
   }
 }
 
-const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'relationships', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'transformRuns', 'executions', 'connectorInfoList', 'connections'];
+const ENVELOPE_KEYS = ['records', 'items', 'results', 'entities', 'values', 'dataSpaces', 'spaces', 'dlos', 'dataLakeObjects', 'dmos', 'dataModelObject', 'dataModelObjects', 'relationships', 'mappings', 'dataModelObjectMappings', 'objectSourceTargetMaps', 'dataStreams', 'streams', 'dataTransforms', 'transforms', 'runs', 'runHistory', 'histories', 'transformRuns', 'executions', 'connectorInfoList', 'connections'];
 const CONTAINER_KEYS = ['result', 'data', 'response', 'payload'];
 
 /**
@@ -569,6 +569,7 @@ export function normalizeDataTransforms(raw: unknown, context: NormalizeContext)
       skipped += 1;
       continue;
     }
+    const lineage = extractTransformLineage(entry);
     items.push({
       apiName,
       label: firstString(entry, ['label', 'displayName', 'Label']),
@@ -579,15 +580,15 @@ export function normalizeDataTransforms(raw: unknown, context: NormalizeContext)
       type: normalizeTransformType(
         entry.type ?? entry.transformType ?? entry.Type ?? entry.kind,
       ) ?? undefined,
-      inputs: stringArrayValue(entry, ['inputs', 'inputObjects', 'sourceObjects', 'inputObject', 'sourceObject', 'InputObjects']),
-      outputs: stringArrayValue(entry, ['outputs', 'outputObjects', 'targetObjects', 'outputObject', 'targetObject', 'OutputObjects']),
+      inputs: stringArrayValue(entry, ['inputs', 'inputObjects', 'sourceObjects', 'inputObject', 'sourceObject', 'InputObjects']) ?? lineage.inputs,
+      outputs: stringArrayValue(entry, ['outputs', 'outputObjects', 'targetObjects', 'outputObject', 'targetObject', 'OutputObjects']) ?? lineage.outputs,
       lastRunStatus: firstString(entry, ['lastRunStatus', 'lastRunState', 'mostRecentRunStatus', 'LastRunStatus']),
       lastRunAt: firstString(entry, ['lastRunAt', 'lastRunDate', 'lastRunTimestamp', 'lastRunTime', 'LastRunAt']),
       schedule: toDefinitionText(
         entry.schedule ?? entry.scheduleSummary ?? entry.cadence ?? entry.scheduleDescription ?? entry.frequency,
       ),
       definition: toDefinitionText(
-        entry.definition ?? entry.transformDefinition ?? entry.sql ?? entry.sqlExpression ?? entry.pipeline ?? entry.pipelineDefinition,
+        entry.definition ?? entry.transformDefinition ?? entry.sql ?? entry.sqlExpression ?? entry.pipeline ?? entry.pipelineDefinition ?? entry.definitions,
       ),
       visualDefinition: parseTransformVisualDefinition(entry),
       dataSpace: firstString(entry, ['dataSpace', 'dataSpaceName', 'space', 'DataSpace']),

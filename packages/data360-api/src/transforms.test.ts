@@ -5,6 +5,8 @@ import { CliError } from '@dcat/salesforce-cli';
 import {
   forbiddenRestOutput,
   transformDetailJson,
+  transformHistoriesJson,
+  transformLiveDetailJson,
   transformRunHistoryJson,
   transformScheduleEmptyJson,
   transformScheduleJson,
@@ -98,6 +100,51 @@ describe('lazy transform bundle retrieval', () => {
     expect(bundle.schedule?.provenance.sourceEndpoint).toBe(schedulePath);
     expect(client.calls).toEqual([detailPath, runPath, schedulePath]);
     expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
+  });
+
+  it('reads live Big definitions and documented histories into the detail tabs', async () => {
+    const client = fakeClient({
+      [detailPath]: transformLiveDetailJson,
+      [runPath]: transformHistoriesJson,
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.sections).toEqual({ detail: 'available', runHistory: 'available', schedule: 'available' });
+    expect(bundle.transform).toMatchObject({
+      apiName: 'AccountTransform',
+      label: 'Account Transform',
+      type: 'Batch',
+      inputs: ['Account_Home__dll'],
+      outputs: ['Account_Cleaned__dll'],
+    });
+    expect(bundle.transform?.definition).toContain('Account_Cleaned__dll');
+    expect(bundle.transform?.visualDefinition?.nodes.map((node) => node.id)).toEqual(['LOAD_DATASET0', 'OUTPUT0']);
+    expect(bundle.transform?.visualDefinition?.edges).toHaveLength(1);
+    expect(bundle.runs).toMatchObject([{
+      id: 'req-1dtg7000001XCY5AAO',
+      status: 'Success',
+      recordsProcessed: 1130,
+      startedAt: '2026-11-26T02:53:50.000Z',
+      endedAt: '2026-11-26T02:53:55.000Z',
+    }]);
+    expect(bundle.messages.runHistory).toMatch(/Retrieved 1 run/);
+    expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
+  });
+
+  it('treats an empty documented history collection as an explicit empty run history', async () => {
+    const client = fakeClient({
+      [detailPath]: transformDetailJson,
+      [runPath]: JSON.stringify({ histories: [], totalSize: 0 }),
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.sections.runHistory).toBe('available');
+    expect(bundle.runs).toEqual([]);
+    expect(bundle.messages.runHistory).toMatch(/no runs/);
   });
 
   it('omits an oversized transform definition instead of producing an unrelayable bundle', async () => {

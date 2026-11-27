@@ -16,6 +16,8 @@ import {
   mappingsJson,
   orgListJson,
   transformDetailJson,
+  transformHistoriesJson,
+  transformLiveDetailJson,
   transformRunHistoryJson,
   transformScheduleJson,
   versionsJson,
@@ -44,7 +46,7 @@ async function demoApp() {
 }
 
 /** Fake CLI that answers version, org-list, and every Data 360 REST path. */
-function liveCliRunner(): ProcessRunner {
+function liveCliRunner(transformBodies: { detail?: string; runHistory?: string } = {}): ProcessRunner {
   const restBodies: Record<string, string> = { '/services/data/': versionsJson };
   for (const version of ['65.0', '67.0']) {
     const base = `/services/data/v${version}/ssot`;
@@ -57,9 +59,9 @@ function liveCliRunner(): ProcessRunner {
       [`${base}/connectors`]: connectorCatalogJson,
       [`${base}/connections?connectorType=SalesforceDotCom`]: connectorConnectionsJson,
       [`/${buildFamilyPath('data-transforms', version)}`]: dataTransformsJson,
-      [`${base}/data-transforms/Account_Transform`]: transformDetailJson,
-      [`${base}/data-transforms/Account_Transform?filterGroup=Big`]: transformDetailJson,
-      [`${base}/data-transforms/Account_Transform/run-history`]: transformRunHistoryJson,
+      [`${base}/data-transforms/Account_Transform`]: transformBodies.detail ?? transformDetailJson,
+      [`${base}/data-transforms/Account_Transform?filterGroup=Big`]: transformBodies.detail ?? transformDetailJson,
+      [`${base}/data-transforms/Account_Transform/run-history`]: transformBodies.runHistory ?? transformRunHistoryJson,
       [`${base}/data-transforms/Account_Transform/schedule`]: transformScheduleJson,
     });
   }
@@ -438,6 +440,33 @@ describe('local connector API', () => {
       '/services/data/v67.0/ssot/data-transforms/Account_Transform/run-history',
       '/services/data/v67.0/ssot/data-transforms/Account_Transform/schedule',
     ]));
+    await app.close();
+  });
+
+  it('normalizes live Big transform detail and documented histories through the connector', async () => {
+    const config = testConfig('live');
+    const runner = liveCliRunner({
+      detail: transformLiveDetailJson,
+      runHistory: transformHistoriesJson,
+    });
+    const app = await buildApp({ config, runner });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/orgs/demo-uat/data-transforms/Account_Transform',
+      headers: localHeaders,
+    });
+    expect(response.statusCode).toBe(200);
+    const bundle = response.json();
+    expect(bundle.transform).toMatchObject({
+      apiName: 'AccountTransform',
+      inputs: ['Account_Home__dll'],
+      outputs: ['Account_Cleaned__dll'],
+    });
+    expect(bundle.transform.definition).toContain('AccountTransformDefinition');
+    expect(bundle.transform.visualDefinition.nodes).toHaveLength(2);
+    expect(bundle.runs).toMatchObject([{ id: 'req-1dtg7000001XCY5AAO', status: 'Success' }]);
+    expect(bundle.sections).toEqual({ detail: 'available', runHistory: 'available', schedule: 'available' });
     await app.close();
   });
 
