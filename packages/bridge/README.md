@@ -43,7 +43,7 @@ Levels are `DEBUG`, `INFO`, `WARN`, and `ERROR`. Sources are `bridge`, `installe
 - Recoverable failures are `WARN` lines with the retry delay; terminal failures, pairing loss, and undeliverable results are `ERROR` lines that say what to do next.
 - Progress polls (`inventory.status`) are `DEBUG` lines; they run about once per second during a load.
 - Repeated failures are summarized at most every five minutes. A quiet gap starts a new failure episode, and recovery is announced once from the next successful request.
-- Cancelled requests and updates are always reported with their request id or next step.
+- Cancelled requests and updates are reported at normal verbosity with their request id or next step; `--quiet` hides these INFO lines.
 
 ```bash
 npx -y @dcat-toolkit/bridge@latest start --verbose   # include polls and progress detail

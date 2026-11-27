@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
+import type { BridgeStatus, InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
 import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
 import { ALL_REFRESH_FAMILIES, refreshScopeForPage } from './lib/refreshScope.ts';
@@ -86,6 +86,14 @@ export function App() {
     queryKey: ['bridge-status'],
     queryFn: api.bridgeStatus,
     enabled: hosted && sessionReady && mode === 'live',
+    // Pairing can finish while the user is on another page. Keep polling here so
+    // the root org gate notices without requiring a return to bridge setup.
+    refetchInterval: (query) => {
+      const status = query.state.data;
+      if (!status?.paired || status.relay === 'working') return 5_000;
+      if (status.cli.installed && status.relay === 'connected') return 60_000;
+      return 10_000;
+    },
   });
   const orgsQuery = useQuery({
     queryKey: orgsQueryKey(mode),
@@ -259,6 +267,10 @@ export function App() {
         // this, a late response could repopulate one mode's orgs under the other
         // mode's label. Removing the old mode also drops its persisted snapshot.
         const previousMode = session?.mode ?? mode;
+        // Captured before the status cache is cleared below. Hosted live must not
+        // run an explicit org.list while the bridge is unpaired; the enabled root
+        // observer will fetch it once the polled status reports a pairing.
+        const bridgePaired = queryClient.getQueryData<BridgeStatus>(['bridge-status'])?.paired === true;
         orgsControllerRef.current?.abort();
         orgsControllerRef.current = null;
         await queryClient.cancelQueries({ queryKey: orgsQueryKey(previousMode) });
@@ -274,17 +286,19 @@ export function App() {
         if (persistPreferencesRef.current) setModePreference(requestedMode);
         setSelectedAlias(null);
         if (persistPreferencesRef.current) setSelectedOrg(null);
-        // The connector exposes a different org list in each mode. Refresh it so
-        // a mode switch cannot leave the UI stuck on the previous mode's orgs.
-        // Seed then fetch with an explicit queryFn so the unobserved new key
-        // cannot flash "Missing queryFn" before its observer attaches.
-        const controller = new AbortController();
-        orgsControllerRef.current = controller;
-        void refreshModeOrgList(queryClient, result.mode, hosted, controller.signal)
-          .catch(() => undefined)
-          .finally(() => {
-            if (orgsControllerRef.current === controller) orgsControllerRef.current = null;
-          });
+        // The connector exposes a different org list in each mode. When the
+        // pairing gate allows it, refresh it so a mode switch cannot leave the
+        // UI stuck on the previous mode's orgs. Seed then fetch with an explicit
+        // queryFn so the unobserved new key cannot flash "Missing queryFn".
+        if (!hosted || result.mode === 'demo' || bridgePaired) {
+          const controller = new AbortController();
+          orgsControllerRef.current = controller;
+          void refreshModeOrgList(queryClient, result.mode, hosted, controller.signal)
+            .catch(() => undefined)
+            .finally(() => {
+              if (orgsControllerRef.current === controller) orgsControllerRef.current = null;
+            });
+        }
         setModeError('');
         setModeNotice(requestedMode === 'demo'
           ? 'Now using demo mode - sample metadata only.'
