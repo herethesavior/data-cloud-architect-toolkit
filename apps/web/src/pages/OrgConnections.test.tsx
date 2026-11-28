@@ -93,6 +93,8 @@ describe('OrgConnections connect wizard', () => {
   beforeEach(() => {
     vi.spyOn(api, 'orgs').mockResolvedValue([]);
     vi.spyOn(api, 'bridgeStatus').mockResolvedValue(status());
+    // Hosted queries use the liveness check; keep test status overrides shared.
+    vi.spyOn(api, 'checkBridgeStatus').mockImplementation(() => api.bridgeStatus());
   });
 
   afterEach(() => {
@@ -186,20 +188,21 @@ describe('OrgConnections connect wizard', () => {
     expect(screen.getByText('npx -y @dcat-toolkit/bridge@latest start')).toBeInTheDocument();
   });
 
-  it('uses the read-only relay check when hosted status is refreshed', async () => {
+  it('uses the liveness relay check when hosted status is refreshed', async () => {
     vi.stubEnv('VITE_HOSTED', 'true');
     const check = vi.spyOn(api, 'checkBridgeStatus').mockResolvedValue(status({
       relay: 'stale',
       lastSeenAt: new Date().toISOString(),
     }));
     const { queryClient } = renderOrgConnections();
+    const checksAfterRender = check.mock.calls.length;
     const cancel = vi.spyOn(queryClient, 'cancelQueries');
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
     await userEvent.click(await screen.findByRole('button', { name: 'Refresh status' }));
 
     expect(await screen.findByText('The bridge stopped responding.')).toBeInTheDocument();
-    expect(check).toHaveBeenCalledOnce();
+    expect(check.mock.calls.length).toBeGreaterThan(checksAfterRender);
     expect(cancel).toHaveBeenCalledWith({ queryKey: ['bridge-status'] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['health'] });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['bridge-status'] });

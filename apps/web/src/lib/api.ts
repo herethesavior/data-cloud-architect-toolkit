@@ -1,4 +1,9 @@
-import { createApiVersionStatus, inferOrgEnvironment, RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
+import {
+  BRIDGE_PROBE_TIMEOUT_MS,
+  createApiVersionStatus,
+  inferOrgEnvironment,
+  RELAY_OPERATION_TIMEOUT_MS,
+} from '@dcat/core';
 import type {
   ApiVersionSelection,
   ApiVersionStatus,
@@ -610,11 +615,16 @@ export const api = {
     return postJson<CliStatus>('/api/cli/refresh', {});
   },
   /**
-   * Explicit read-only status check. The hosted relay answers from its own
-   * snapshot; it does not wake the bridge, queue a task, or change the heartbeat.
+   * Liveness check used by the UI. The hosted relay wakes the bridge's held
+   * poll and waits for a fresh check-in; it never queues a user operation.
    */
-  checkBridgeStatus: async (): Promise<BridgeStatus> => {
-    if (isHosted()) return request<BridgeStatus>('/api/relay/status/check');
+  checkBridgeStatus: async (options: { signal?: AbortSignal } = {}): Promise<BridgeStatus> => {
+    if (isHosted()) {
+      return request<BridgeStatus>('/api/relay/status/check', {
+        signal: options.signal,
+        timeoutMs: BRIDGE_PROBE_TIMEOUT_MS + 3_000,
+      });
+    }
     return bridgeStatus();
   },
   compatibility: async (): Promise<ApiVersionStatus> => {

@@ -371,8 +371,22 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
     noteCsrf(state, route);
 
     if ((path === '/api/relay/status' || path === '/api/relay/status/check') && method === 'GET') {
-      if (path === '/api/relay/status/check') state.statusChecks += 1;
-      return json(route, bridgeStatus(state, new URL(url).origin));
+      if (path !== '/api/relay/status/check') {
+        return json(route, bridgeStatus(state, new URL(url).origin));
+      }
+      state.statusChecks += 1;
+      // Mirror the Worker's active check: wake the agent and wait for a fresh
+      // poll. A stopped bridge keeps its recent heartbeat but cannot answer.
+      const pollsBefore = state.pollCalls;
+      const deadline = Date.now() + 1_000;
+      while (Date.now() < deadline && state.pollCalls === pollsBefore) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const status = bridgeStatus(state, new URL(url).origin);
+      if (state.paired && state.lastSeenAt !== null && state.pollCalls === pollsBefore && !status.working) {
+        return json(route, { ...status, relay: 'stale', working: false });
+      }
+      return json(route, status);
     }
 
     if (path === '/api/relay/pairing' && method === 'POST') {
@@ -720,6 +734,37 @@ test('hosted refresh status reports a long operation without queuing relay work'
     window.__dcatBridgeHold = false;
     window.__dcatBridgeStop = true;
   });
+});
+
+test('hosted refresh status detects a stopped bridge without refreshing orgs', async ({ page }) => {
+  const state = createState('live');
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  await page.goto('/orgs');
+
+  await page.getByRole('button', { name: 'Create pairing code' }).click();
+  await startFakeBridge(page, 'PAIR12345678');
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.getByText('Bridge connected')).toBeVisible();
+  expect(state.lastSeenAt).not.toBeNull();
+
+  // The terminal bridge exits; no unpair request is sent, so the relay still
+  // holds a recent heartbeat until something actively checks for a new poll.
+  await page.evaluate(() => {
+    window.__dcatBridgeStop = true;
+  });
+  await page.waitForTimeout(300);
+  const pollsAfterStop = state.pollCalls;
+  await page.waitForTimeout(300);
+  expect(state.pollCalls).toBe(pollsAfterStop);
+
+  const operationsBeforeRefresh = [...state.operations];
+  const checksBeforeRefresh = state.statusChecks;
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.getByText('Bridge offline')).toBeVisible();
+  await expect(page.getByText('The bridge stopped responding.')).toBeVisible();
+  expect(state.statusChecks).toBeGreaterThan(checksBeforeRefresh);
+  expect(state.operations).toEqual(operationsBeforeRefresh);
 });
 
 test('hosted setup before pairing does not report a CLI or org failure', async ({ page }) => {

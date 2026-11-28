@@ -2,9 +2,9 @@ import type { BridgeStatus } from '@dcat/core';
 import { formatUpdatedAt, safeDateText } from './inventory.ts';
 
 /**
- * Passive status traffic has one cadence. An explicit Refresh status writes a
- * fresh snapshot, so the next poll is measured from that result rather than
- * from a second observer's older timer.
+ * Hosted liveness checks and local passive reads share one cadence. An explicit
+ * Refresh status writes a fresh snapshot, so the next poll is measured from that
+ * result rather than from a second observer's older timer.
  */
 export function bridgeStatusPollIntervalMs(status: BridgeStatus | undefined): number {
   if (!status?.paired || status.relay === 'working') return 5_000;

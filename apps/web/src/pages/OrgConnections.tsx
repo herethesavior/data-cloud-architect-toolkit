@@ -179,10 +179,10 @@ export function OrgConnections({
 
   const bridgeStatusQuery = useQuery({
     queryKey: ['bridge-status'],
-    queryFn: api.bridgeStatus,
-    // In hosted live mode the App root is the single passive poller. A second
-    // observer here would add overlapping requests and could overwrite an
-    // explicit Refresh status with a result that started before the click.
+    queryFn: ({ signal }) => hosted ? api.checkBridgeStatus({ signal }) : api.bridgeStatus(),
+    // In hosted live mode the App root is the single poller. A second observer
+    // here would add overlapping liveness checks and could overwrite an explicit
+    // Refresh status with a result that started before the click.
     refetchInterval: hosted ? false : (query) => bridgeStatusPollIntervalMs(query.state.data),
   });
   // The App root also observes the mode-scoped org list. In hosted live mode,
@@ -201,7 +201,7 @@ export function OrgConnections({
 
   const refreshStatus = useMutation({
     mutationFn: async () => {
-      // Hosted status is a read-only relay check; local status re-runs the CLI probe.
+      // Hosted status wakes the bridge long-poll; local status re-runs the CLI probe.
       if (hosted) return api.checkBridgeStatus();
       await api.refreshCli();
       return api.bridgeStatus();
