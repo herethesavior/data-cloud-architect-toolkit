@@ -85,7 +85,7 @@ export function App() {
   const sessionReady = Boolean(sessionQuery.data);
   const bridgeStatusQuery = useQuery({
     queryKey: ['bridge-status'],
-    queryFn: api.bridgeStatus,
+    queryFn: ({ signal }) => hosted ? api.checkBridgeStatus({ signal }) : api.bridgeStatus(),
     enabled: hosted && sessionReady && mode === 'live',
     // Pairing can finish while the user is on another page. Keep polling here so
     // the root org gate notices without requiring a return to bridge setup.

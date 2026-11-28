@@ -99,6 +99,12 @@ export const BRIDGE_STALE_AFTER_MS = 60_000;
 export const BRIDGE_REPAIR_GRACE_MS = 2 * 60_000;
 
 /**
+ * An explicit status check wakes the bridge's held poll and waits this long for
+ * proof of life. It never queues user work, so the window only covers a re-poll.
+ */
+export const BRIDGE_PROBE_TIMEOUT_MS = 2_000;
+
+/**
  * Shared by the browser and hosted Worker so a client deadline can never expire
  * before the Worker's relay deadline for the same operation.
  */

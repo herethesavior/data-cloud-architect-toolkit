@@ -948,7 +948,7 @@ describe('hosted bridge relay', () => {
     }
   });
 
-  it('does not wake a held bridge poll during an explicit check', async () => {
+  it('wakes a held bridge poll during an explicit check', async () => {
     const env = makeEnv();
     const session = await startSession(env);
     const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
@@ -965,13 +965,44 @@ describe('hosted bridge relay', () => {
       });
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    const check = await app.request('/api/relay/status/check', { headers: session.headers }, env);
-    expect(await check.json()).toMatchObject({ paired: true, relay: 'connected' });
-    expect(pollSettled).toBe(false);
+    const checkPromise = app.request('/api/relay/status/check', { headers: session.headers }, env);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(pollSettled).toBe(true);
 
-    // Release the held poll so the test does not leave a dangling DO wait.
-    await postJson('/api/relay/requests', { operation: 'org.list' }, session.headers, env);
+    // The woken bridge re-polls immediately; that fresh traffic is the proof.
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, version: '0.2.2' }, {}, env);
+    const check = await checkPromise;
+    expect(await check.json()).toMatchObject({
+      paired: true,
+      relay: 'connected',
+      agentVersion: '0.2.2',
+    });
     await heldPoll;
+  });
+
+  it('reports a recently seen bridge as offline when it misses an explicit check', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+    await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, version: '0.2.2' }, {}, env);
+
+    const check = await app.request('/api/relay/status/check', { headers: session.headers }, env);
+    expect(await check.json()).toMatchObject({
+      paired: true,
+      relay: 'stale',
+      working: false,
+      agentVersion: '0.2.2',
+      canRepairPairing: false,
+    });
+
+    // The passive snapshot still has a recent heartbeat; only a real check
+    // proves the bridge is gone, so re-pairing is not pushed prematurely.
+    const passive = await app.request('/api/relay/status', { headers: session.headers }, env);
+    expect(await passive.json()).toMatchObject({ paired: true, relay: 'connected' });
   });
 
   it('stops an orphaned bridge when the shared session deadline passes', async () => {
@@ -1254,7 +1285,7 @@ describe('hosted bridge relay', () => {
         updateAvailable: false,
       });
 
-      // A read-only check must not rewrite the heartbeat; ordinary status stays
+      // A failed check must not rewrite the heartbeat; ordinary status stays
       // consistent with what the explicit check reported.
       const after = await app.request('/api/relay/status', { headers: session.headers }, env);
       expect((await after.json() as { relay: string }).relay).toBe('stale');

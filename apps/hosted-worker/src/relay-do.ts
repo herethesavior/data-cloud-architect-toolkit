@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 import {
   apiVersionStatusSchema,
+  BRIDGE_PROBE_TIMEOUT_MS,
   BRIDGE_STALE_AFTER_MS,
   chunkRelayResult,
   cliStatusSchema,
@@ -353,6 +354,15 @@ export class RelayDurableObjectCore {
     }
   }
 
+  /**
+   * Heartbeats are throttled, but a status probe needs to see every receipt.
+   * This sequence changes on any authorized bridge traffic within the probe.
+   */
+  private noteBridgeActivity(): void {
+    const sequence = this.getMetaNumber('activity_seq') ?? 0;
+    this.setMeta('activity_seq', String(sequence + 1));
+  }
+
   private updateAgent(body: Record<string, unknown>, now: number): void {
     const cli = parseCli(body.cli);
     if (cli && JSON.stringify(cli) !== this.getMeta('cli')) {
@@ -415,6 +425,39 @@ export class RelayDurableObjectCore {
     return json({ paired: true, ...this.agentSnapshot() });
   }
 
+  /**
+   * Wake the bridge's held poll and wait for fresh traffic. A stopped agent
+   * leaves its long-poll waiting on the server, so a snapshot read alone cannot
+   * tell it apart from a healthy bridge whose heartbeat is still recent.
+   */
+  async probe(body: Record<string, unknown>): Promise<Response> {
+    const sessionId = await this.authorized(body);
+    if (!sessionId || sessionId !== body.sessionId || this.getMeta('revoked') === '1') {
+      return error('INVALID_AGENT_TOKEN', 'The bridge pairing is no longer active.', 401);
+    }
+    const active = this.readRequest();
+    // A claimed task keeps the bridge from polling; its running state is proof
+    // of life and must not be treated as an offline bridge.
+    if (active && this.requestState(active, Date.now()).status === 'running') {
+      return json({ ...this.agentSnapshot(), alive: true, working: true });
+    }
+
+    const before = this.getMetaNumber('activity_seq') ?? 0;
+    this.wakeWaiters();
+    const requested = typeof body.timeoutMs === 'number' && Number.isFinite(body.timeoutMs)
+      ? body.timeoutMs
+      : BRIDGE_PROBE_TIMEOUT_MS;
+    const timeoutMs = Math.min(Math.max(requested, 250), BRIDGE_PROBE_TIMEOUT_MS);
+    const deadline = performance.now() + timeoutMs;
+    while (performance.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      if ((this.getMetaNumber('activity_seq') ?? 0) > before) {
+        return json({ ...this.agentSnapshot(), alive: true, working: false });
+      }
+    }
+    return json({ ...this.agentSnapshot(), alive: false, working: false });
+  }
+
   async poll(body: Record<string, unknown>): Promise<Response> {
     const sessionId = await this.authorized(body);
     if (!sessionId) {
@@ -422,6 +465,7 @@ export class RelayDurableObjectCore {
     }
     const now = Date.now();
     this.updateAgent(body, now);
+    this.noteBridgeActivity();
     const immediate = this.claimPending(now);
     if (immediate || body.wait !== true) {
       return json({ status: 'ok', tasks: immediate ? [immediate] : [] });
@@ -449,6 +493,7 @@ export class RelayDurableObjectCore {
     // A bridge executing a long task cannot poll, but posting its result is
     // proof it is alive. Refresh now so the next request is not falsely stale.
     this.markSeen(Date.now(), true);
+    this.noteBridgeActivity();
     const response = relayResponseSchema.safeParse(body.response);
     if (!response.success) {
       return error('INVALID_ARGUMENT', 'The bridge response is not valid.', 400);
@@ -650,6 +695,7 @@ export class RelayDurableObjectCore {
     switch (pathname) {
       case '/init': return this.init(body);
       case '/state': return this.state(body);
+      case '/probe': return this.probe(body);
       case '/poll': return this.poll(body);
       case '/respond': return this.respond(body);
       case '/queue': return this.queue(body);

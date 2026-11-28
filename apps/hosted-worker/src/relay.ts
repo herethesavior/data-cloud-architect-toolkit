@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import {
   apiVersionStatusSchema,
+  BRIDGE_PROBE_TIMEOUT_MS,
   BRIDGE_REPAIR_GRACE_MS,
   BRIDGE_STALE_AFTER_MS,
   cliStatusSchema,
@@ -307,10 +308,16 @@ async function agentState(
   }
 }
 
+interface BridgeStatusOptions {
+  /** Explicit checks wake the bridge and wait for proof of life; passive reads do not. */
+  probe?: boolean;
+}
+
 export async function bridgeStatusForSession(
   env: Env,
   session: SessionRecord,
   origin: string,
+  options: BridgeStatusOptions = {},
 ): Promise<BridgeStatus> {
   const agentToken = session.relay.agentToken;
   if (!agentToken) return getBridgeUpdateStatus(session, origin);
@@ -324,17 +331,41 @@ export async function bridgeStatusForSession(
     // last known pairing and show a retryable degraded state instead.
     return getBridgeUpdateStatus(session, origin, { relay: 'unavailable', working: false });
   }
+
+  let snapshot: AgentStateBody = body;
+  const override: StatusOverride = {};
+  if (options.probe && body.working !== true) {
+    const probe = await relayJson<AgentStateBody & { alive?: boolean }>(env, agentToken, '/probe', {
+      agentToken,
+      sessionId: session.id,
+      timeoutMs: BRIDGE_PROBE_TIMEOUT_MS,
+    });
+    if (isInvalidAgentToken(probe.body, probe.response.status) || isExplicitlyUnpaired(probe.body, probe.response.status)) {
+      return getBridgeUpdateStatus(unpairedStatusView(session), origin);
+    }
+    if (!probe.response.ok || typeof probe.body?.alive !== 'boolean') {
+      return getBridgeUpdateStatus(session, origin, { relay: 'unavailable', working: false });
+    }
+    snapshot = probe.body;
+    if (!probe.body.alive && snapshot.lastSeenAt !== null) {
+      // The heartbeat has not aged out yet, but the bridge did not answer a
+      // wake-up. Report the failed liveness check instead of a cached success.
+      override.relay = 'stale';
+      override.working = false;
+    }
+  }
+
   return getBridgeUpdateStatus({
     ...session,
     relay: {
       ...session.relay,
-      lastSeenAt: body.lastSeenAt,
-      agentVersion: body.agentVersion,
-      cli: body.cli,
-      compatibility: body.compatibility ?? session.relay.compatibility,
-      working: body.working === true,
+      lastSeenAt: snapshot.lastSeenAt,
+      agentVersion: snapshot.agentVersion,
+      cli: snapshot.cli,
+      compatibility: snapshot.compatibility ?? session.relay.compatibility,
+      working: snapshot.working === true,
     },
-  }, origin);
+  }, origin, override);
 }
 
 async function pairingState(env: Env, session: SessionRecord): Promise<PairingState> {
@@ -362,26 +393,26 @@ export async function clearRelayRequest(env: Env, session: SessionRecord): Promi
 export function relayRoutes() {
   const app = new Hono<{ Bindings: Env }>();
 
-  async function statusResponse(context: Context<{ Bindings: Env }>): Promise<Response> {
+  async function statusResponse(context: Context<{ Bindings: Env }>, probe = false): Promise<Response> {
     try {
       const session = await resolveSession(context, context.env);
       return context.json(await bridgeStatusForSession(
         context.env,
         session,
         originOf(context.req.url),
+        { probe },
       ));
     } catch (error) {
       return sendRouteError(context, error);
     }
   }
 
-  app.get('/api/relay/status', statusResponse);
+  app.get('/api/relay/status', (context) => statusResponse(context));
 
-  // Dedicated read-only check for the UI's Refresh status action. It shares the
-  // passive path on purpose: a /state read does not wake a held poll, queue a
-  // task, or mutate the heartbeat. A busy bridge is reported from the relay's
-  // current operation state instead of being probed.
-  app.get('/api/relay/status/check', statusResponse);
+  // A real liveness check: wake the bridge's held poll and wait for it to check
+  // in again. It never queues user work, and a busy bridge is reported from the
+  // relay's current operation state instead of being probed.
+  app.get('/api/relay/status/check', (context) => statusResponse(context, true));
 
   app.post('/api/relay/pairing', async (context) => {
     try {
