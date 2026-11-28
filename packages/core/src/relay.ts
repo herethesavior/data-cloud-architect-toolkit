@@ -112,12 +112,15 @@ export const RELAY_OPERATION_TIMEOUT_MS: Record<RelayOperationName, number> = {
   'cli.status': 30_000,
   'org.list': 120_000,
   'org.connect': 6 * 60_000,
-  'inventory.get': 60_000,
-  'inventory.start': 60_000,
+  'inventory.get': 120_000,
+  // A first batch can include a slow API-version probe and several family pages.
+  'inventory.start': 180_000,
   // A status poll may need to refresh the org cache, and that CLI call has a
   // 90-second deadline of its own.
-  'inventory.status': 120_000,
-  'transform.get': 60_000,
+  'inventory.status': 180_000,
+  // Large transform definitions take several REST calls; a short deadline turns
+  // a slow-but-progressing load into a terminal relay timeout.
+  'transform.get': 5 * 60_000,
   'mode.set': 30_000,
   'compatibility.set': 30_000,
   'bridge.update': 5 * 60_000,

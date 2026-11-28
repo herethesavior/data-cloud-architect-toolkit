@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createApiVersionStatus } from '@dcat/core';
+import { createApiVersionStatus, RELAY_OPERATION_TIMEOUT_MS } from '@dcat/core';
 import type { OrgSummary, SessionInfo } from '@dcat/core';
 import { demoInventory, demoOrgs } from '@dcat/test-fixtures';
 import { api, clearCachedSession, getSession } from './api.ts';
@@ -552,7 +552,7 @@ describe('web API session handling', () => {
 
     const pending = api.inventory('prod-org', { force: true });
     const assertion = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT' });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(RELAY_OPERATION_TIMEOUT_MS['inventory.start']);
     await assertion;
   });
 
@@ -592,7 +592,7 @@ describe('web API session handling', () => {
 
     const pending = api.transformBundle('prod-org', 'Transform/One');
     const assertion = expect(pending).rejects.toMatchObject({ code: 'TIMEOUT' });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(RELAY_OPERATION_TIMEOUT_MS['transform.get']);
     await assertion;
   });
 

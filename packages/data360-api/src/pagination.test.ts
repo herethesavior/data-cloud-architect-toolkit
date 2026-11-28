@@ -58,6 +58,19 @@ describe('opaque continuation handling', () => {
     expect(buildNextPath(path, short)).toBe(path);
   });
 
+  it('stops a full one-record page when the reported total has been reached', () => {
+    const path = 'services/data/v68.0/ssot/data-transforms?filterGroup=Small&limit=1&offset=2';
+    const continuation = offsetContinuation(
+      { dataTransforms: [{ apiName: 'Transform_003' }], totalSize: 3 },
+      path,
+      1,
+      1,
+    );
+    expect(continuation.hasMore).toBe(false);
+    expect(continuation.cursor).toBeNull();
+    expect(buildNextPath(path, continuation)).toBe(path);
+  });
+
   it('reads totals from common envelopes and stops on explicit completion', () => {
     expect(extractTotal({ result: { totalSize: 200, records: [] } })).toBe(200);
     expect(extractTotal({ meta: { totalCount: '42' } })).toBe(42);

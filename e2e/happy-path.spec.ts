@@ -345,6 +345,44 @@ test('live reload restores the live context without demo crossover', async ({ pa
   expect(calls.inventory).toBe(inventoryCallsAfterLoad);
 });
 
+test('a first-load relay timeout clears immediately and resumes a fresh full inventory', async ({ page }) => {
+  const state = createConnectorState();
+  state.mode = 'live';
+  const sessionBodies: Array<Record<string, unknown>> = [];
+  let sessionAttempts = 0;
+  await seedLiveMode(page);
+  await mockConnector(page, state);
+  await page.route('**/api/orgs/*/inventory/session', async (route: Route) => {
+    sessionAttempts += 1;
+    sessionBodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (sessionAttempts === 1) {
+      return route.fulfill({
+        status: 504,
+        json: { error: { code: 'RELAY_TIMEOUT', message: 'The bridge did not answer in time.' } },
+      });
+    }
+    // Hold the fresh session open long enough to prove the error is gone while
+    // the retry is still loading, not merely after rows arrive.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    return route.fallback();
+  });
+  await page.goto('/');
+
+  const alert = page.getByRole('alert').filter({ hasText: "The bridge didn't respond in time." });
+  await expect(alert).toBeVisible();
+  await expect(page.getByText('Live org metadata')).toHaveCount(0);
+
+  await alert.getByRole('button', { name: 'Resume loading' }).click();
+
+  await expect.poll(() => sessionAttempts).toBe(2);
+  await expect(alert).toHaveCount(0);
+  await expect(page.getByText('Discovering your Data 360 inventory')).toBeVisible();
+  expect(sessionBodies[1]).toMatchObject({ refresh: true });
+  expect(sessionBodies[1]?.sessionId).toBeUndefined();
+
+  await expect(page.getByText('Live org metadata')).toBeVisible();
+});
+
 test('live Data Spaces counts use nested live attribution without false discovery errors', async ({ page }) => {
   const state = createConnectorState();
   state.mode = 'live';

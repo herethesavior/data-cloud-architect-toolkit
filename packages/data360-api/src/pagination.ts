@@ -295,8 +295,11 @@ export function offsetContinuation(
   }
   const offset = pathOffset(requestPath) ?? 0;
   const loaded = offset + pageItemCount;
+  // A reported total is authoritative: a full final page must not trigger one
+  // more request. This matters for one-record fallback pages, where every
+  // non-empty page is "full" by definition.
   const hasMore = pageItemCount > 0
-    && (pageItemCount >= pageSize || (total !== null && loaded < total));
+    && (total !== null ? loaded < total : pageItemCount >= pageSize);
   return {
     cursor: hasMore ? String(loaded) : null,
     param: 'offset',

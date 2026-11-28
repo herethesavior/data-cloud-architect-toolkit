@@ -29,6 +29,7 @@ import {
 } from './discover.ts';
 import {
   buildData360Path,
+  buildDataTransformPath,
   buildDmoRelationshipsPath,
   buildExpectedCountPath,
   buildFamilyPath,
@@ -38,6 +39,7 @@ import {
   isValidDataspace,
   isValidDmoDeveloperName,
   offsetPageSizeFor,
+  pageSizeForPath,
   RELATIONSHIP_REQUEST_PAGE_SIZE,
 } from './endpoints.ts';
 import {
@@ -120,6 +122,8 @@ interface CursorState {
   retried: number;
   skipped: number;
   seenKeys: Set<string>;
+  /** Data Transform pages already reduced after a CLI output-limit failure. */
+  compact?: boolean;
 }
 
 interface FamilyState extends CursorState {
@@ -279,6 +283,7 @@ function makeCursor(basePath: string): CursorState {
     retried: 0,
     skipped: 0,
     seenKeys: new Set<string>(),
+    compact: false,
   };
 }
 
@@ -633,10 +638,38 @@ function continuationForFamily(
   path: string,
   itemCount: number,
 ): ReturnType<typeof extractContinuation> {
-  const pageSize = offsetPageSizeFor(family);
+  const pageSize = pageSizeForPath(family, path);
   return pageSize === null
     ? extractContinuation(decoded)
     : offsetContinuation(decoded, path, pageSize, itemCount);
+}
+
+/**
+ * Restart Data Transforms from offset zero with the smallest response Salesforce
+ * offers. Rows already loaded stay in `seenKeys`, so replaying earlier offsets
+ * cannot duplicate them. The compact path is kept for the rest of this session,
+ * including count-gap repairs and resumes.
+ */
+function useCompactDataTransformPages(
+  state: ProgressiveDiscoveryState,
+  cursor: CursorState,
+): void {
+  if (!state.apiVersion) return;
+  const path = buildDataTransformPath(state.apiVersion, 0, true);
+  cursor.basePath = path;
+  cursor.path = path;
+  cursor.paths = [path];
+  cursor.cursor = null;
+  cursor.param = null;
+  cursor.pageIndex = 0;
+  cursor.done = false;
+  cursor.failed = false;
+  cursor.error = null;
+  cursor.errorStatus = 'error';
+  cursor.degraded = false;
+  cursor.compact = true;
+  pushWarning(state, 'data-transforms', 'OUTPUT_LIMIT_SMALLER_PAGES',
+    'Data Transform metadata was too large for one response. Reloading it in smaller pages.', 'info');
 }
 
 async function requestPage<T>(
@@ -680,6 +713,13 @@ async function requestPage<T>(
   } catch (error) {
     if (family === 'mappings' && isMappingAbsence(error)) {
       cursor.done = true;
+      return true;
+    }
+    // The CLI size cap is a page-size problem, not a permanent gap. Retry the
+    // whole family once one Small record at a time before reporting a failure.
+    if (family === 'data-transforms' && !cursor.compact
+      && isOutputLimitMessage(safeErrorMessage(error))) {
+      useCompactDataTransformPages(state, cursor);
       return true;
     }
     markFailure(state, family, cursor, error);

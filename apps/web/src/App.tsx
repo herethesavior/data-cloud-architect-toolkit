@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useIsRestoring, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BridgeStatus, InventorySnapshot, OrgSummary, ResourceFamily, SessionInfo } from '@dcat/core';
 import { api, ApiError, getSession, setCachedSession } from './lib/api.ts';
+import type { InventoryRequestOptions } from './lib/api.ts';
 import { bridgeStatusPollIntervalMs } from './lib/bridgeStatus.ts';
 import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
 import { ALL_REFRESH_FAMILIES, refreshScopeForPage } from './lib/refreshScope.ts';
@@ -408,7 +409,7 @@ export function App() {
   const resumeInventory = useMutation({
     mutationFn: async ({ target, sessionId, family }: {
       target: WorkspaceContext | null;
-      sessionId: string;
+      sessionId?: string;
       family?: ResourceFamily;
     }) => {
       if (!target?.alias) throw new Error('Select an org first.');
@@ -420,10 +421,7 @@ export function App() {
       const key = ['inventory', target.contextId] as const;
       try {
         await queryClient.cancelQueries({ queryKey: key });
-        const snapshot = await api.inventory(target.alias, {
-          sessionId,
-          resume: true,
-          family,
+        const requestOptions: InventoryRequestOptions = {
           signal: controller.signal,
           onSnapshot: (incoming) => {
             if (resumeControllerRef.current !== controller || target.contextId !== activeContextIdRef.current) return;
@@ -432,7 +430,12 @@ export function App() {
               mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), incoming),
             );
           },
-        });
+        };
+        // Without a resumable checkpoint, start a fresh full session inside this
+        // mutation so the UI stays in its resuming state until rows arrive.
+        const snapshot = await api.inventory(target.alias, sessionId
+          ? { ...requestOptions, sessionId, resume: true, family }
+          : { ...requestOptions, force: true });
         if (resumeControllerRef.current === controller && target.contextId === activeContextIdRef.current) {
           queryClient.setQueryData<InventorySnapshot>(key, mergeInventorySnapshot(queryClient.getQueryData<InventorySnapshot>(key), snapshot));
         }
@@ -454,14 +457,7 @@ export function App() {
     families: families ?? refreshScope.families,
   });
   resumeInventoryRef.current = (family) => {
-    const sessionId = actionsInventoryRef.current?.progress?.sessionId;
-    // A failed resume can leave no resumable session. Retrying must still do
-    // something visible. Recover with a full load: a scoped load could leave
-    // other views without rows they never got a chance to fetch.
-    if (!sessionId) {
-      refreshInventory.mutate({ target: actionsContextRef.current, families: ALL_REFRESH_FAMILIES });
-      return;
-    }
+    const sessionId = actionsInventoryRef.current?.progress?.sessionId ?? undefined;
     resumeInventory.mutate({ target: actionsContextRef.current, sessionId, family });
   };
 
