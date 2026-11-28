@@ -22,7 +22,7 @@ export type UserErrorContext =
   | 'mode'
   | 'compatibility';
 
-export type ErrorRecovery = 'connect' | 'retry' | 'continue';
+export type ErrorRecovery = 'connect' | 'retry' | 'continue' | 'resume';
 
 export interface UserError {
   message: string;
@@ -80,6 +80,8 @@ const contextCopy: Record<UserErrorContext, UserError> = {
   },
 };
 
+const RELAY_TIMEOUT_MESSAGE = "The bridge didn't respond in time.";
+
 const codeCopy: Record<string, UserError> = {
   ABORTED: { message: 'That request was cancelled.' },
   CANCELLED: { message: 'That request was cancelled.', hint: 'Try again if you still need it.' },
@@ -88,8 +90,9 @@ const codeCopy: Record<string, UserError> = {
     hint: 'Try again. If it keeps happening, check your connection.',
   },
   RELAY_TIMEOUT: {
-    message: "The bridge didn't respond in time.",
-    hint: 'Check that the bridge is running on your computer, then try again.',
+    message: RELAY_TIMEOUT_MESSAGE,
+    hint: 'Loading can resume from the last completed batch. Check that the bridge is still running.',
+    recovery: 'resume',
   },
   RELAY_FAILED: {
     message: "The bridge couldn't complete that request.",
@@ -180,6 +183,15 @@ export function describeError(error: unknown, context: UserErrorContext): UserEr
     return {
       message: 'That transform is too large to display in one view.',
       hint: 'Refresh the inventory, then open the transform again.',
+    };
+  }
+  // Only inventory has a resumable session; other callers must retry instead of
+  // being told work will continue from a batch they cannot access.
+  if (code === 'RELAY_TIMEOUT' && context !== 'inventory') {
+    return {
+      message: RELAY_TIMEOUT_MESSAGE,
+      hint: 'Check that the bridge is still running, then try again.',
+      recovery: 'retry',
     };
   }
   return (code ? codeCopy[code] : undefined) ?? contextCopy[context];

@@ -84,10 +84,10 @@ function pagedDlos(total = 200, perPage = 10): Record<string, string> {
   return pages;
 }
 
-function pagedTransforms(total = 22, perPage = 20): Record<string, string> {
+function pagedTransforms(total = 22, perPage = 20, compact = false): Record<string, string> {
   const pages: Record<string, string> = {};
   for (let offset = 0; offset < total; offset += perPage) {
-    const path = buildDataTransformPath('65.0', offset);
+    const path = buildDataTransformPath('65.0', offset, compact);
     const records = Array.from({ length: Math.min(perPage, total - offset) }, (_, index) => ({
       apiName: `Transform_${String(offset + index + 1).padStart(3, '0')}`,
       label: `Transform ${offset + index + 1}`,
@@ -442,9 +442,44 @@ describe('progressive discovery', () => {
     expect(snapshot.warnings.some((warning) => warning.code === 'OUTPUT_LIMIT')).toBe(false);
   });
 
-  it('translates a CLI size limit into an actionable Data Transform gap', async () => {
+  it('reloads Data Transforms in smaller pages after a CLI output limit', async () => {
+    const compactPages = pagedTransforms(22, 1, true);
+    const cli = fakeCli(compactPages, {}, {}, {
+      [transformPath]: new CliError('OUTPUT_LIMIT', 'Salesforce CLI output exceeded the safe size limit.'),
+    });
+    const state = await createProgressiveDiscovery({
+      cli,
+      alias: org.alias,
+      org,
+      retry,
+      apiVersionSelection: { mode: 'latest' },
+    });
+    await drain(state);
+    const snapshot = progressiveSnapshot(state);
+
+    expect(snapshot.dataTransforms.map((transform) => transform.apiName)).toEqual(
+      Array.from({ length: 22 }, (_, index) => `Transform_${String(index + 1).padStart(3, '0')}`),
+    );
+    expect(snapshot.capabilities.find((capability) => capability.family === 'data-transforms')).toMatchObject({
+      status: 'available',
+      itemCount: 22,
+    });
+    expect(cli.calls).toContain(buildDataTransformPath('65.0', 0, true));
+    expect(cli.calls).toContain(buildDataTransformPath('65.0', 21, true));
+    expect(snapshot.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        family: 'data-transforms',
+        code: 'OUTPUT_LIMIT_SMALLER_PAGES',
+      }),
+    ]));
+    expect(snapshot.warnings.some((warning) => warning.code === 'OUTPUT_LIMIT')).toBe(false);
+  });
+
+  it('reports an actionable gap when even a single compact Data Transform is too large', async () => {
+    const compactPath = buildDataTransformPath('65.0', 0, true);
     const cli = fakeCli({}, {}, {}, {
       [transformPath]: new CliError('OUTPUT_LIMIT', 'Salesforce CLI output exceeded the safe size limit.'),
+      [compactPath]: new CliError('OUTPUT_LIMIT', 'Salesforce CLI output exceeded the safe size limit.'),
     });
     const state = await createProgressiveDiscovery({
       cli,

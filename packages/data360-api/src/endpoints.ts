@@ -24,9 +24,12 @@ export const DATA_TRANSFORM_PAGE_SIZE = 5;
 /**
  * The list endpoint defaults to the Big filter group, which includes full
  * transform definitions. Medium keeps inventory fields without pulling those
- * potentially multi-megabyte graphs through Salesforce CLI.
+ * potentially multi-megabyte graphs through Salesforce CLI. Orgs whose Medium
+ * payloads still exceed the CLI output cap fall back to one Small record per page.
  */
 export const DATA_TRANSFORM_FILTER_GROUP = 'Medium';
+export const DATA_TRANSFORM_COMPACT_FILTER_GROUP = 'Small';
+export const DATA_TRANSFORM_COMPACT_PAGE_SIZE = 1;
 
 /**
  * Verified upper bound for the per-DMO relationship subresource. Requested pages
@@ -75,6 +78,19 @@ export function offsetPageSizeFor(family: ResourceFamily): number | null {
   return null;
 }
 
+/** Derive the real page size from a cursor path so compact pages stay compact. */
+export function pageSizeForPath(family: ResourceFamily, path: string): number | null {
+  const configured = offsetPageSizeFor(family);
+  if (configured === null) return null;
+  try {
+    const value = Number(new URL(path, 'https://dcat.local').searchParams.get('limit'));
+    if (Number.isSafeInteger(value) && value >= 1) return value;
+  } catch {
+    // A malformed path keeps the family's configured size.
+  }
+  return configured;
+}
+
 /** Initial request path for a family. Offset-paginated families start at page zero. */
 export function buildFamilyPath(family: ResourceFamily, apiVersion: string): string {
   if (family === 'dmos') {
@@ -91,6 +107,9 @@ export function buildFamilyPath(family: ResourceFamily, apiVersion: string): str
  */
 export function buildExpectedCountPath(family: ResourceFamily, apiVersion: string): string | null {
   if (family === 'dmos' || family === 'mappings') return null;
+  // A count probe contains no rows, but a Medium transform can still be large
+  // enough to trip the CLI output cap. Small is sufficient for `totalSize`.
+  if (family === 'data-transforms') return buildDataTransformPath(apiVersion, 0, true);
   const path = buildFamilyPath(family, apiVersion);
   try {
     const url = new URL(path, 'https://dcat.local');
@@ -108,12 +127,14 @@ export function buildDmoPath(apiVersion: string, offset: number): string {
   return `${buildData360Path('dmos', apiVersion)}?limit=${DMO_PAGE_SIZE}&offset=${offset}`;
 }
 
-export function buildDataTransformPath(apiVersion: string, offset = 0): string {
+export function buildDataTransformPath(apiVersion: string, offset = 0, compact = false): string {
   if (!Number.isSafeInteger(offset) || offset < 0) {
     throw new CliError('INVALID_ARGUMENT', 'An invalid Data Transform offset was supplied.');
   }
+  const filterGroup = compact ? DATA_TRANSFORM_COMPACT_FILTER_GROUP : DATA_TRANSFORM_FILTER_GROUP;
+  const limit = compact ? DATA_TRANSFORM_COMPACT_PAGE_SIZE : DATA_TRANSFORM_PAGE_SIZE;
   return `${buildData360Path('data-transforms', apiVersion)}`
-    + `?filterGroup=${DATA_TRANSFORM_FILTER_GROUP}&limit=${DATA_TRANSFORM_PAGE_SIZE}&offset=${offset}`;
+    + `?filterGroup=${filterGroup}&limit=${limit}&offset=${offset}`;
 }
 
 /** Salesforce rejects unfiltered mapping lookups, so an empty name is never sent. */
@@ -190,6 +211,8 @@ export const TRANSFORM_SUBRESOURCE_SUFFIXES = {
  * explicitly keeps the UI graph stable if the org changes that default.
  */
 export const TRANSFORM_DETAIL_FILTER_GROUP = 'Big';
+/** Fallback for definitions too large for the CLI output cap. */
+export const TRANSFORM_DETAIL_COMPACT_FILTER_GROUP = 'Small';
 
 export type TransformSubresource = keyof typeof TRANSFORM_SUBRESOURCE_SUFFIXES;
 
@@ -216,8 +239,9 @@ export function buildTransformSubresourcePath(
   return `${buildData360Path('data-transforms', apiVersion)}/${encodeURIComponent(safeId)}${suffix}`;
 }
 
-export function buildTransformDetailPath(id: string, apiVersion: string): string {
-  return `${buildTransformSubresourcePath(id, 'detail', apiVersion)}?filterGroup=${TRANSFORM_DETAIL_FILTER_GROUP}`;
+export function buildTransformDetailPath(id: string, apiVersion: string, compact = false): string {
+  const filterGroup = compact ? TRANSFORM_DETAIL_COMPACT_FILTER_GROUP : TRANSFORM_DETAIL_FILTER_GROUP;
+  return `${buildTransformSubresourcePath(id, 'detail', apiVersion)}?filterGroup=${filterGroup}`;
 }
 
 export function buildTransformRunHistoryPath(id: string, apiVersion: string): string {

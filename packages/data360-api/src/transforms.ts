@@ -6,7 +6,7 @@ import type {
   TransformSchedule,
 } from '@dcat/core';
 import { CliError, redactSensitive, safeErrorMessage } from '@dcat/salesforce-cli';
-import { classifyRestFailure } from './capabilities.ts';
+import { classifyRestFailure, isOutputLimitMessage } from './capabilities.ts';
 import type { RestClient } from './discover.ts';
 import { extractHttpStatus, fetchCollection } from './discover.ts';
 import { buildTransformDetailPath, buildTransformRunHistoryPath, buildTransformSchedulePath } from './endpoints.ts';
@@ -101,6 +101,33 @@ function prepareTransform(transform: DataTransform): Prepared<DataTransform> {
   return {
     value: { ...sanitized, definition: definition.value as string | undefined, raw: raw.value },
     omitted: definition.omitted || raw.omitted,
+  };
+}
+
+/**
+ * Small detail can omit lineage that the inventory list already reported. Keep
+ * those summary fields without letting stale seed values override fresh detail.
+ */
+function mergeCompactSeed(normalized: DataTransform, seed: DataTransform | null): DataTransform {
+  if (!seed) return normalized;
+  return {
+    ...normalized,
+    label: normalized.label ?? seed.label,
+    status: normalized.status ?? seed.status,
+    description: normalized.description ?? seed.description,
+    id: normalized.id ?? seed.id,
+    type: normalized.type ?? seed.type,
+    inputs: normalized.inputs?.length ? normalized.inputs : seed.inputs,
+    outputs: normalized.outputs?.length ? normalized.outputs : seed.outputs,
+    lastRunStatus: normalized.lastRunStatus ?? seed.lastRunStatus,
+    lastRunAt: normalized.lastRunAt ?? seed.lastRunAt,
+    schedule: normalized.schedule ?? seed.schedule,
+    definition: normalized.definition ?? seed.definition,
+    visualDefinition: normalized.visualDefinition ?? seed.visualDefinition,
+    dataSpace: normalized.dataSpace ?? seed.dataSpace,
+    createdAt: normalized.createdAt ?? seed.createdAt,
+    modifiedAt: normalized.modifiedAt ?? seed.modifiedAt,
+    owner: normalized.owner ?? seed.owner,
   };
 }
 
@@ -218,7 +245,7 @@ export function createUnsupportedTransformBundle(seed: DataTransform | null, mes
  */
 export async function fetchTransformBundle(options: FetchTransformBundleOptions): Promise<TransformBundle> {
   const { client, alias, apiVersion, id, seed = null } = options;
-  const detailPath = buildTransformDetailPath(id, apiVersion);
+  let detailPath = buildTransformDetailPath(id, apiVersion);
   const runHistoryPath = buildTransformRunHistoryPath(id, apiVersion);
   const schedulePath = buildTransformSchedulePath(id, apiVersion);
   const maxPages = Math.min(MAX_TRANSFORM_RUN_PAGES, Math.max(1, options.maxPages ?? MAX_TRANSFORM_RUN_PAGES));
@@ -231,7 +258,18 @@ export async function fetchTransformBundle(options: FetchTransformBundleOptions)
   let transform: DataTransform | null = null;
   let detailState: SectionState;
   try {
-    const decoded = parseJsonResponse(await client.restGet(alias, detailPath), 'Transform Detail');
+    let compacted = false;
+    let decoded: unknown;
+    try {
+      decoded = parseJsonResponse(await client.restGet(alias, detailPath), 'Transform Detail');
+    } catch (error) {
+      // Big includes the full visual graph. A fan-out transform can exceed the
+      // CLI output cap before DCAT can trim it, so retry with Small metadata.
+      if (!isOutputLimitMessage(safeErrorMessage(error))) throw error;
+      detailPath = buildTransformDetailPath(id, apiVersion, true);
+      decoded = parseJsonResponse(await client.restGet(alias, detailPath), 'Transform Detail');
+      compacted = true;
+    }
     const record = unwrapRecord(decoded, 'Transform Detail');
     const normalized = normalizeDataTransforms([record], {
       ...base,
@@ -241,13 +279,15 @@ export async function fetchTransformBundle(options: FetchTransformBundleOptions)
     if (!normalized) {
       throw new CliError('UNEXPECTED_RESPONSE', 'The transform detail response did not contain a recognizable data transform.');
     }
-    const prepared = prepareTransform(normalized);
+    const prepared = prepareTransform(compacted ? mergeCompactSeed(normalized, seed) : normalized);
     transform = prepared.value;
     detailState = {
-      status: prepared.omitted ? 'partial' : 'available',
-      message: prepared.omitted
-        ? `Transform details were retrieved. ${OMITTED_METADATA_MESSAGE}`
-        : 'Transform details were retrieved from the detail endpoint.',
+      status: prepared.omitted || compacted ? 'partial' : 'available',
+      message: compacted
+        ? 'Transform details were retrieved without the full definition because the CLI output limit was exceeded.'
+        : prepared.omitted
+          ? `Transform details were retrieved. ${OMITTED_METADATA_MESSAGE}`
+          : 'Transform details were retrieved from the detail endpoint.',
     };
   } catch (error) {
     const failure = sectionFailure(error);

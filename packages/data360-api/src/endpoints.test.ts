@@ -10,6 +10,7 @@ import {
   buildFamilyPath,
   buildMappingPath,
   buildTransformDetailPath,
+  pageSizeForPath,
   buildTransformRunHistoryPath,
   buildTransformSchedulePath,
   buildTransformSubresourcePath,
@@ -21,6 +22,7 @@ const base = 'services/data/v65.0/ssot/data-transforms';
 describe('allowlisted transform paths', () => {
   it('builds the three documented GET paths from the registry', () => {
     expect(buildTransformDetailPath('Normalize_Contacts', '65.0')).toBe(`${base}/Normalize_Contacts?filterGroup=Big`);
+    expect(buildTransformDetailPath('Normalize_Contacts', '65.0', true)).toBe(`${base}/Normalize_Contacts?filterGroup=Small`);
     expect(buildTransformRunHistoryPath('Normalize_Contacts', '65.0')).toBe(`${base}/Normalize_Contacts/run-history`);
     expect(buildTransformSchedulePath('Normalize_Contacts', '65.0')).toBe(`${base}/Normalize_Contacts/schedule`);
   });
@@ -82,8 +84,13 @@ describe('allowlisted transform paths', () => {
       'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=5&offset=40',
     );
     expect(buildExpectedCountPath('data-transforms', '65.0')).toBe(
-      'services/data/v65.0/ssot/data-transforms?filterGroup=Medium&limit=1&offset=0',
+      'services/data/v65.0/ssot/data-transforms?filterGroup=Small&limit=1&offset=0',
     );
+    expect(buildDataTransformPath('65.0', 40, true)).toBe(
+      'services/data/v65.0/ssot/data-transforms?filterGroup=Small&limit=1&offset=40',
+    );
+    expect(pageSizeForPath('data-transforms', buildDataTransformPath('65.0', 40, true))).toBe(1);
+    expect(pageSizeForPath('dmos', buildDmoPath('65.0', 20))).toBe(10);
     expect(buildFamilyPath('dlos', '65.0')).toBe(
       'services/data/v65.0/ssot/data-lake-objects',
     );

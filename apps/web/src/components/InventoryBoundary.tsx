@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { DiscoveryProgress as DiscoveryProgressData, InventorySnapshot } from '@dcat/core';
@@ -206,11 +206,18 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
     'inventory-resume-error',
     resumeError ? `${context?.contextId ?? 'none'}:${actions?.resumeAttempt ?? 0}:${resumeError}` : 'none',
   );
+  // React Query keeps `status: error` while a refetch runs. Remember which error
+  // the user dismissed so an explicit retry can show loading immediately.
+  const [clearedError, setClearedError] = useState<unknown>(null);
+  const resumeInProgress = query.error === clearedError && Boolean(actions?.isResumingDiscovery);
 
   // A disabled query is "pending" in React Query. Without this guard every
   // explorer would spin forever when live mode has no authenticated org.
   if (!context) return <NoOrgState />;
   if (query.isPending && !query.data) return <DiscoveryProgress stages={discoveryStages(null, true)} />;
+  // A first-load retry has no snapshot to keep on screen. Show the discovery
+  // skeleton instead of the error the user just asked to resume from.
+  if (resumeInProgress && !query.data) return <DiscoveryProgress stages={discoveryStages(null, true)} />;
   // Once any snapshot exists, keep it visible. Automatic loads, resume, and
   // manual refresh all stream partial snapshots into the same query cache;
   // only a first-ever load needs a full-page skeleton.
@@ -230,14 +237,17 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
   if (query.isError && !query.data) {
     const described = describeError(query.error, 'inventory');
     const canContinue = described.recovery === 'continue' && Boolean(actions?.continueInventory);
+    const canResume = described.recovery === 'resume' && Boolean(actions?.resumeDiscovery);
     return (
       <ErrorState
         title="Couldn't load the inventory"
         message={described.message}
         hint={described.hint}
-        retryLabel={canContinue ? 'Continue loading' : 'Try again'}
+        retryLabel={canContinue ? 'Continue loading' : canResume ? 'Resume loading' : 'Try again'}
         onRetry={() => {
+          setClearedError(query.error);
           if (canContinue) actions?.continueInventory?.();
+          else if (canResume) actions?.resumeDiscovery?.();
           else void query.refetch();
         }}
         secondary={actions && actions.mode === 'live' ? (
@@ -257,8 +267,9 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
 
   const inventory = query.data;
   const describedLoadError = query.isError ? describeError(query.error, 'inventory') : null;
-  const loadError = describedLoadError?.message ?? '';
+  const loadError = query.isError && query.error !== clearedError ? describedLoadError?.message ?? '' : '';
   const canContinue = describedLoadError?.recovery === 'continue' && Boolean(actions?.continueInventory);
+  const canResume = describedLoadError?.recovery === 'resume' && Boolean(actions?.resumeDiscovery);
   const timestamp = Date.parse(inventory.generatedAt);
   const absolute = Number.isFinite(timestamp) ? new Date(timestamp).toLocaleString() : 'time unavailable';
   const live = context.mode === 'live';
@@ -327,12 +338,14 @@ export function InventoryBoundary({ query, context, children }: InventoryBoundar
           <button
             type="button"
             onClick={() => {
+              setClearedError(query.error);
               if (canContinue) actions?.continueInventory?.();
+              else if (canResume) actions?.resumeDiscovery?.();
               else void query.refetch();
             }}
             className="min-h-8 rounded-lg border border-danger/30 bg-surface px-3 font-semibold text-danger transition-colors hover:bg-surface-alt"
           >
-            {canContinue ? 'Continue loading' : 'Retry'}
+            {canContinue ? 'Continue loading' : canResume ? 'Resume loading' : 'Retry'}
           </button>
         </div>
       ) : null}

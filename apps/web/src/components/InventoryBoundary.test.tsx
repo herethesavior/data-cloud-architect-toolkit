@@ -324,18 +324,19 @@ describe('InventoryBoundary progressive state', () => {
     expect(resumeDiscovery).toHaveBeenCalledTimes(1);
   });
 
-  it('shows a retryable error instead of spinning on a failed partial load', async () => {
+  it('resumes a timed-out partial load and clears the stale error banner', async () => {
     const refetch = vi.fn();
+    const resumeDiscovery = vi.fn();
+    const error = new ApiError('RELAY_TIMEOUT', 'The bridge did not answer in time.');
     const query = {
       data: snapshotFor('running'),
       isPending: false,
       isFetching: false,
       isError: true,
-      error: new Error('The local bridge did not answer in time.'),
+      error,
       refetch,
     } as unknown as UseQueryResult<InventorySnapshot, Error>;
-
-    render(
+    const boundary = (isResumingDiscovery: boolean) => (
       <InventoryActionsProvider value={{
         context,
         mode: 'live',
@@ -347,19 +348,74 @@ describe('InventoryBoundary progressive state', () => {
         cancelRefresh: vi.fn(),
         isRefreshingInventory: false,
         refreshError: '',
+        resumeDiscovery,
+        isResumingDiscovery,
       }}>
         <InventoryBoundary query={query} context={context}>
           {() => <div>Loaded rows</div>}
         </InventoryBoundary>
-      </InventoryActionsProvider>,
+      </InventoryActionsProvider>
     );
 
-    expect(screen.getByRole('alert')).toHaveTextContent("Loading stopped: We couldn't load this org's metadata.");
+    const view = render(boundary(false));
+
+    expect(screen.getByRole('alert')).toHaveTextContent("Loading stopped: The bridge didn't respond in time.");
     expect(screen.queryByRole('img', { name: 'Inventory loading' })).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'Inventory still loading' })).not.toBeInTheDocument();
     expect(screen.getByText('Loaded rows')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(refetch).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Resume loading' }));
+    expect(resumeDiscovery).toHaveBeenCalledTimes(1);
+    expect(refetch).not.toHaveBeenCalled();
+
+    view.rerender(boundary(true));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Inventory still loading' })).toBeInTheDocument();
+  });
+
+  it('clears a first-load timeout screen as soon as resume starts', async () => {
+    const refetch = vi.fn();
+    const resumeDiscovery = vi.fn();
+    const query = {
+      data: null,
+      isPending: false,
+      isFetching: false,
+      isError: true,
+      error: new ApiError('RELAY_TIMEOUT', 'The bridge did not answer in time.'),
+      refetch,
+    } as unknown as UseQueryResult<InventorySnapshot, Error>;
+    const boundary = (isResumingDiscovery: boolean) => (
+      <InventoryActionsProvider value={{
+        context,
+        mode: 'live',
+        orgList: { status: 'idle' },
+        onGoToOrgs: vi.fn(),
+        onToggleMode: vi.fn(),
+        isTogglingMode: false,
+        refreshInventory: vi.fn(),
+        cancelRefresh: vi.fn(),
+        isRefreshingInventory: false,
+        refreshError: '',
+        resumeDiscovery,
+        isResumingDiscovery,
+      }}>
+        <InventoryBoundary query={query} context={context}>
+          {() => <div>Loaded rows</div>}
+        </InventoryBoundary>
+      </InventoryActionsProvider>
+    );
+
+    const view = render(boundary(false));
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent("Couldn't load the inventory");
+    expect(alert).toHaveTextContent("The bridge didn't respond in time.");
+    await userEvent.click(within(alert).getByRole('button', { name: 'Resume loading' }));
+    expect(resumeDiscovery).toHaveBeenCalledTimes(1);
+    expect(refetch).not.toHaveBeenCalled();
+
+    view.rerender(boundary(true));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText('Discovering your Data 360 inventory')).toBeInTheDocument();
   });
 
   it('offers a working continue action for an oversized partial load', async () => {

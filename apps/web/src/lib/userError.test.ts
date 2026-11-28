@@ -40,6 +40,24 @@ describe('describeError', () => {
     });
   });
 
+  it('routes a relay timeout to the existing session instead of a fresh load', () => {
+    expect(describeError(new ApiError('RELAY_TIMEOUT', 'raw detail'), 'inventory')).toEqual({
+      message: "The bridge didn't respond in time.",
+      hint: 'Loading can resume from the last completed batch. Check that the bridge is still running.',
+      recovery: 'resume',
+    });
+  });
+
+  it('does not promise a resume action for a relay timeout outside inventory', () => {
+    for (const context of ['transform', 'compatibility'] as const) {
+      expect(describeError(new ApiError('RELAY_TIMEOUT', 'raw detail'), context)).toEqual({
+        message: "The bridge didn't respond in time.",
+        hint: 'Check that the bridge is still running, then try again.',
+        recovery: 'retry',
+      });
+    }
+  });
+
   it('routes oversized metadata to a real continue action', () => {
     expect(describeError(new ApiError('RESPONSE_TOO_LARGE', 'raw detail'), 'inventory')).toEqual({
       message: 'That metadata is too large to display in one view.',

@@ -22,6 +22,7 @@ import {
 
 const base = 'services/data/v65.0/ssot/data-transforms/Account_Transform';
 const detailPath = `${base}?filterGroup=Big`;
+const compactDetailPath = `${base}?filterGroup=Small`;
 const runPath = `${base}/run-history`;
 const schedulePath = `${base}/schedule`;
 
@@ -130,6 +131,51 @@ describe('lazy transform bundle retrieval', () => {
       endedAt: '2026-11-26T02:53:55.000Z',
     }]);
     expect(bundle.messages.runHistory).toMatch(/Retrieved 1 run/);
+    expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
+  });
+
+  it('retries a too-large Big definition with Small metadata instead of failing the bundle', async () => {
+    const client = fakeClient({
+      [detailPath]: new CliError('COMMAND_FAILED',
+        'Salesforce CLI could not read this response because it was too large. Start a new load to use smaller pages.'),
+      [compactDetailPath]: transformDetailJson,
+      [runPath]: transformRunHistoryJson,
+      [schedulePath]: transformScheduleJson,
+    });
+
+    const bundle = await fetchTransformBundle(options(client));
+
+    expect(bundle.sections.detail).toBe('partial');
+    expect(bundle.messages.detail).toMatch(/CLI output limit/i);
+    expect(bundle.transform?.apiName).toBe('Account_Transform');
+    expect(bundle.transform?.provenance.sourceEndpoint).toBe(compactDetailPath);
+    expect(client.calls).toEqual([detailPath, compactDetailPath, runPath, schedulePath]);
+    expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
+  });
+
+  it('keeps list lineage when a compact Big fallback omits inputs and outputs', async () => {
+    const compact = JSON.parse(transformDetailJson) as { result: Record<string, unknown> };
+    delete compact.result.inputObjects;
+    delete compact.result.targetObjects;
+    const client = fakeClient({
+      [detailPath]: new CliError('COMMAND_FAILED',
+        'Salesforce CLI could not read this response because it was too large. Start a new load to use smaller pages.'),
+      [compactDetailPath]: JSON.stringify(compact),
+      [runPath]: transformRunHistoryJson,
+      [schedulePath]: transformScheduleJson,
+    });
+    const lineageSeed: DataTransform = {
+      ...seed,
+      inputs: ['Seed_Input__dll'],
+      outputs: ['Seed_Output__dll'],
+    };
+
+    const bundle = await fetchTransformBundle(options(client, { seed: lineageSeed }));
+
+    expect(bundle.sections.detail).toBe('partial');
+    expect(bundle.transform?.inputs).toEqual(['Seed_Input__dll']);
+    expect(bundle.transform?.outputs).toEqual(['Seed_Output__dll']);
+    expect(bundle.transform?.provenance.sourceEndpoint).toBe(compactDetailPath);
     expect(transformBundleSchema.safeParse(bundle).success).toBe(true);
   });
 
