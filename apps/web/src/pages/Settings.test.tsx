@@ -388,7 +388,7 @@ describe('Settings stored data controls', () => {
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Erase all local data?' })).toBeInTheDocument();
     expect(within(dialog).getByText('Cached org lists and inventory snapshots')).toBeInTheDocument();
-    expect(within(dialog).getByText(/Bridge pairing or the local bridge installation/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/The bridge installation/)).toBeInTheDocument();
     expect(onEraseLocalData).not.toHaveBeenCalled();
 
     await act(async () => {

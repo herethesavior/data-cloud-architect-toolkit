@@ -231,6 +231,32 @@ describe('hosted bridge relay', () => {
     expect(staleAgent.status).toBe(401);
   });
 
+  it('wakes a held bridge poll when the browser unpairs', async () => {
+    const env = makeEnv();
+    const session = await startSession(env);
+    const pairing = await postJson<{ code: string }>('/api/relay/pairing', {}, session.headers, env);
+    const paired = await postJson<{ agentToken: string }>('/api/relay/pair', {
+      code: pairing.code,
+      cli,
+    }, {}, env);
+
+    let pollSettled = false;
+    const heldPoll = postJson<{ error?: { code?: string }; tasks?: unknown[] }>('/api/relay/poll', {
+      agentToken: paired.agentToken,
+      cli,
+      wait: true,
+    }, {}, env).then((result) => {
+      pollSettled = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(pollSettled).toBe(false);
+
+    const unpair = await postJson('/api/relay/unpair', {}, session.headers, env);
+    expect(unpair).toEqual({ paired: false });
+    expect(await heldPoll).toMatchObject({ error: { code: 'INVALID_AGENT_TOKEN' } });
+  });
+
   it('keeps agent heartbeats and responses from overwriting browser session state', async () => {
     const kv = new FakeKV();
     const env = makeEnv(kv);
@@ -966,8 +992,7 @@ describe('hosted bridge relay', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     const checkPromise = app.request('/api/relay/status/check', { headers: session.headers }, env);
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(pollSettled).toBe(true);
+    await vi.waitFor(() => expect(pollSettled).toBe(true), { timeout: 500 });
 
     // The woken bridge re-polls immediately; that fresh traffic is the proof.
     await postJson('/api/relay/poll', { agentToken: paired.agentToken, cli, version: '0.2.2' }, {}, env);

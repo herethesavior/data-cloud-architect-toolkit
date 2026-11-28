@@ -7,7 +7,12 @@ import { mergeInventorySnapshot } from './lib/inventoryMerge.ts';
 import { ALL_REFRESH_FAMILIES, refreshScopeForPage } from './lib/refreshScope.ts';
 import { settleInterruptedInventory } from './lib/inventorySettlement.ts';
 import { describeError } from './lib/userError.ts';
-import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './lib/localData.ts';
+import {
+  clearDcatCachedMetadata,
+  clearDcatDiagnostics,
+  clearDcatLocalPreferences,
+  clearDcatSavedLayouts,
+} from './lib/localData.ts';
 import { isHosted } from './lib/hosted.ts';
 import { resetNoticeDismissals } from './lib/noticeDismissal.ts';
 import type { CommandResult } from './lib/commandSearch.ts';
@@ -320,9 +325,12 @@ export function App() {
     eraseInProgressRef.current = true;
     try {
       // Reset the server session first. If the connector is offline, nothing in
-      // this browser has been erased yet and the user can safely retry.
+      // this browser has been erased yet and the user can safely retry. Unpair
+      // also revokes the hosted bridge token so the old process stops polling.
+      if (hosted) await api.unpairBridge();
       await setModeAsync('demo');
       await clearDcatCachedMetadata(queryClient);
+      await clearDcatDiagnostics(queryClient);
       clearDcatLocalPreferences();
       resetNoticeDismissals();
       setHiddenAliases([]);
