@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
-import { clearDcatCachedMetadata, clearDcatLocalPreferences, clearDcatSavedLayouts } from './localData.ts';
+import {
+  clearDcatCachedMetadata,
+  clearDcatDiagnostics,
+  clearDcatLocalPreferences,
+  clearDcatSavedLayouts,
+} from './localData.ts';
 import { clearPersistedCache } from './queryPersistence.ts';
 import { orgsQueryKey } from './workspace.ts';
 
@@ -69,5 +74,18 @@ describe('local data controls', () => {
     expect(client.getQueryData(['session'])).toEqual({ mode: 'demo' });
     expect(client.getQueryData(['health'])).toEqual({ status: 'ok' });
     expect(clearPersistedCache).toHaveBeenCalledOnce();
+  });
+
+  it('drops bridge diagnostics only during a full erase', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['session'], { mode: 'live' });
+    client.setQueryData(['bridge-status'], { paired: true, relay: 'connected' });
+    client.setQueryData(['health'], { status: 'ok' });
+
+    await clearDcatDiagnostics(client);
+
+    expect(client.getQueryData(['session'])).toEqual({ mode: 'live' });
+    expect(client.getQueryData(['bridge-status'])).toBeUndefined();
+    expect(client.getQueryData(['health'])).toBeUndefined();
   });
 });

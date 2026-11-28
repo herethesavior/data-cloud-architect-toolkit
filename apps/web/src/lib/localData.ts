@@ -49,3 +49,13 @@ export async function clearDcatCachedMetadata(queryClient: QueryClient): Promise
   queryClient.removeQueries({ predicate: (query) => isCachedDataQuery(query.queryKey) });
   await clearPersistedCache();
 }
+
+function isDiagnosticsQuery(queryKey: readonly unknown[]): boolean {
+  return queryKey[0] === 'bridge-status' || queryKey[0] === 'health';
+}
+
+/** Full erase only: a cached bridge or health snapshot must not outlive a reset. */
+export async function clearDcatDiagnostics(queryClient: QueryClient): Promise<void> {
+  await queryClient.cancelQueries({ predicate: (query) => isDiagnosticsQuery(query.queryKey) });
+  queryClient.removeQueries({ predicate: (query) => isDiagnosticsQuery(query.queryKey) });
+}

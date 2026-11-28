@@ -17,6 +17,7 @@ import { demoInventory, demoOrgs, demoTransformBundles } from '@dcat/test-fixtur
 declare global {
   interface Window {
     __dcatBridgeStop?: boolean;
+    __dcatBridgeStopped?: boolean;
     __dcatBridgeHold?: boolean;
   }
 }
@@ -52,6 +53,7 @@ interface HostedState {
   operations: RelayOperation[];
   operationBodies: RelayOperation[];
   pairCalls: number;
+  unpairCalls: number;
   pollCalls: number;
   respondCalls: number;
   statusChecks: number;
@@ -174,6 +176,7 @@ function createState(mode: Mode): HostedState {
     operations: [],
     operationBodies: [],
     pairCalls: 0,
+    unpairCalls: 0,
     pollCalls: 0,
     respondCalls: 0,
     statusChecks: 0,
@@ -510,6 +513,7 @@ async function mockHostedWorker(page: Page, state: HostedState): Promise<void> {
     }
 
     if (path === '/api/relay/unpair' && method === 'POST') {
+      state.unpairCalls += 1;
       state.paired = false;
       state.agentToken = null;
       state.pairingCode = null;
@@ -562,8 +566,9 @@ async function startFakeBridge(page: Page, pairingCode: string): Promise<void> {
     });
     if (!pair.ok) throw new Error(`Pairing failed with status ${pair.status}`);
     const { agentToken: token } = (await pair.json()) as { agentToken: string };
-    const bridge = window as Window & { __dcatBridgeStop?: boolean };
+    const bridge = window as Window & { __dcatBridgeStop?: boolean; __dcatBridgeStopped?: boolean };
     bridge.__dcatBridgeStop = false;
+    bridge.__dcatBridgeStopped = false;
 
     const loop = async () => {
       while (!bridge.__dcatBridgeStop) {
@@ -576,7 +581,10 @@ async function startFakeBridge(page: Page, pairingCode: string): Promise<void> {
             cli: { installed: true, version: '2.116.6', error: null },
           }),
         });
-        if (!poll.ok) return;
+        if (!poll.ok) {
+          bridge.__dcatBridgeStopped = true;
+          return;
+        }
         const payload = (await poll.json()) as { tasks?: Array<{ id: string; operation?: RelayOperation }> };
         for (const task of payload.tasks ?? []) {
           while (bridge.__dcatBridgeHold) {
@@ -596,6 +604,7 @@ async function startFakeBridge(page: Page, pairingCode: string): Promise<void> {
         }
         await new Promise((resolve) => window.setTimeout(resolve, 100));
       }
+      bridge.__dcatBridgeStopped = true;
     };
     void loop();
   }, pairingCode);
@@ -765,6 +774,44 @@ test('hosted refresh status detects a stopped bridge without refreshing orgs', a
   await expect(page.getByText('The bridge stopped responding.')).toBeVisible();
   expect(state.statusChecks).toBeGreaterThan(checksBeforeRefresh);
   expect(state.operations).toEqual(operationsBeforeRefresh);
+});
+
+test('hosted erase resets pairing, stops the bridge, and offers a fresh pair', async ({ page }) => {
+  const state = createState('live');
+  await seedPreference(page, 'live');
+  await mockHostedWorker(page, state);
+  await page.goto('/orgs');
+
+  await page.getByRole('button', { name: 'Create pairing code' }).click();
+  await startFakeBridge(page, 'PAIR12345678');
+  await page.getByRole('button', { name: 'Refresh status' }).click();
+  await expect(page.getByText('Bridge connected')).toBeVisible();
+  expect(state.paired).toBe(true);
+
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Settings & Diagnostics' }).click();
+  await page.getByRole('button', { name: 'Erase all local data' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Hosted bridge pairing and its cached status');
+  await dialog.getByRole('button', { name: 'Erase all local data' }).click();
+
+  const storedData = page.locator('section.panel').filter({
+    has: page.getByRole('heading', { name: 'Stored data' }),
+  });
+  await expect(storedData.getByRole('status')).toContainText('All local data erased');
+  await expect(page.locator('header').getByText('DEMO DATA', { exact: true })).toBeVisible();
+  expect(state.unpairCalls).toBeGreaterThan(0);
+  expect(state.paired).toBe(false);
+  expect(state.agentToken).toBeNull();
+  expect(state.pairingCode).toBeNull();
+  expect(state.lastSeenAt).toBeNull();
+  await expect.poll(() => page.evaluate(() => window.__dcatBridgeStopped)).toBe(true);
+
+  // The user returns to live mode through the normal mode switch; the server
+  // session is already unpaired, so setup offers a new pairing code.
+  await page.locator('header').getByRole('button', { name: 'Switch to live mode' }).click();
+  await page.locator('#desktop-sidebar').getByRole('link', { name: 'Org Connections' }).click();
+  await expect(page.getByText('Bridge not paired')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create pairing code' })).toBeVisible();
 });
 
 test('hosted setup before pairing does not report a CLI or org failure', async ({ page }) => {

@@ -623,7 +623,7 @@ test('stored data controls clear caches, reset layouts, and gate a full erase', 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Erase all local data?' })).toBeVisible();
   await expect(dialog).toContainText('Cached org lists and inventory snapshots');
-  await expect(dialog).toContainText('Bridge pairing or the local bridge installation');
+  await expect(dialog).toContainText('The bridge installation');
   await dialog.getByRole('button', { name: 'Keep my data' }).click();
   await expect(dialog).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('dcat.theme'))).toBe('dark');

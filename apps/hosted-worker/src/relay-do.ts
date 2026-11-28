@@ -481,6 +481,11 @@ export class RelayDurableObjectCore {
       this.waiters.add(wake);
     });
 
+    // A held poll can span a revocation. Recheck before handing it work so an
+    // unpaired bridge exits on this response instead of one poll later.
+    if (!(await this.authorized(body))) {
+      return error('INVALID_AGENT_TOKEN', 'The site reset this bridge pairing. Run setup again.', 401);
+    }
     const task = this.claimPending(Date.now());
     return json({ status: 'ok', tasks: task ? [task] : [] });
   }
@@ -683,6 +688,9 @@ export class RelayDurableObjectCore {
     this.sql.exec('DELETE FROM current_request');
     this.setMeta('revoked', '1');
     this.clearMeta();
+    // An idle bridge is parked in a long poll. Wake it so it sees the revoked
+    // token immediately instead of waiting for the poll window to expire.
+    this.wakeWaiters();
     return json({ paired: false });
   }
 

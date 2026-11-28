@@ -513,9 +513,9 @@ export function Settings({
               <div className="min-w-0">
                 <p className="text-sm font-medium text-ink">Erase all local data</p>
                 <p className="mt-1 text-xs text-ink-soft">
-                  Deletes cached metadata and every DCAT preference in this browser. The app returns to Demo mode and
-                  clears your saved org selection. This does not sign you out or change bridge pairing or Salesforce CLI
-                  authentication.
+                  Deletes cached metadata and every DCAT preference in this browser. In hosted mode it also resets
+                  bridge pairing and stops the running bridge. The app returns to Demo mode and clears your saved org
+                  selection. This does not sign you out or change Salesforce CLI authentication.
                 </p>
               </div>
               <Button variant="danger" onClick={() => { setDataNotice(''); setDataError(''); setEraseOpen(true); }} icon={<Icon name="warning" size={15} />}>
@@ -548,13 +548,14 @@ export function Settings({
                 <li>Cached org lists and inventory snapshots</li>
                 <li>Mode, selected org, and hidden orgs</li>
                 <li>Theme, appearance settings, sidebar state, and saved ERD/Lineage layouts</li>
+                <li>Hosted bridge pairing and its cached status</li>
               </ul>
             </>
           }
           consequences={
             <div className="space-y-2 rounded-lg border border-line bg-surface-alt px-3 py-2.5 text-xs text-ink-soft">
               <p className="font-medium text-ink">This does not touch:</p>
-              <p>Bridge pairing or the local bridge installation · Salesforce CLI authentication · Your sign-in</p>
+              <p>The bridge installation · Salesforce CLI authentication · Your sign-in</p>
               <p>
                 Cached metadata will be fetched again. Saved preferences return to defaults and cannot be restored.
               </p>
